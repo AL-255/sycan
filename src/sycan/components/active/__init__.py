@@ -1,4 +1,4 @@
-"""Active (nonlinear semiconductor) devices: diode, MOSFETs, BJT."""
+"""Active (nonlinear) devices: diode, MOSFETs, BJT, vacuum-tube triode."""
 from sycan.components.active.bjt import BJT
 from sycan.components.active.diode import Diode
 from sycan.components.active.mosfet_l1 import NMOS_L1, PMOS_L1
@@ -6,6 +6,7 @@ from sycan.components.active.mosfet_subthreshold import (
     NMOS_subthreshold,
     PMOS_subthreshold,
 )
+from sycan.components.active.triode import Triode
 
 __all__ = [
     "BJT",
@@ -14,4 +15,5 @@ __all__ = [
     "NMOS_subthreshold",
     "PMOS_L1",
     "PMOS_subthreshold",
+    "Triode",
 ]

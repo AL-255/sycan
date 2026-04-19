@@ -7,6 +7,7 @@ from sycan.components.active import (
     NMOS_subthreshold,
     PMOS_L1,
     PMOS_subthreshold,
+    Triode,
 )
 from sycan.components.basic import (
     CCCS,
@@ -51,6 +52,7 @@ __all__ = [
     "Port",
     "Resistor",
     "StampContext",
+    "Triode",
     "VCCS",
     "VCVS",
     "VoltageSource",

@@ -16,6 +16,7 @@ from sycan.components.active import (
     NMOS_subthreshold,
     PMOS_L1,
     PMOS_subthreshold,
+    Triode,
 )
 from sycan.components.basic import (
     CCCS,
@@ -60,6 +61,8 @@ class Circuit:
             "emitter",
             "anode",
             "cathode",
+            "plate",
+            "grid",
         ):
             node = getattr(component, attr, None)
             if node is not None:
@@ -141,6 +144,25 @@ class Circuit:
     def add_gnd(self, name: str, node: str) -> GND:
         """Tie ``node`` to the absolute zero reference."""
         return self.add(GND(name, node))  # type: ignore[return-value]
+
+    def add_triode(
+        self,
+        name: str,
+        plate: str,
+        grid: str,
+        cathode: str,
+        K: Value,
+        mu: Value,
+        **kwargs: Value,
+    ) -> Triode:
+        """Attach a Langmuir 3/2-power vacuum-tube triode.
+
+        Optional keywords: ``V_g_op`` / ``V_p_op`` (AC operating point),
+        ``C_gk`` / ``C_gp`` / ``C_pk`` (intrinsic capacitances).
+        """
+        return self.add(
+            Triode(name, plate, grid, cathode, K, mu, **kwargs)
+        )  # type: ignore[return-value]
 
     def add_diode(
         self,
