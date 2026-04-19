@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>sycan REPL — symbolic circuit analysis in your browser</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    max-width: 960px; margin: 2em auto; padding: 0 1em; line-height: 1.45;
+  }
+  h1 { margin-bottom: 0.2em; }
+  .sub { color: #888; margin-top: 0; }
+  #status { font-size: 0.9em; color: #888; margin: 0.5em 0; }
+  #editor, #output {
+    width: 100%; font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13px; padding: 10px; box-sizing: border-box;
+    border: 1px solid #bbb; border-radius: 6px;
+  }
+  #editor { height: 280px; resize: vertical; }
+  #output { min-height: 160px; background: #f6f6f6; white-space: pre-wrap; }
+  @media (prefers-color-scheme: dark) { #output { background: #1a1a1a; } }
+  button {
+    padding: 8px 18px; font-size: 14px; cursor: pointer;
+    border: 1px solid #888; border-radius: 6px; background: #eaeaea;
+  }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 0.5em 0; }
+  h3 { margin-bottom: 0.3em; }
+</style>
+</head>
+<body>
+
+<h1>sycan REPL</h1>
+<p class="sub">Symbolic circuit analysis (DC · AC · impedance · Monte-Carlo) running
+entirely in your browser via Pyodide. <a href="https://github.com/AL-255/sycan">Source on GitHub</a>.</p>
+
+<div id="status">Loading Pyodide…</div>
+
+<h3>Code</h3>
+<textarea id="editor" spellcheck="false">import sympy as sp
+from sycan import parse, solve_dc
+
+# Symbolic voltage divider.
+netlist = """voltage divider
+V1 in 0 Vin
+R1 in out Ra
+R2 out 0 Rb
+.end
+"""
+
+for sym, expr in solve_dc(parse(netlist)).items():
+    print(f"{sym} = {expr}")
+</textarea>
+
+<div class="row">
+  <button id="run" disabled>Run (Ctrl/⌘-Enter)</button>
+  <button id="clear">Clear output</button>
+</div>
+
+<h3>Output</h3>
+<div id="output"></div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+let py = null;
+const status   = document.getElementById('status');
+const editor   = document.getElementById('editor');
+const output   = document.getElementById('output');
+const runBtn   = document.getElementById('run');
+const clearBtn = document.getElementById('clear');
+
+function write(msg) { output.textContent += msg; }
+
+async function boot() {
+  py = await loadPyodide();
+  status.textContent = 'Installing sympy + sycan…';
+  await py.loadPackage(['sympy', 'micropip']);
+  await py.runPythonAsync(`
+import micropip
+# Resolve relative to the page URL so this works under /docs on Pages.
+await micropip.install('./sycan-0.1.0-py3-none-any.whl')
+import sycan
+print(f'sycan {sycan.__name__} ready')
+  `);
+  status.textContent = 'Ready. Edit the code and hit Run.';
+  runBtn.disabled = false;
+  editor.focus();
+}
+
+async function run() {
+  output.textContent = '';
+  py.setStdout({ batched: (s) => write(s + '\n') });
+  py.setStderr({ batched: (s) => write(s + '\n') });
+  runBtn.disabled = true;
+  try {
+    const result = await py.runPythonAsync(editor.value);
+    if (result !== undefined && result !== null) write(String(result) + '\n');
+  } catch (e) {
+    write(String(e));
+  } finally {
+    runBtn.disabled = false;
+  }
+}
+
+runBtn.addEventListener('click', run);
+clearBtn.addEventListener('click', () => { output.textContent = ''; });
+editor.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
+});
+
+boot().catch((e) => { status.textContent = 'Failed to load Pyodide: ' + e; });
+</script>
+</body>
+</html>
