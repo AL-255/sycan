@@ -18,6 +18,7 @@ from sycan.components.active import (
     PMOS_subthreshold,
     Triode,
 )
+from sycan.components.rf import TLINE
 from sycan.components.basic import (
     CCCS,
     CCVS,
@@ -162,6 +163,21 @@ class Circuit:
         """
         return self.add(
             Triode(name, plate, grid, cathode, K, mu, **kwargs)
+        )  # type: ignore[return-value]
+
+    def add_tline(
+        self,
+        name: str,
+        n_in_p: str,
+        n_in_m: str,
+        n_out_p: str,
+        n_out_m: str,
+        Z0: Value,
+        td: Value,
+    ) -> TLINE:
+        """Attach a lossless 2-port transmission line (Z0, one-way delay td)."""
+        return self.add(
+            TLINE(name, n_in_p, n_in_m, n_out_p, n_out_m, Z0, td)
         )  # type: ignore[return-value]
 
     def add_diode(

@@ -9,6 +9,7 @@ from sycan.components.active import (
     PMOS_subthreshold,
     Triode,
 )
+from sycan.components.rf import TLINE
 from sycan.components.basic import (
     CCCS,
     CCVS,
@@ -52,6 +53,7 @@ __all__ = [
     "Port",
     "Resistor",
     "StampContext",
+    "TLINE",
     "Triode",
     "VCCS",
     "VCVS",

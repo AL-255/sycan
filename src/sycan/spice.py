@@ -25,6 +25,7 @@ Supported syntax:
       Qxxx  C B E TYPE IS BF BR [V_T]               ; TYPE=NPN or PNP (G-P)
       Dxxx  A K IS [N [V_T]]                        ; Shockley diode
       Pxxx  N+ N- [role]                            ; named port (role=input/output/generic)
+      Txxx  N1+ N1- N2+ N2- Z0 td                   ; lossless transmission line
       GND[n] NODE                  ; ties NODE to the absolute zero reference
 
 Values may be plain numbers with an engineering suffix
@@ -213,6 +214,12 @@ def parse(text: str) -> Circuit:
             n_plus, n_minus = parts[1], parts[2]
             role = parts[3] if len(parts) > 3 else "generic"
             circuit.add_port(name, n_plus, n_minus, role)
+        elif head == "t":
+            _require(parts, 7, lineno, name)
+            circuit.add_tline(
+                name, parts[1], parts[2], parts[3], parts[4],
+                parse_value(parts[5]), parse_value(parts[6]),
+            )
         elif head == "d":
             _require(parts, 4, lineno, name)
             anode, cathode = parts[1], parts[2]
