@@ -107,7 +107,7 @@ def test_2t_reference_collapses_when_symmetric():
 
 
 def test_2t_reference_parses_without_error():
-    from sycan.components.basic import NMOS_subthreshold
+    from sycan.components.active import NMOS_subthreshold
 
     circuit = parse(NETLIST)
     mosfets = [c for c in circuit.components if isinstance(c, NMOS_subthreshold)]

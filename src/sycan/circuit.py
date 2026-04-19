@@ -9,16 +9,18 @@ from __future__ import annotations
 from typing import Optional
 
 from sycan.mna import Component, Value
-from sycan.components.basic import (
+from sycan.components.active import (
     BJT,
+    Diode,
+    NMOS_subthreshold,
+)
+from sycan.components.basic import (
     CCCS,
     CCVS,
     Capacitor,
     CurrentSource,
-    Diode,
     GND,
     Inductor,
-    NMOS_subthreshold,
     Resistor,
     VCCS,
     VCVS,
