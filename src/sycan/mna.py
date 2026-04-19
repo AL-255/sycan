@@ -116,6 +116,36 @@ def build_mna(
     return A, x, b
 
 
+def build_residuals(
+    circuit: "Circuit",
+    mode: str = "dc",
+    s: Optional[sp.Expr] = None,
+) -> tuple[sp.Matrix, list[sp.Expr]]:
+    """Assemble the full residual vector ``A*x - b + nonlinear(x)``.
+
+    Useful as a starting point for custom nonlinear solvers (numerical
+    Newton, continuation, noise sampling, etc.) that want the raw
+    symbolic equations rather than the dict form produced by
+    :func:`solve_dc`.
+    """
+    A, x, b = build_mna(circuit, mode=mode, s=s)
+    residuals = list(A * x - b)
+
+    nodes = circuit.nodes
+    n = len(nodes)
+    aux_owners = [c for c in circuit.components if c.aux_count(mode) > 0]
+    node_rows = {name: idx - 1 for name, idx in circuit._nodes.items()}
+    aux_rows = {c.name: n + k for k, c in enumerate(aux_owners)}
+    ctx = StampContext(
+        A=A, b=b, node_rows=node_rows, aux_rows=aux_rows,
+        mode=mode, s=s, x=x, residuals=residuals,
+    )
+    for c in circuit.components:
+        if c.has_nonlinear:
+            c.stamp_nonlinear(ctx)
+    return x, residuals
+
+
 def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Expr]:
     """Solve the DC operating point symbolically.
 
@@ -159,6 +189,84 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Ex
     if simplify:
         result = {sym: sp.simplify(expr) for sym, expr in result.items()}
     return result
+
+
+def solve_impedance(
+    circuit: "Circuit",
+    port_name: str,
+    termination: str = "auto",
+    s: Optional[sp.Expr] = None,
+    simplify: bool = False,
+) -> sp.Expr:
+    """Small-signal impedance looking into a named ``Port``.
+
+    A unit AC voltage is applied across the target port and the
+    resulting branch current is read out; ``Z = dv/di`` follows.
+    Other ports in the netlist are terminated per ``termination``:
+
+    * ``"z"``    — all other ports open (Z-parameter convention).
+    * ``"y"``    — all other ports shorted (Y-parameter convention).
+    * ``"auto"`` — other *input* ports shorted, *output* ports opened
+      (the usual "sources zeroed, loads open" convention for amplifier
+      input / output impedance).
+
+    The test source and any termination wires are added to a throw-away
+    copy of the circuit, so the caller's circuit is left untouched.
+    """
+    from sycan.circuit import Circuit
+    from sycan.components.basic.port import Port
+
+    if termination not in ("z", "y", "auto"):
+        raise ValueError(
+            f"termination must be 'z', 'y' or 'auto'; got {termination!r}"
+        )
+
+    target_port: Optional[Port] = None
+    other_ports: list[Port] = []
+    for c in circuit.components:
+        if isinstance(c, Port):
+            if c.name == port_name:
+                target_port = c
+            else:
+                other_ports.append(c)
+    if target_port is None:
+        raise ValueError(f"port {port_name!r} not found in circuit")
+
+    # Shallow-copy the circuit: share non-Port components, copy node registry.
+    test_circuit = Circuit()
+    test_circuit._nodes = dict(circuit._nodes)
+    test_circuit.components = [
+        c for c in circuit.components if not isinstance(c, Port)
+    ]
+
+    # Apply a 1 V AC test source at the target port.
+    test_circuit.add_vsource(
+        "_Vtest", target_port.n_plus, target_port.n_minus,
+        value=0, ac_value=1,
+    )
+
+    # Terminate the other ports.
+    for p in other_ports:
+        short_it = (
+            termination == "y"
+            or (termination == "auto" and p.role == "input")
+        )
+        if short_it:
+            test_circuit.add_vsource(
+                f"_Vshort_{p.name}", p.n_plus, p.n_minus, 0,
+            )
+        # "z" and "auto" on output/generic ports leave the node open.
+
+    sol = solve_ac(test_circuit, s=s, simplify=False)
+
+    I_test = sol[sp.Symbol("I(_Vtest)")]
+    # V_test = +1 (AC); I(V_test) is the SPICE branch current from + to -
+    # through the source, which equals the negative of the current the
+    # source supplies into the circuit. Hence Z = 1 / (-I_test) = -1/I_test.
+    Z = -1 / I_test
+    if simplify:
+        Z = sp.simplify(Z)
+    return Z
 
 
 def solve_ac(

@@ -12,7 +12,10 @@ from sycan.mna import Component, Value
 from sycan.components.active import (
     BJT,
     Diode,
+    NMOS_L1,
     NMOS_subthreshold,
+    PMOS_L1,
+    PMOS_subthreshold,
 )
 from sycan.components.basic import (
     CCCS,
@@ -21,6 +24,7 @@ from sycan.components.basic import (
     CurrentSource,
     GND,
     Inductor,
+    Port,
     Resistor,
     VCCS,
     VCVS,
@@ -124,6 +128,16 @@ class Circuit:
     ) -> CCVS:
         return self.add(CCVS(name, n_plus, n_minus, ctrl, gain))  # type: ignore[return-value]
 
+    def add_port(
+        self,
+        name: str,
+        n_plus: str,
+        n_minus: str = "0",
+        role: str = "generic",
+    ) -> Port:
+        """Mark ``(n_plus, n_minus)`` as a named port for impedance analysis."""
+        return self.add(Port(name, n_plus, n_minus, role))  # type: ignore[return-value]
+
     def add_gnd(self, name: str, node: str) -> GND:
         """Tie ``node`` to the absolute zero reference."""
         return self.add(GND(name, node))  # type: ignore[return-value]
@@ -167,6 +181,47 @@ class Circuit:
             BJT(name, collector, base, emitter, polarity, IS, BF, BR, **kwargs)
         )  # type: ignore[return-value]
 
+    def add_nmos_l1(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        mu_n: Value,
+        Cox: Value,
+        W: Value,
+        L: Value,
+        V_TH: Value,
+        **kwargs: Value,
+    ) -> NMOS_L1:
+        """Attach a Shichman-Hodges (Level 1) NMOS.
+
+        Optional keyword parameters: ``lam`` (channel-length modulation),
+        ``C_gs``, ``C_gd`` (intrinsic capacitances), and
+        ``V_GS_op`` / ``V_DS_op`` (AC linearisation point).
+        """
+        return self.add(
+            NMOS_L1(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
+        )  # type: ignore[return-value]
+
+    def add_pmos_l1(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        mu_n: Value,
+        Cox: Value,
+        W: Value,
+        L: Value,
+        V_TH: Value,
+        **kwargs: Value,
+    ) -> PMOS_L1:
+        """Attach a Shichman-Hodges (Level 1) PMOS (V_TH is a magnitude)."""
+        return self.add(
+            PMOS_L1(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
+        )  # type: ignore[return-value]
+
     def add_nmos_subthreshold(
         self,
         name: str,
@@ -181,26 +236,43 @@ class Circuit:
         m: Optional[Value] = None,
         V_T: Optional[Value] = None,
     ) -> NMOS_subthreshold:
-        """Attach a sub-threshold NMOS.
-
-        Drain current model::
-
-            I_D = mu_n * Cox * (W/L) * (m - 1) * V_T**2
-                  * exp((V_GS - V_TH) / (m V_T))
-                  * (1 - exp(-V_DS / V_T))
-        """
-        kwargs = {
-            "mu_n": mu_n,
-            "Cox": Cox,
-            "W": W,
-            "L": L,
-            "V_TH": V_TH,
-        }
+        """Attach a sub-threshold NMOS."""
+        kwargs: dict[str, Value] = {}
         if m is not None:
             kwargs["m"] = m
         if V_T is not None:
             kwargs["V_T"] = V_T
-        return self.add(NMOS_subthreshold(name, drain, gate, source, **kwargs))  # type: ignore[return-value]
+        return self.add(
+            NMOS_subthreshold(
+                name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs
+            )
+        )  # type: ignore[return-value]
+
+    def add_pmos_subthreshold(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        mu_n: Value,
+        Cox: Value,
+        W: Value,
+        L: Value,
+        V_TH: Value,
+        m: Optional[Value] = None,
+        V_T: Optional[Value] = None,
+    ) -> PMOS_subthreshold:
+        """Attach a sub-threshold PMOS (V_TH is a magnitude)."""
+        kwargs: dict[str, Value] = {}
+        if m is not None:
+            kwargs["m"] = m
+        if V_T is not None:
+            kwargs["V_T"] = V_T
+        return self.add(
+            PMOS_subthreshold(
+                name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs
+            )
+        )  # type: ignore[return-value]
 
     @property
     def nodes(self) -> list[str]:

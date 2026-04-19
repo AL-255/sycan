@@ -18,9 +18,13 @@ Supported syntax:
       Fxxx  N+ N- VNAM gain        ; CCCS
       Hxxx  N+ N- VNAM gain        ; CCVS
       Wxxx  N1 N2                  ; ideal wire (stamped as a 0 V source)
-      Mxxx  D G S TYPE mu_n Cox W L V_TH [m [V_T]]  ; TYPE=NMOS_subthreshold
+      Mxxx  D G S TYPE mu_n Cox W L V_TH [m [V_T]]
+                                                    ; TYPE=N/PMOS_subthreshold
+      Mxxx  D G S TYPE mu_n Cox W L V_TH [lam]
+                                                    ; TYPE=N/PMOS_L1
       Qxxx  C B E TYPE IS BF BR [V_T]               ; TYPE=NPN or PNP (G-P)
       Dxxx  A K IS [N [V_T]]                        ; Shockley diode
+      Pxxx  N+ N- [role]                            ; named port (role=input/output/generic)
       GND[n] NODE                  ; ties NODE to the absolute zero reference
 
 Values may be plain numbers with an engineering suffix
@@ -204,6 +208,11 @@ def parse(text: str) -> Circuit:
             # Ideal wire: a 0 V voltage source electrically merges the nodes.
             _require(parts, 3, lineno, name)
             circuit.add_vsource(name, parts[1], parts[2], 0)
+        elif head == "p":
+            _require(parts, 3, lineno, name)
+            n_plus, n_minus = parts[1], parts[2]
+            role = parts[3] if len(parts) > 3 else "generic"
+            circuit.add_port(name, n_plus, n_minus, role)
         elif head == "d":
             _require(parts, 4, lineno, name)
             anode, cathode = parts[1], parts[2]
@@ -234,21 +243,38 @@ def parse(text: str) -> Circuit:
         elif head == "m":
             _require(parts, 10, lineno, name)
             drain, gate, source, mtype = parts[1], parts[2], parts[3], parts[4]
-            if mtype.lower() != "nmos_subthreshold":
-                raise ValueError(
-                    f"line {lineno}: unknown MOSFET model {mtype!r}; "
-                    "only NMOS_subthreshold is available"
-                )
             mu_n = parse_value(parts[5])
             Cox = parse_value(parts[6])
             W = parse_value(parts[7])
             L = parse_value(parts[8])
             V_TH = parse_value(parts[9])
-            m_val = parse_value(parts[10]) if len(parts) > 10 else None
-            V_T = parse_value(parts[11]) if len(parts) > 11 else None
-            circuit.add_nmos_subthreshold(
-                name, drain, gate, source, mu_n, Cox, W, L, V_TH, m_val, V_T
-            )
+            mtype_lc = mtype.lower()
+            if mtype_lc in ("nmos_subthreshold", "pmos_subthreshold"):
+                m_val = parse_value(parts[10]) if len(parts) > 10 else None
+                V_T = parse_value(parts[11]) if len(parts) > 11 else None
+                adder = (
+                    circuit.add_nmos_subthreshold
+                    if mtype_lc == "nmos_subthreshold"
+                    else circuit.add_pmos_subthreshold
+                )
+                adder(
+                    name, drain, gate, source, mu_n, Cox, W, L, V_TH, m_val, V_T
+                )
+            elif mtype_lc in ("nmos_l1", "pmos_l1"):
+                kwargs: dict[str, sp.Expr] = {}
+                if len(parts) > 10:
+                    kwargs["lam"] = parse_value(parts[10])
+                adder = (
+                    circuit.add_nmos_l1
+                    if mtype_lc == "nmos_l1"
+                    else circuit.add_pmos_l1
+                )
+                adder(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
+            else:
+                raise ValueError(
+                    f"line {lineno}: unknown MOSFET model {mtype!r}; "
+                    "expected N/PMOS_subthreshold or N/PMOS_L1"
+                )
         else:
             raise ValueError(f"line {lineno}: unsupported element {name!r}")
 
