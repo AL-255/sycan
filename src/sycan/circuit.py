@@ -10,10 +10,12 @@ from typing import Optional
 
 from sycan.mna import Component, Value
 from sycan.components.basic import (
+    BJT,
     CCCS,
     CCVS,
     Capacitor,
     CurrentSource,
+    Diode,
     GND,
     Inductor,
     NMOS_subthreshold,
@@ -47,6 +49,11 @@ class Circuit:
             "drain",
             "gate",
             "source",
+            "collector",
+            "base",
+            "emitter",
+            "anode",
+            "cathode",
         ):
             node = getattr(component, attr, None)
             if node is not None:
@@ -118,6 +125,45 @@ class Circuit:
     def add_gnd(self, name: str, node: str) -> GND:
         """Tie ``node`` to the absolute zero reference."""
         return self.add(GND(name, node))  # type: ignore[return-value]
+
+    def add_diode(
+        self,
+        name: str,
+        anode: str,
+        cathode: str,
+        IS: Value,
+        N: Optional[Value] = None,
+        V_T: Optional[Value] = None,
+    ) -> Diode:
+        """Attach a Shockley diode: ``I_D = IS (exp(V_D/(N V_T)) - 1)``."""
+        kwargs: dict[str, Value] = {}
+        if N is not None:
+            kwargs["N"] = N
+        if V_T is not None:
+            kwargs["V_T"] = V_T
+        return self.add(Diode(name, anode, cathode, IS, **kwargs))  # type: ignore[return-value]
+
+    def add_bjt(
+        self,
+        name: str,
+        collector: str,
+        base: str,
+        emitter: str,
+        polarity: str,
+        IS: Value,
+        BF: Value,
+        BR: Value,
+        **kwargs: Value,
+    ) -> BJT:
+        """Attach a Gummel-Poon DC BJT (``polarity='NPN'`` or ``'PNP'``).
+
+        Optional SPICE G-P parameters (``NF``, ``NR``, ``VAF``, ``VAR``,
+        ``IKF``, ``IKR``, ``ISE``, ``NE``, ``ISC``, ``NC``, ``V_T``)
+        can be supplied as keyword arguments.
+        """
+        return self.add(
+            BJT(name, collector, base, emitter, polarity, IS, BF, BR, **kwargs)
+        )  # type: ignore[return-value]
 
     def add_nmos_subthreshold(
         self,

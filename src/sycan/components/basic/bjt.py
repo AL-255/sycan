@@ -1,0 +1,149 @@
+"""SPICE Gummel-Poon DC model for a bipolar transistor (NPN or PNP).
+
+The DC equations follow Gray & Meyer §1.4 and the SPICE G-P manual.
+All standard DC effects are included:
+
+* ideal forward/reverse transport currents (``IS``, ``NF``, ``NR``),
+* ideal forward/reverse current gains (``BF``, ``BR``),
+* non-ideal base-emitter / base-collector leakage diodes
+  (``ISE``, ``NE`` and ``ISC``, ``NC``),
+* base-width modulation via forward/reverse Early voltages
+  (``VAF``, ``VAR``),
+* high-level-injection roll-off via forward/reverse knee currents
+  (``IKF``, ``IKR``) through the base-charge factor.
+
+Let ``pol = +1`` (NPN) or ``-1`` (PNP). Define the internal junction
+voltages
+
+    V_BE = pol * (V(base) - V(emitter))
+    V_BC = pol * (V(base) - V(collector))
+
+and the ideal transport currents
+
+    I_BF = IS * (exp(V_BE / (NF V_T)) - 1)
+    I_BR = IS * (exp(V_BC / (NR V_T)) - 1)
+
+Base-charge factor (normalized majority base charge)::
+
+    q_1 = 1 / (1 - V_BC/VAF - V_BE/VAR)
+    q_2 = I_BF/IKF + I_BR/IKR
+    q_B = (q_1 / 2) * (1 + sqrt(1 + 4 q_2))
+
+Internal branch currents::
+
+    I_BE = I_BF/BF + ISE * (exp(V_BE/(NE V_T)) - 1)
+    I_BC = I_BR/BR + ISC * (exp(V_BC/(NC V_T)) - 1)
+    I_CE = (I_BF - I_BR) / q_B
+
+Terminal currents (positive when flowing *into* each terminal),
+multiplied by ``pol`` so the PNP has the expected sign-reversal::
+
+    I_C = pol * (I_CE - I_BC)
+    I_B = pol * (I_BE + I_BC)
+    I_E = -(I_C + I_B)
+
+Default parameters model an ideal Ebers-Moll transistor:
+``VAF = VAR = IKF = IKR = oo`` (no Early, no knee), ``ISE = ISC = 0``
+(no leakage), ``NF = NR = 1``, ``NE = 1.5``, ``NC = 2``,
+``V_T = 25.85 mV``. Only ``IS``, ``BF``, ``BR`` must be supplied.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import ClassVar
+
+import sympy as sp
+
+from sycan.mna import Component, StampContext
+
+_DEFAULT_VT = sp.Rational(2585, 100000)
+
+
+@dataclass
+class BJT(Component):
+    name: str
+    collector: str
+    base: str
+    emitter: str
+    polarity: str  # "NPN" or "PNP"
+    IS: sp.Expr
+    BF: sp.Expr
+    BR: sp.Expr
+    NF: sp.Expr = field(default_factory=lambda: sp.Integer(1))
+    NR: sp.Expr = field(default_factory=lambda: sp.Integer(1))
+    VAF: sp.Expr = field(default_factory=lambda: sp.oo)
+    VAR: sp.Expr = field(default_factory=lambda: sp.oo)
+    IKF: sp.Expr = field(default_factory=lambda: sp.oo)
+    IKR: sp.Expr = field(default_factory=lambda: sp.oo)
+    ISE: sp.Expr = field(default_factory=lambda: sp.Integer(0))
+    NE: sp.Expr = field(default_factory=lambda: sp.Rational(3, 2))
+    ISC: sp.Expr = field(default_factory=lambda: sp.Integer(0))
+    NC: sp.Expr = field(default_factory=lambda: sp.Integer(2))
+    V_T: sp.Expr = field(default_factory=lambda: _DEFAULT_VT)
+
+    has_nonlinear: ClassVar[bool] = True
+
+    def __post_init__(self) -> None:
+        self.polarity = self.polarity.upper()
+        if self.polarity not in ("NPN", "PNP"):
+            raise ValueError(
+                f"BJT {self.name!r}: polarity must be 'NPN' or 'PNP', got "
+                f"{self.polarity!r}"
+            )
+        for attr in (
+            "IS", "BF", "BR", "NF", "NR",
+            "VAF", "VAR", "IKF", "IKR",
+            "ISE", "NE", "ISC", "NC", "V_T",
+        ):
+            setattr(self, attr, sp.sympify(getattr(self, attr)))
+
+    def stamp(self, ctx: StampContext) -> None:
+        return None
+
+    def stamp_nonlinear(self, ctx: StampContext) -> None:
+        if ctx.mode != "dc":
+            return
+        assert ctx.x is not None and ctx.residuals is not None
+
+        c_idx = ctx.n(self.collector)
+        b_idx = ctx.n(self.base)
+        e_idx = ctx.n(self.emitter)
+
+        V_C = ctx.x[c_idx] if c_idx >= 0 else sp.Integer(0)
+        V_B = ctx.x[b_idx] if b_idx >= 0 else sp.Integer(0)
+        V_E = ctx.x[e_idx] if e_idx >= 0 else sp.Integer(0)
+
+        pol = sp.Integer(1) if self.polarity == "NPN" else sp.Integer(-1)
+        V_BE = pol * (V_B - V_E)
+        V_BC = pol * (V_B - V_C)
+
+        # Ideal transport currents.
+        I_BF = self.IS * (sp.exp(V_BE / (self.NF * self.V_T)) - 1)
+        I_BR = self.IS * (sp.exp(V_BC / (self.NR * self.V_T)) - 1)
+
+        # Base-charge factor (Early + high-level injection).
+        q_1 = 1 / (1 - V_BC / self.VAF - V_BE / self.VAR)
+        q_2 = I_BF / self.IKF + I_BR / self.IKR
+        q_B = (q_1 / 2) * (1 + sp.sqrt(1 + 4 * q_2))
+
+        # Non-ideal leakage diodes (skip cleanly when ISE/ISC are zero).
+        I_BE_leak = self.ISE * (sp.exp(V_BE / (self.NE * self.V_T)) - 1)
+        I_BC_leak = self.ISC * (sp.exp(V_BC / (self.NC * self.V_T)) - 1)
+
+        # Internal branch currents.
+        I_BE_total = I_BF / self.BF + I_BE_leak
+        I_BC_total = I_BR / self.BR + I_BC_leak
+        I_CE = (I_BF - I_BR) / q_B
+
+        # Terminal currents INTO each terminal.
+        I_C = pol * (I_CE - I_BC_total)
+        I_B = pol * (I_BE_total + I_BC_total)
+        I_E = -(I_C + I_B)
+
+        # KCL residual: these currents leave each node into the BJT.
+        if c_idx >= 0:
+            ctx.residuals[c_idx] += I_C
+        if b_idx >= 0:
+            ctx.residuals[b_idx] += I_B
+        if e_idx >= 0:
+            ctx.residuals[e_idx] += I_E

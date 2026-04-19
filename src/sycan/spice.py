@@ -19,6 +19,8 @@ Supported syntax:
       Hxxx  N+ N- VNAM gain        ; CCVS
       Wxxx  N1 N2                  ; ideal wire (stamped as a 0 V source)
       Mxxx  D G S TYPE mu_n Cox W L V_TH [m [V_T]]  ; TYPE=NMOS_subthreshold
+      Qxxx  C B E TYPE IS BF BR [V_T]               ; TYPE=NPN or PNP (G-P)
+      Dxxx  A K IS [N [V_T]]                        ; Shockley diode
       GND[n] NODE                  ; ties NODE to the absolute zero reference
 
 Values may be plain numbers with an engineering suffix
@@ -202,6 +204,33 @@ def parse(text: str) -> Circuit:
             # Ideal wire: a 0 V voltage source electrically merges the nodes.
             _require(parts, 3, lineno, name)
             circuit.add_vsource(name, parts[1], parts[2], 0)
+        elif head == "d":
+            _require(parts, 4, lineno, name)
+            anode, cathode = parts[1], parts[2]
+            IS_val = parse_value(parts[3])
+            N_val = parse_value(parts[4]) if len(parts) > 4 else None
+            V_T = parse_value(parts[5]) if len(parts) > 5 else None
+            circuit.add_diode(name, anode, cathode, IS_val, N_val, V_T)
+        elif head == "q":
+            _require(parts, 8, lineno, name)
+            collector, base, emitter, btype = (
+                parts[1], parts[2], parts[3], parts[4]
+            )
+            if btype.upper() not in ("NPN", "PNP"):
+                raise ValueError(
+                    f"line {lineno}: unknown BJT type {btype!r}; "
+                    "expected NPN or PNP"
+                )
+            IS_val = parse_value(parts[5])
+            BF = parse_value(parts[6])
+            BR = parse_value(parts[7])
+            extra: dict[str, sp.Expr] = {}
+            if len(parts) > 8:
+                extra["V_T"] = parse_value(parts[8])
+            circuit.add_bjt(
+                name, collector, base, emitter, btype.upper(),
+                IS_val, BF, BR, **extra,
+            )
         elif head == "m":
             _require(parts, 10, lineno, name)
             drain, gate, source, mtype = parts[1], parts[2], parts[3], parts[4]
