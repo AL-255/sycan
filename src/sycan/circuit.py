@@ -16,6 +16,7 @@ from sycan.components.basic import (
     CurrentSource,
     GND,
     Inductor,
+    NMOS_subthreshold,
     Resistor,
     VCCS,
     VCVS,
@@ -37,7 +38,16 @@ class Circuit:
 
     def add(self, component: Component) -> Component:
         """Append a pre-built component, registering its referenced nodes."""
-        for attr in ("n_plus", "n_minus", "nc_plus", "nc_minus", "node"):
+        for attr in (
+            "n_plus",
+            "n_minus",
+            "nc_plus",
+            "nc_minus",
+            "node",
+            "drain",
+            "gate",
+            "source",
+        ):
             node = getattr(component, attr, None)
             if node is not None:
                 self._touch(node)
@@ -108,6 +118,41 @@ class Circuit:
     def add_gnd(self, name: str, node: str) -> GND:
         """Tie ``node`` to the absolute zero reference."""
         return self.add(GND(name, node))  # type: ignore[return-value]
+
+    def add_nmos_subthreshold(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        mu_n: Value,
+        Cox: Value,
+        W: Value,
+        L: Value,
+        V_TH: Value,
+        m: Optional[Value] = None,
+        V_T: Optional[Value] = None,
+    ) -> NMOS_subthreshold:
+        """Attach a sub-threshold NMOS.
+
+        Drain current model::
+
+            I_D = mu_n * Cox * (W/L) * (m - 1) * V_T**2
+                  * exp((V_GS - V_TH) / (m V_T))
+                  * (1 - exp(-V_DS / V_T))
+        """
+        kwargs = {
+            "mu_n": mu_n,
+            "Cox": Cox,
+            "W": W,
+            "L": L,
+            "V_TH": V_TH,
+        }
+        if m is not None:
+            kwargs["m"] = m
+        if V_T is not None:
+            kwargs["V_T"] = V_T
+        return self.add(NMOS_subthreshold(name, drain, gate, source, **kwargs))  # type: ignore[return-value]
 
     @property
     def nodes(self) -> list[str]:
