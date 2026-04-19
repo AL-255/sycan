@@ -6,9 +6,9 @@ readme = "README.md"
 authors = [
     { name = "AL-255", email = "thelithcore@gmail.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
-    "sympy>=1.14.0",
+    "sympy>=1.12",
 ]
 
 [project.scripts]
