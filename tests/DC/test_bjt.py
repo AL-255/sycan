@@ -25,6 +25,13 @@ Q1 c b 0 PNP IS BF BR V_T
 .end
 """
 
+NETLIST_NPN_EARLY = """NPN BJT with Early effect
+Vbe b 0 V_BE
+Vce c 0 V_CE
+Q1 c b 0 NPN IS BF BR V_T VAF
+.end
+"""
+
 
 def _ideal_emn_currents(V_BE_int, V_BC_int, IS, BF, BR, V_T):
     """Ebers-Moll transport-form currents for an ideal transistor."""
@@ -73,20 +80,9 @@ def test_bjt_pnp_gummel_poon_reduces_to_ebers_moll():
 def test_bjt_early_effect_nonlinearizes_collector_current():
     """When ``VAF`` is finite the base-charge factor ``q_B`` scales the
     collector transport current; I_C must gain a 1/(1 - V_BC/VAF)
-    dependence. We verify this by building the model directly (the
-    full G-P solve with symbolic VAF runs into sympy simplification
-    limits)."""
-    from sycan import Circuit, build_mna
-
+    dependence."""
     V_BE, V_CE, IS, BF, BR, V_T, VAF = sp.symbols("V_BE V_CE IS BF BR V_T VAF")
-
-    circuit = Circuit()
-    circuit.add_vsource("Vbe", "b", "0", V_BE)
-    circuit.add_vsource("Vce", "c", "0", V_CE)
-    circuit.add_bjt(
-        "Q1", "c", "b", "0", "NPN",
-        IS=IS, BF=BF, BR=BR, V_T=V_T, VAF=VAF,
-    )
+    sol = solve_dc(parse(NETLIST_NPN_EARLY))
 
     # Expected q_B when only VAF is finite: q_1 = 1/(1 - V_BC/VAF),
     # q_2 = 0, so q_B = q_1.
@@ -97,5 +93,4 @@ def test_bjt_early_effect_nonlinearizes_collector_current():
     I_BR = IS * (sp.exp(V_BC / V_T) - 1)
     I_C_expected = (I_BF - I_BR) / q_B - I_BR / BR
 
-    sol = solve_dc(circuit)
     assert sp.simplify(sol[sp.Symbol("I(Vce)")] + I_C_expected) == 0

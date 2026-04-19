@@ -20,12 +20,14 @@ Supported syntax:
       Wxxx  N1 N2                  ; ideal wire (stamped as a 0 V source)
       Mxxx  D G S TYPE mu_n Cox W L V_TH [m [V_T]]
                                                     ; TYPE=N/PMOS_subthreshold
-      Mxxx  D G S TYPE mu_n Cox W L V_TH [lam]
+      Mxxx  D G S TYPE mu_n Cox W L V_TH [lam [V_GS_op V_DS_op [C_gs [C_gd]]]]
                                                     ; TYPE=N/PMOS_L1
-      Qxxx  C B E TYPE IS BF BR [V_T]               ; TYPE=NPN or PNP (G-P)
+      Qxxx  C B E TYPE IS BF BR [V_T [VAF]]         ; TYPE=NPN or PNP (G-P)
       Dxxx  A K IS [N [V_T]]                        ; Shockley diode
       Pxxx  N+ N- [role]                            ; named port (role=input/output/generic)
       Txxx  N1+ N1- N2+ N2- Z0 td                   ; lossless transmission line
+      Xxxx  P G K TRIODE K mu [V_g_op V_p_op [C_gk C_gp C_pk]]
+                                                    ; vacuum-tube triode subcircuit
       GND[n] NODE                  ; ties NODE to the absolute zero reference
 
 Values may be plain numbers with an engineering suffix
@@ -111,14 +113,15 @@ def _source_values(
 
     Accepts::
 
-        <val>                       -> (val, None)
-        DC <val>                    -> (val, None)
+        <val>                       -> (val, None)   ; applies in both modes
+        DC <val>                    -> (val, 0)      ; DC bias, short at AC
         AC <val>                    -> (0,   val)
         DC <val> AC <val>           -> (dc, ac)
         AC <val> DC <val>           -> (dc, ac)
     """
     dc_val: sp.Expr | None = None
     ac_val: sp.Expr | None = None
+    dc_explicit = False
     i = 0
     while i < len(tokens):
         tok = tokens[i]
@@ -131,6 +134,7 @@ def _source_values(
             val = parse_value(tokens[i + 1])
             if low == "dc":
                 dc_val = val
+                dc_explicit = True
             else:
                 ac_val = val
             i += 2
@@ -144,6 +148,9 @@ def _source_values(
         raise ValueError(f"line {lineno}: source {name!r} missing value")
     if dc_val is None:
         dc_val = sp.Integer(0)
+    # Explicit DC keyword without AC means this is a DC-only source (AC short).
+    if dc_explicit and ac_val is None:
+        ac_val = sp.Integer(0)
     return dc_val, ac_val
 
 
@@ -243,6 +250,8 @@ def parse(text: str) -> Circuit:
             extra: dict[str, sp.Expr] = {}
             if len(parts) > 8:
                 extra["V_T"] = parse_value(parts[8])
+            if len(parts) > 9:
+                extra["VAF"] = parse_value(parts[9])
             circuit.add_bjt(
                 name, collector, base, emitter, btype.upper(),
                 IS_val, BF, BR, **extra,
@@ -271,6 +280,14 @@ def parse(text: str) -> Circuit:
                 kwargs: dict[str, sp.Expr] = {}
                 if len(parts) > 10:
                     kwargs["lam"] = parse_value(parts[10])
+                if len(parts) > 11:
+                    kwargs["V_GS_op"] = parse_value(parts[11])
+                if len(parts) > 12:
+                    kwargs["V_DS_op"] = parse_value(parts[12])
+                if len(parts) > 13:
+                    kwargs["C_gs"] = parse_value(parts[13])
+                if len(parts) > 14:
+                    kwargs["C_gd"] = parse_value(parts[14])
                 adder = (
                     circuit.add_nmos_l1
                     if mtype_lc == "nmos_l1"
@@ -281,6 +298,30 @@ def parse(text: str) -> Circuit:
                 raise ValueError(
                     f"line {lineno}: unknown MOSFET model {mtype!r}; "
                     "expected N/PMOS_subthreshold or N/PMOS_L1"
+                )
+        elif head == "x":
+            _require(parts, 5, lineno, name)
+            subckt = parts[4].upper()
+            if subckt == "TRIODE":
+                _require(parts, 7, lineno, name)
+                plate, grid, cathode = parts[1], parts[2], parts[3]
+                K_val = parse_value(parts[5])
+                mu_val = parse_value(parts[6])
+                kwargs: dict[str, sp.Expr] = {}
+                if len(parts) > 7:
+                    kwargs["V_g_op"] = parse_value(parts[7])
+                if len(parts) > 8:
+                    kwargs["V_p_op"] = parse_value(parts[8])
+                if len(parts) > 9:
+                    kwargs["C_gk"] = parse_value(parts[9])
+                if len(parts) > 10:
+                    kwargs["C_gp"] = parse_value(parts[10])
+                if len(parts) > 11:
+                    kwargs["C_pk"] = parse_value(parts[11])
+                circuit.add_triode(name, plate, grid, cathode, K_val, mu_val, **kwargs)
+            else:
+                raise ValueError(
+                    f"line {lineno}: unknown subcircuit type {subckt!r} for {name!r}"
                 )
         else:
             raise ValueError(f"line {lineno}: unsupported element {name!r}")

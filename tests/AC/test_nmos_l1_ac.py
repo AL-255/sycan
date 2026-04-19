@@ -14,39 +14,35 @@ and with ``C_gd`` included::
 import sympy as sp
 import pytest
 
-from sycan import Circuit, NMOS_L1, PMOS_L1, solve_ac
+from sycan import parse, solve_ac
+
+_CS_AMP = """\
+CS {mtype} amp
+V1 g 0 AC v_in
+V2 vdd 0 DC VDD
+RL vdd d R_L
+M1 d g 0 {mtype} mu_n Cox W L V_TH lam V_GS_op V_DS_op
+.end
+"""
+
+_CS_AMP_CGD = """\
+CS {mtype} amp with Cgd
+V1 g 0 AC v_in
+V2 vdd 0 DC VDD
+RL vdd d R_L
+M1 d g 0 {mtype} mu_n Cox W L V_TH lam V_GS_op V_DS_op 0 C_gd
+.end
+"""
 
 
-def _build_cs_amp(
-    cls, mu_n, Cox, W, L, V_TH, lam, R_L, V_GS_op, V_DS_op, v_in, VDD,
-    *, C_gd=0, C_gs=0,
-):
-    c = Circuit()
-    c.add_vsource("V1", "g", "0", value=0, ac_value=v_in)
-    c.add_vsource("V2", "vdd", "0", value=VDD, ac_value=0)
-    c.add_resistor("RL", "vdd", "d", R_L)
-    c.add(
-        cls(
-            "M1", "d", "g", "0",
-            mu_n=mu_n, Cox=Cox, W=W, L=L, V_TH=V_TH,
-            lam=lam, C_gs=C_gs, C_gd=C_gd,
-            V_GS_op=V_GS_op, V_DS_op=V_DS_op,
-        )
-    )
-    return c
-
-
-@pytest.mark.parametrize("cls,pol", [(NMOS_L1, 1), (PMOS_L1, -1)])
-def test_cs_amplifier_low_frequency_gain(cls, pol):
+@pytest.mark.parametrize("mtype,pol", [("NMOS_L1", 1), ("PMOS_L1", -1)])
+def test_cs_amplifier_low_frequency_gain(mtype, pol):
     (
         mu_n, Cox, W, L, V_TH, lam, R_L, V_GS_op, V_DS_op, v_in, VDD,
     ) = sp.symbols(
         "mu_n Cox W L V_TH lam R_L V_GS_op V_DS_op v_in VDD"
     )
-    circuit = _build_cs_amp(
-        cls, mu_n, Cox, W, L, V_TH, lam, R_L, V_GS_op, V_DS_op, v_in, VDD
-    )
-    sol = solve_ac(circuit)
+    sol = solve_ac(parse(_CS_AMP.format(mtype=mtype)))
 
     pol_s = sp.Integer(pol)
     V_GS_eff = pol_s * V_GS_op
@@ -59,18 +55,14 @@ def test_cs_amplifier_low_frequency_gain(cls, pol):
     assert sp.simplify(V_out - expected) == 0
 
 
-@pytest.mark.parametrize("cls,pol", [(NMOS_L1, 1), (PMOS_L1, -1)])
-def test_cs_amplifier_with_miller_capacitance(cls, pol):
+@pytest.mark.parametrize("mtype,pol", [("NMOS_L1", 1), ("PMOS_L1", -1)])
+def test_cs_amplifier_with_miller_capacitance(mtype, pol):
     (
         mu_n, Cox, W, L, V_TH, lam, R_L, V_GS_op, V_DS_op, v_in, VDD, C_gd,
     ) = sp.symbols(
         "mu_n Cox W L V_TH lam R_L V_GS_op V_DS_op v_in VDD C_gd"
     )
-    circuit = _build_cs_amp(
-        cls, mu_n, Cox, W, L, V_TH, lam, R_L, V_GS_op, V_DS_op, v_in, VDD,
-        C_gd=C_gd,
-    )
-    sol = solve_ac(circuit)
+    sol = solve_ac(parse(_CS_AMP_CGD.format(mtype=mtype)))
 
     s = sp.Symbol("s")
     pol_s = sp.Integer(pol)
