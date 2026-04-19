@@ -1,6 +1,6 @@
 [project]
 name = "sycan"
-version = "0.1.0"
+version = "0.1.1"
 description = "SYmbolic Circuit ANalysis"
 readme = "README.md"
 authors = [

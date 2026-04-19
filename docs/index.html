@@ -80,7 +80,7 @@ async function boot() {
   await py.runPythonAsync(`
 import micropip
 # Resolve relative to the page URL so this works under /docs on Pages.
-await micropip.install('./sycan-0.1.0-py3-none-any.whl')
+await micropip.install('./sycan-0.1.1-py3-none-any.whl?v=1')
 import sycan
 print(f'sycan {sycan.__name__} ready')
   `);
