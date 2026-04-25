@@ -4,6 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>sycan REPL — symbolic circuit analysis in your browser</title>
+
+<!-- CodeMirror: syntax-highlighted editor with line numbers. -->
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css">
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/monokai.css">
+
 <style>
   :root { color-scheme: light dark; }
   body {
@@ -13,14 +20,21 @@
   h1 { margin-bottom: 0.2em; }
   .sub { color: #888; margin-top: 0; }
   #status { font-size: 0.9em; color: #888; margin: 0.5em 0; }
-  #editor, #output {
+  #output {
     width: 100%; font-family: "JetBrains Mono", Menlo, Consolas, monospace;
     font-size: 13px; padding: 10px; box-sizing: border-box;
     border: 1px solid #bbb; border-radius: 6px;
+    min-height: 160px; background: #f6f6f6; white-space: pre-wrap;
   }
-  #editor { height: 320px; resize: vertical; }
-  #output { min-height: 160px; background: #f6f6f6; white-space: pre-wrap; }
   @media (prefers-color-scheme: dark) { #output { background: #1a1a1a; } }
+
+  /* CodeMirror frame matches the other UI elements. */
+  .CodeMirror {
+    height: 320px;
+    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    border: 1px solid #bbb; border-radius: 6px;
+  }
 
   /* Buttons: explicit colors so dark-mode UA styling can't leave text
      invisible on a light background (or vice-versa). */
@@ -85,155 +99,17 @@ entirely in your browser via Pyodide. <a href="https://github.com/AL-255/sycan">
 <script id="MathJax-script" async
         src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/python/python.js"></script>
+
 <script>
 // -----------------------------------------------------------------------
-// Preset examples. Each key is the button label; the value is the code
-// loaded into the editor when the button is pressed.
+// Page wiring. Examples live in `examples/` as plain .py files listed in
+// `examples/manifest.json`; this script just fetches and displays them.
 // -----------------------------------------------------------------------
-const EXAMPLES = {
-  "Voltage divider": `import sympy as sp
-from sycan import parse, solve_dc
-
-netlist = """voltage divider
-V1 in 0 Vin
-R1 in out Ra
-R2 out 0 Rb
-.end
-"""
-
-for sym, expr in solve_dc(parse(netlist)).items():
-    print(f"$\${sp.latex(sym)} = {sp.latex(expr)}$$")
-`,
-
-  "RC low-pass (AC)": `import sympy as sp
-from sycan import parse, solve_ac
-
-netlist = """RC low-pass
-V1 in 0 AC Vin
-R1 in out R
-C1 out 0 C
-.end
-"""
-
-sol = solve_ac(parse(netlist))
-Vin = sp.Symbol("Vin")
-H = sol[sp.Symbol("V(out)")] / Vin
-print(f"$$H(s) = {sp.latex(sp.simplify(H))}$$")
-`,
-
-  "2-T V_T reference": `import sympy as sp
-from sycan import parse
-from sycan.components.active import NMOS_subthreshold
-
-# Classical 2-transistor sub-threshold voltage reference:
-# sub-threshold currents in two cross-connected NMOS devices with
-# different geometry / thresholds pin V(n1) to a CTAT-cancelling
-# log-of-ratio voltage.
-netlist = """2T reference
-V1 vdd 0 VDD
-M1 vdd 0 n1 NMOS_subthreshold mu_n1 Cox1 W1 L1 V_TH1 m1 V_T
-M2 n1 n1 0 NMOS_subthreshold mu_n2 Cox2 W2 L2 V_TH2 m2 V_T
-.end
-"""
-circuit = parse(netlist)
-mosfets = [c for c in circuit.components if isinstance(c, NMOS_subthreshold)]
-print(f"Parsed {len(circuit.components)} components, "
-      f"including {len(mosfets)} sub-threshold NMOS devices.")
-
-# sp.solve can't close the transcendental KCL directly. But in the
-# saturation limit (V_DS >> V_T) matching I_D1 = I_D2 reduces to a
-# log-space linear equation, with closed-form solution:
-mu_n1, mu_n2, Cox1, Cox2 = sp.symbols(
-    "mu_n1 mu_n2 Cox1 Cox2", positive=True)
-W1, W2, L1, L2 = sp.symbols("W1 W2 L1 L2", positive=True)
-V_TH1, V_TH2, m1, m2, V_T = sp.symbols(
-    "V_TH1 V_TH2 m1 m2 V_T", positive=True)
-
-V_n1 = (m1*m2/(m1+m2) * (V_TH2 - V_TH1)
-        + m1*m2/(m1+m2) * V_T * sp.log(
-            mu_n1*Cox1*W1*L2 / (mu_n2*Cox2*W2*L1)))
-print()
-print(f"$$V(n_1) = {sp.latex(V_n1)}$$")
-`,
-
-  "CS amp impedances": `import sympy as sp
-from sycan import Circuit, solve_impedance
-
-mu_n, Cox, W, L, V_TH, lam, R_L = sp.symbols("mu_n Cox W L V_TH lam R_L")
-VDD, V_GS_op, V_DS_op, C_gs = sp.symbols("VDD V_GS_op V_DS_op C_gs")
-
-c = Circuit()
-c.add_port("P_in",  "gate",  "0", "input")
-c.add_port("P_out", "drain", "0", "output")
-c.add_vsource("Vdd", "vdd", "0", value=VDD, ac_value=0)
-c.add_resistor("RL", "vdd", "drain", R_L)
-c.add_nmos_l1("M1", "drain", "gate", "0",
-              mu_n=mu_n, Cox=Cox, W=W, L=L, V_TH=V_TH, lam=lam,
-              C_gs=C_gs, V_GS_op=V_GS_op, V_DS_op=V_DS_op)
-
-Z_in  = sp.simplify(solve_impedance(c, "P_in",  termination="auto"))
-Z_out = sp.simplify(solve_impedance(c, "P_out", termination="auto"))
-print("Z_in  = 1/(s C_gs):")
-print(f"$$Z_{{in}} = {sp.latex(Z_in)}$$")
-print()
-print("Z_out = R_L || r_o:")
-print(f"$$Z_{{out}} = {sp.latex(Z_out)}$$")
-`,
-
-  "SRPP optimal load": `import sympy as sp
-from sycan import Circuit, solve_impedance
-
-# SRPP (Series-Regulated Push-Pull): two identical triodes stacked with
-# a sense resistor Rs between T2's cathode and T1's plate.
-K, mu, V_g_op, V_p_op, R_s, V_B = sp.symbols("K mu V_g_op V_p_op R_s V_B")
-
-c = Circuit()
-c.add_port("P_in",  "in",  "0", "input")
-c.add_port("P_out", "out", "0", "output")
-c.add_vsource("Vb", "hv", "0", value=V_B, ac_value=0)
-c.add_triode("T1", plate="n_mid", grid="in",    cathode="0",
-             K=K, mu=mu, V_g_op=V_g_op, V_p_op=V_p_op)
-c.add_triode("T2", plate="hv",    grid="n_mid", cathode="out",
-             K=K, mu=mu, V_g_op=V_g_op, V_p_op=V_p_op)
-c.add_resistor("Rs", "out", "n_mid", R_s)
-
-Z_out = solve_impedance(c, "P_out", termination="auto")
-print("Z_out(R_s) =")
-print(f"$$Z_{{out}}(R_s) = {sp.latex(sp.simplify(Z_out))}$$")
-print()
-print("R_s -> infinity limit (== R_L optimal for 2nd-harmonic cancellation):")
-print(f"$$\\lim_{{R_s \\to \\infty}} Z_{{out}} = "
-      f"{sp.latex(sp.limit(Z_out, R_s, sp.oo))}$$")
-`,
-
-  "Wheatstone bridge": `import sympy as sp
-from sycan import parse, solve_dc
-
-netlist = """wheatstone bridge
-V1 a 0 Vs
-R1 a b R1
-R2 b 0 R2
-R3 a c R3
-R4 c 0 R4
-.end
-"""
-
-sol = solve_dc(parse(netlist))
-V_b = sol[sp.Symbol("V(b)")]
-V_c = sol[sp.Symbol("V(c)")]
-diff = sp.simplify(V_b - V_c)
-print(f"$$V(b) - V(c) = {sp.latex(diff)}$$")
-print()
-print("Balance condition: R1*R4 == R2*R3")
-`,
-};
-
-// -----------------------------------------------------------------------
-// Page wiring
-// -----------------------------------------------------------------------
-let py = null;
+let py = null, cm = null;
 const status     = document.getElementById('status');
-const editor     = document.getElementById('editor');
+const editorEl   = document.getElementById('editor');
 const output     = document.getElementById('output');
 const runBtn     = document.getElementById('run');
 const clearBtn   = document.getElementById('clear');
@@ -241,23 +117,59 @@ const examplesEl = document.getElementById('examples');
 
 function write(msg) { output.textContent += msg; }
 
-function loadExample(name) {
-  editor.value = EXAMPLES[name];
+async function loadExample(file) {
+  const resp = await fetch(`./examples/${file}`);
+  if (!resp.ok) throw new Error(`Could not fetch ${file}: ${resp.status}`);
+  const code = await resp.text();
+  cm.setValue(code);
   output.textContent = '';
 }
 
-// Build the example buttons.
-for (const name of Object.keys(EXAMPLES)) {
-  const b = document.createElement('button');
-  b.className = 'example';
-  b.textContent = name;
-  b.addEventListener('click', () => loadExample(name));
-  examplesEl.appendChild(b);
+async function buildExamples() {
+  const resp = await fetch('./examples/manifest.json');
+  if (!resp.ok) throw new Error(`Could not fetch manifest: ${resp.status}`);
+  const manifest = await resp.json();
+  for (const {label, file} of manifest) {
+    const b = document.createElement('button');
+    b.className = 'example';
+    b.textContent = label;
+    b.addEventListener('click', () => {
+      loadExample(file).catch((e) => write(String(e) + '\n'));
+    });
+    examplesEl.appendChild(b);
+  }
+  if (manifest.length > 0) {
+    await loadExample(manifest[0].file);
+  }
 }
-// Start with the first example loaded.
-loadExample(Object.keys(EXAMPLES)[0]);
+
+function initEditor() {
+  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  cm = CodeMirror.fromTextArea(editorEl, {
+    mode: 'python',
+    lineNumbers: true,
+    indentUnit: 4,
+    theme: dark ? 'monokai' : 'default',
+    extraKeys: {
+      'Ctrl-Enter': run,
+      'Cmd-Enter':  run,
+    },
+  });
+  // Live-follow OS theme changes.
+  window.matchMedia('(prefers-color-scheme: dark)')
+        .addEventListener('change', (e) => {
+          cm.setOption('theme', e.matches ? 'monokai' : 'default');
+        });
+}
 
 async function boot() {
+  initEditor();
+  // Examples and Pyodide load in parallel; we only need both done before
+  // enabling Run.
+  const examplesP = buildExamples().catch((e) => {
+    status.textContent = 'Failed to load examples: ' + e;
+    throw e;
+  });
   py = await loadPyodide();
   status.textContent = 'Installing sympy + sycan…';
   await py.loadPackage(['sympy', 'micropip']);
@@ -267,9 +179,10 @@ await micropip.install('./sycan-0.1.1-py3-none-any.whl?v=1')
 import sycan
 print(f'sycan {sycan.__name__} ready')
   `);
+  await examplesP;
   status.textContent = 'Ready. Pick an example above (or edit) and hit Run.';
   runBtn.disabled = false;
-  editor.focus();
+  cm.focus();
 }
 
 async function typesetMath() {
@@ -281,12 +194,13 @@ async function typesetMath() {
 }
 
 async function run() {
+  if (runBtn.disabled || !py) return;
   output.textContent = '';
   py.setStdout({ batched: (s) => write(s + '\n') });
   py.setStderr({ batched: (s) => write(s + '\n') });
   runBtn.disabled = true;
   try {
-    const result = await py.runPythonAsync(editor.value);
+    const result = await py.runPythonAsync(cm.getValue());
     if (result !== undefined && result !== null) write(String(result) + '\n');
   } catch (e) {
     write(String(e));
@@ -298,9 +212,6 @@ async function run() {
 
 runBtn.addEventListener('click', run);
 clearBtn.addEventListener('click', () => { output.textContent = ''; });
-editor.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); }
-});
 
 boot().catch((e) => { status.textContent = 'Failed to load Pyodide: ' + e; });
 </script>

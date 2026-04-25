@@ -1,6 +1,13 @@
 # docs/
 
-- `index.html` — in-browser sycan REPL (Pyodide), live at <https://al-255.github.io/sycan/>.
+- `index.html` — in-browser sycan REPL (Pyodide + CodeMirror + MathJax),
+  live at <https://al-255.github.io/sycan/>.
+- `examples/` — preset example scripts loaded by the REPL on demand.
+  - `manifest.json` — list of `{label, file}` entries; the page builds one
+    button per entry. To add an example: drop a `.py` file in this folder
+    and append a line to `manifest.json`.
+  - `*.py` — one example per file, edited as ordinary Python (no JS-string
+    escaping pitfalls).
 - `sycan-*.whl` — the wheel `index.html` installs via `micropip`.
 
 ## Preview locally

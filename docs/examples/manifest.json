@@ -1,0 +1,8 @@
+[
+  {"label": "Voltage divider",   "file": "voltage_divider.py"},
+  {"label": "RC low-pass (AC)",  "file": "rc_lowpass.py"},
+  {"label": "2-T V_T reference", "file": "2t_vref.py"},
+  {"label": "CS amp impedances", "file": "cs_amp.py"},
+  {"label": "SRPP optimal load", "file": "srpp.py"},
+  {"label": "Wheatstone bridge", "file": "wheatstone.py"}
+]
