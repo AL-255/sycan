@@ -69,6 +69,21 @@ entirely in your browser via Pyodide. <a href="https://github.com/AL-255/sycan">
 <h3>Output</h3>
 <div id="output"></div>
 
+<script>
+  // MathJax v3: render any $$...$$ / \[...\] block (and $...$ / \(...\)
+  // for inline) the examples emit. We trigger typesetting manually after
+  // each run so the output div picks up newly-printed LaTeX.
+  window.MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+    },
+    svg: { fontCache: 'global' },
+    startup: { typeset: false },
+  };
+</script>
+<script id="MathJax-script" async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
 <script>
 // -----------------------------------------------------------------------
@@ -87,7 +102,7 @@ R2 out 0 Rb
 """
 
 for sym, expr in solve_dc(parse(netlist)).items():
-    print(f"{sym} = {expr}")
+    print(f"$\${sp.latex(sym)} = {sp.latex(expr)}$$")
 `,
 
   "RC low-pass (AC)": `import sympy as sp
@@ -103,7 +118,7 @@ C1 out 0 C
 sol = solve_ac(parse(netlist))
 Vin = sp.Symbol("Vin")
 H = sol[sp.Symbol("V(out)")] / Vin
-print("H(s) =", sp.simplify(H))
+print(f"$$H(s) = {sp.latex(sp.simplify(H))}$$")
 `,
 
   "2-T V_T reference": `import sympy as sp
@@ -138,8 +153,7 @@ V_n1 = (m1*m2/(m1+m2) * (V_TH2 - V_TH1)
         + m1*m2/(m1+m2) * V_T * sp.log(
             mu_n1*Cox1*W1*L2 / (mu_n2*Cox2*W2*L1)))
 print()
-print("V(n1) =")
-sp.pprint(V_n1)
+print(f"$$V(n_1) = {sp.latex(V_n1)}$$")
 `,
 
   "CS amp impedances": `import sympy as sp
@@ -157,11 +171,13 @@ c.add_nmos_l1("M1", "drain", "gate", "0",
               mu_n=mu_n, Cox=Cox, W=W, L=L, V_TH=V_TH, lam=lam,
               C_gs=C_gs, V_GS_op=V_GS_op, V_DS_op=V_DS_op)
 
+Z_in  = sp.simplify(solve_impedance(c, "P_in",  termination="auto"))
+Z_out = sp.simplify(solve_impedance(c, "P_out", termination="auto"))
 print("Z_in  = 1/(s C_gs):")
-sp.pprint(sp.simplify(solve_impedance(c, "P_in", termination="auto")))
+print(f"$$Z_{{in}} = {sp.latex(Z_in)}$$")
 print()
 print("Z_out = R_L || r_o:")
-sp.pprint(sp.simplify(solve_impedance(c, "P_out", termination="auto")))
+print(f"$$Z_{{out}} = {sp.latex(Z_out)}$$")
 `,
 
   "SRPP optimal load": `import sympy as sp
@@ -183,10 +199,11 @@ c.add_resistor("Rs", "out", "n_mid", R_s)
 
 Z_out = solve_impedance(c, "P_out", termination="auto")
 print("Z_out(R_s) =")
-sp.pprint(sp.simplify(Z_out))
+print(f"$$Z_{{out}}(R_s) = {sp.latex(sp.simplify(Z_out))}$$")
 print()
 print("R_s -> infinity limit (== R_L optimal for 2nd-harmonic cancellation):")
-sp.pprint(sp.limit(Z_out, R_s, sp.oo))
+print(f"$$\\lim_{{R_s \\to \\infty}} Z_{{out}} = "
+      f"{sp.latex(sp.limit(Z_out, R_s, sp.oo))}$$")
 `,
 
   "Wheatstone bridge": `import sympy as sp
@@ -205,8 +222,7 @@ sol = solve_dc(parse(netlist))
 V_b = sol[sp.Symbol("V(b)")]
 V_c = sol[sp.Symbol("V(c)")]
 diff = sp.simplify(V_b - V_c)
-print("V(b) - V(c) =")
-sp.pprint(diff)
+print(f"$$V(b) - V(c) = {sp.latex(diff)}$$")
 print()
 print("Balance condition: R1*R4 == R2*R3")
 `,
@@ -256,6 +272,14 @@ print(f'sycan {sycan.__name__} ready')
   editor.focus();
 }
 
+async function typesetMath() {
+  if (!window.MathJax || !MathJax.typesetPromise) return;
+  if (MathJax.startup && MathJax.startup.promise) {
+    await MathJax.startup.promise;
+  }
+  await MathJax.typesetPromise([output]);
+}
+
 async function run() {
   output.textContent = '';
   py.setStdout({ batched: (s) => write(s + '\n') });
@@ -268,6 +292,7 @@ async function run() {
     write(String(e));
   } finally {
     runBtn.disabled = false;
+    try { await typesetMath(); } catch (_) { /* MathJax errors are non-fatal */ }
   }
 }
 
