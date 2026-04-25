@@ -25,58 +25,56 @@
     </marker>
   </defs>
   <line
-     x1="32"
-     y1="38"
-     x2="32"
-     y2="8"
+     x1="30"
+     y1="35"
+     x2="30"
+     y2="5"
      stroke="#222"
      stroke-width="2"
      id="line1"
      style="stroke:#000000;stroke-width:1.5;stroke-dasharray:none" />
   <line
-     x1="26"
-     y1="32"
-     x2="26"
-     y2="14"
+     x1="24"
+     y1="29"
+     x2="24"
+     y2="11"
      stroke="#222222"
      stroke-width="1.6"
      id="line4"
      style="stroke:#000000;stroke-width:1.5;stroke-dasharray:none" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1;stroke-dasharray:none"
-     d="M 20.989296,23 H 16"
+     d="M 18.989296,20 H 14"
      id="path5" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1;stroke-dasharray:none"
-     d="M 42,44 V 31.956084 H 32"
+     d="M 40,38 V 28.956084 H 30"
      id="path6" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1;stroke-dasharray:none"
-     d="M 42,2 V 14.043916 H 32"
+     d="m 40,2 v 9.043916 H 30"
      id="path6-6" />
   <!-- port markers: <circle id="port-NAME" cx=X cy=Y r="0"> -->
   <circle
      id="port-drain"
-     cx="42"
-     cy="-46"
+     cx="40"
+     cy="40"
      fill="none"
      stroke="none"
      r="2"
-     style="stroke:#000000"
-     transform="scale(1,-1)" />
+     style="stroke:#000000" />
   <circle
      id="port-gate"
-     cx="14"
-     cy="-23"
+     cx="12"
+     cy="20"
      fill="none"
      stroke="none"
      r="2"
-     style="stroke:#000000"
-     transform="scale(1,-1)" />
+     style="stroke:#000000" />
   <circle
      id="port-gate-5"
-     cx="22.989296"
-     cy="-23"
+     cx="20.989296"
+     cy="-20"
      fill="none"
      stroke="none"
      r="2"
@@ -84,15 +82,14 @@
      transform="scale(1,-1)" />
   <circle
      id="port-source"
-     cx="42"
+     cx="40"
      cy="0"
      fill="none"
      stroke="none"
      style="stroke:#000000"
-     r="2"
-     transform="scale(1,-1)" />
+     r="2" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1;stroke-miterlimit:4.1;stroke-dasharray:none;marker-end:url(#Triangle)"
-     d="m 40.551075,14.043916 h -5"
+     d="m 38.551075,11.043916 h -5"
      id="path1" />
 </svg>

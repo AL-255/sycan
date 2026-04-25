@@ -10,10 +10,10 @@
   <path
      id="polyline1"
      style="fill:none;stroke:#000000;stroke-width:1.6"
-     d="m 35,2 v 7 l -7,3 14,4 -14,4 14,4 -14,4 14,4 -7,3 v 9" />
+     d="m 0,2 v 7 l -7,3 14,4 -14,4 14,4 -14,4 14,4 -7,3 v 9" />
   <circle
      id="port-n_plus"
-     cx="35"
+     cx="0"
      cy="0"
      fill="none"
      stroke="none"
@@ -21,7 +21,7 @@
      style="stroke:#000000" />
   <circle
      id="port-n_minus"
-     cx="35"
+     cx="0"
      cy="46"
      fill="none"
      stroke="none"

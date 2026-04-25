@@ -20,17 +20,33 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="7.6036228"
-     inkscape:cx="43.992188"
-     inkscape:cy="35.575147"
+     inkscape:zoom="43.227012"
+     inkscape:cx="2.8107425"
+     inkscape:cy="31.866649"
      inkscape:window-width="2560"
      inkscape:window-height="1403"
      inkscape:window-x="0"
      inkscape:window-y="0"
      inkscape:window-maximized="1"
-     inkscape:current-layer="svg2" />
+     inkscape:current-layer="svg2"
+     showgrid="true">
+    <inkscape:grid
+       id="grid1"
+       units="px"
+       originx="0"
+       originy="0"
+       spacingx="10"
+       spacingy="10"
+       empcolor="#0099e5"
+       empopacity="0.30196078"
+       color="#0099e5"
+       opacity="0.14901961"
+       empspacing="5"
+       enabled="true"
+       visible="true" />
+  </sodipodi:namedview>
   <path
-     d="m 35,5.0550442 v 5.9013208 c 5.333331,0 5.333331,8.137747 0,8.137747 5.334513,-0.0012 5.334513,8.136547 0,8.137747 5.334513,-0.0012 5.334513,8.136547 0,8.137747 v 5.63815"
+     d="m 0,2 v 5.9013208 c 5.333331,0 5.333331,8.1377472 0,8.1377472 5.334513,-0.0012 5.334513,8.136547 0,8.137747 5.334513,-0.0012 5.334513,8.136547 0,8.137747 v 5.63815"
      fill="none"
      stroke="#222222"
      stroke-width="1.44335"
@@ -39,16 +55,16 @@
      style="stroke:#000000" />
   <circle
      id="port-n_plus"
-     cx="35"
-     cy="3.0550442"
+     cx="8.8817842e-16"
+     cy="0"
      fill="none"
      stroke="none"
      r="2"
      style="fill:none;stroke:#000000" />
   <circle
      id="port-n_minus"
-     cx="35"
-     cy="43.007755"
+     cx="8.8817842e-16"
+     cy="39.952709"
      fill="none"
      stroke="none"
      r="2"

@@ -8,10 +8,10 @@
   <defs
      id="defs1" />
   <circle
-     cx="35"
+     cx="0"
      cy="23"
      r="14"
-     fill="#fff"
+     fill="#ffffff"
      stroke="#222"
      stroke-width="1.6"
      id="circle1"
@@ -19,15 +19,16 @@
   <path
      id="line1"
      style="stroke:#000000;stroke-width:1.6"
-     d="M 35,14 V 28.655129" />
+     d="M 0,14 V 28.655129" />
   <polygon
-     points="35,32 31,26 39,26"
+     points="31,26 39,26 35,32 "
      fill="#222"
      id="polygon1"
-     style="stroke:none;fill:#000000" />
+     style="fill:#000000;stroke:none"
+     transform="translate(-35)" />
   <circle
      id="port-n_plus"
-     cx="35"
+     cx="0"
      cy="0"
      fill="none"
      stroke="none"
@@ -35,7 +36,7 @@
      style="stroke:#000000" />
   <circle
      id="port-n_minus"
-     cx="35"
+     cx="0"
      cy="46"
      fill="none"
      stroke="none"
@@ -43,10 +44,10 @@
      style="stroke:#000000" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="M 35,9 V 2"
+     d="M 0,9 V 2"
      id="path1" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="m 35,37 v 7"
+     d="m 0,37 v 7"
      id="path2" />
 </svg>

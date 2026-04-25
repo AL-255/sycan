@@ -7,58 +7,57 @@
    xmlns:svg="http://www.w3.org/2000/svg">
   <defs
      id="defs3" />
-  <ellipse
-     cx="32"
+  <circle
+     cx="30"
      cy="23"
-     rx="14"
-     ry="14"
      fill="#fff"
      stroke="#222"
      stroke-width="1.4"
      id="ellipse1"
-     style="stroke-width:1.5;stroke-dasharray:none;stroke:#000000;fill:none" />
+     style="fill:none;stroke:#000000;stroke-width:1.5;stroke-dasharray:none"
+     r="14" />
   <path
      id="line1"
      style="fill:none;stroke:#000000;stroke-width:1.4"
-     d="M 24,14 H 40" />
+     d="M 22,14 H 38" />
   <path
      id="line2"
      style="fill:none;stroke:#000000;stroke-width:1.4;stroke-dasharray:2.8, 2.8"
-     d="M 22,23 H 42" />
+     d="M 20,23 H 40" />
   <circle
      id="port-plate"
-     cx="32"
-     cy="0"
+     cx="30"
+     cy="-6.9388939e-18"
      fill="none"
      stroke="none"
      r="2"
      style="stroke:#000000" />
   <circle
      id="port-grid"
-     cx="7.8910794"
-     cy="23"
+     cx="0"
+     cy="20"
      fill="none"
      stroke="none"
      r="2"
      style="stroke:#000000" />
   <circle
      id="port-cathode"
-     cx="24"
+     cx="20"
      cy="46"
      fill="none"
      stroke="none"
      r="2"
      style="stroke:#000000" />
   <path
-     style="fill:none;stroke:#000000;stroke-miterlimit:4.1;stroke-width:1.5;stroke-dasharray:none"
-     d="M 24,44 V 30 h 16 v 2.042211"
+     style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1;stroke-dasharray:none"
+     d="m 20,44 v -2.869581 l 2,-1.393123 V 30 h 16 v 2.042211"
      id="path3" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.4;stroke-miterlimit:4.1;stroke-dasharray:none;stroke-dashoffset:0"
-     d="M 32,14 V 2"
+     d="M 30,14 V 2"
      id="path4" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.4;stroke-miterlimit:4.1;stroke-dasharray:none;stroke-dashoffset:0"
-     d="M 22,23 H 9.8910796"
+     d="M 20,23 H 10.842287 L 9.263769,20 H 2"
      id="path5" />
 </svg>

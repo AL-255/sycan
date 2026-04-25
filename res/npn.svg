@@ -27,14 +27,14 @@
   <path
      id="line1"
      style="stroke:#000000;stroke-width:1.5"
-     d="M 30,12 V 34" />
+     d="M 28,9 V 31" />
   <path
      id="line4"
      style="stroke:#000000;stroke-width:1.5"
-     d="M 20,23 H 30" />
+     d="m 22,20 h 6" />
   <circle
      id="port-collector"
-     cx="42"
+     cx="40"
      cy="0"
      fill="none"
      stroke="none"
@@ -42,30 +42,30 @@
      style="stroke:#000000" />
   <circle
      id="port-base"
-     cx="18"
-     cy="23"
+     cx="20"
+     cy="20"
      fill="none"
      stroke="none"
      r="2"
      style="stroke:#000000" />
   <circle
      id="port-emitter"
-     cx="42"
-     cy="46"
+     cx="40"
+     cy="40"
      fill="none"
      stroke="none"
      r="2"
      style="stroke:#000000" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1;stroke-dasharray:none"
-     d="M 30,19.110082 42,14.006883 V 2"
+     d="M 28,16.110082 40,11.006883 V 2"
      id="path4" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1;stroke-dasharray:none"
-     d="m 30,26.889918 12,5.103199 V 44"
+     d="m 28,23.889918 12,5.103199 V 38"
      id="path4-5" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1;stroke-miterlimit:4.1;stroke-dasharray:none;marker-end:url(#Triangle)"
-     d="m 30,26.889918 9.355808,3.978713"
+     d="m 28,23.889918 9.355808,3.978713"
      id="path5" />
 </svg>

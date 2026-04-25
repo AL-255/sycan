@@ -20,37 +20,52 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="10.119718"
-     inkscape:cx="45.011137"
-     inkscape:cy="19.812805"
-     inkscape:window-width="1280"
+     inkscape:zoom="11.271873"
+     inkscape:cx="-4.1696707"
+     inkscape:cy="16.98919"
+     inkscape:window-width="2560"
      inkscape:window-height="1403"
      inkscape:window-x="0"
      inkscape:window-y="0"
-     inkscape:window-maximized="0"
-     inkscape:current-layer="svg3" />
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg3"
+     showgrid="true">
+    <inkscape:grid
+       id="grid1"
+       units="px"
+       originx="0"
+       originy="0"
+       spacingx="10"
+       spacingy="10"
+       empcolor="#0099e5"
+       empopacity="0.30196078"
+       color="#0099e5"
+       opacity="0.14901961"
+       empspacing="5"
+       enabled="true"
+       visible="true" />
+  </sodipodi:namedview>
   <path
      id="polygon1"
-     transform="matrix(1,0,0,-1,0,40)"
-     style="fill:#ffffff;stroke:#222222;stroke-width:1.6"
-     d="M 25,28 35,8 45,28 Z" />
+     style="fill:#ffffff;stroke:#000000;stroke-width:1.6"
+     d="M -10,12 0,32 10,12 Z" />
   <path
      id="line1"
-     style="stroke:#222222;stroke-width:1.6"
-     d="M 25,32 H 45" />
+     style="stroke:#000000;stroke-width:1.6"
+     d="M -10,32 H 10" />
   <path
      id="line2"
-     style="stroke:#222222;stroke-width:1.4"
-     d="M 35,2 V 12"
+     style="stroke:#000000;stroke-width:1.4"
+     d="M 0,2 V 12"
      sodipodi:nodetypes="cc" />
   <path
      id="line3"
-     style="stroke:#222222;stroke-width:1.4"
-     d="M 35,32 V 44"
+     style="stroke:#000000;stroke-width:1.4"
+     d="M 0,32 V 44"
      sodipodi:nodetypes="cc" />
   <circle
      id="port-anode"
-     cx="35"
+     cx="0"
      cy="0"
      fill="none"
      stroke="none"
@@ -58,7 +73,7 @@
      r="2" />
   <circle
      id="port-cathode"
-     cx="35"
+     cx="0"
      cy="46"
      fill="none"
      stroke="none"

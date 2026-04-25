@@ -20,20 +20,36 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="7.9077111"
-     inkscape:cx="-2.4659474"
-     inkscape:cy="11.318066"
+     inkscape:zoom="5.5426292"
+     inkscape:cx="-7.4874213"
+     inkscape:cy="3.1573463"
      inkscape:window-width="2560"
      inkscape:window-height="1403"
      inkscape:window-x="0"
      inkscape:window-y="0"
      inkscape:window-maximized="1"
-     inkscape:current-layer="svg1" />
+     inkscape:current-layer="svg1"
+     showgrid="true">
+    <inkscape:grid
+       id="grid1"
+       units="px"
+       originx="0"
+       originy="0"
+       spacingx="10"
+       spacingy="10"
+       empcolor="#0099e5"
+       empopacity="0.30196078"
+       color="#0099e5"
+       opacity="0.14901961"
+       empspacing="5"
+       enabled="true"
+       visible="true" />
+  </sodipodi:namedview>
   <circle
-     cx="35"
+     cx="0"
      cy="23"
      r="14"
-     fill="#fff"
+     fill="#ffffff"
      stroke="#222"
      stroke-width="1.6"
      id="circle1"
@@ -41,16 +57,17 @@
   <path
      id="line1"
      style="stroke:#000000;stroke-width:1.6"
-     d="M 35,14 V 28.655129"
+     d="M 0,14 V 28.655129"
      sodipodi:nodetypes="cc" />
   <polygon
-     points="35,32 31,26 39,26"
+     points="31,26 39,26 35,32 "
      fill="#222"
      id="polygon1"
-     style="stroke:none;fill:#000000" />
+     style="fill:#000000;stroke:none"
+     transform="translate(-35)" />
   <circle
      id="port-n_plus"
-     cx="35"
+     cx="0"
      cy="0"
      fill="none"
      stroke="none"
@@ -58,7 +75,7 @@
      style="stroke:#000000" />
   <circle
      id="port-n_minus"
-     cx="35"
+     cx="0"
      cy="46"
      fill="none"
      stroke="none"
@@ -66,10 +83,10 @@
      style="stroke:#000000" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="M 35,9 V 2"
+     d="M 0,9 V 2"
      id="path1" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="m 35,37 v 7"
+     d="m 0,37 v 7"
      id="path2" />
 </svg>

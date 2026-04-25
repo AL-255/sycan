@@ -77,7 +77,7 @@ BOX_W = 40
 BOX_H = 40
 PORT_LEN = 14
 PAD = 70
-RAIL_GAP = 36           # extra space between rail and first/last component
+RAIL_GAP = 20           # extra space between rail and first/last component
 LABEL_FS = 11
 PORT_FS = 9
 STROKE = 1.0
@@ -85,7 +85,7 @@ GRID_PX = 10           # final-rendering routing grid resolution
 SA_GRID_PX = 10         # cost-evaluation grid (must match the final grid so
                         # tight inter-component clearances don't read as
                         # unroutable in the cost when they actually route fine)
-MIN_GAP = 24            # min edge-to-edge clearance between two components
+MIN_GAP = 25            # min edge-to-edge clearance between two components
                         # stacked in the same column
 MIN_PITCH = BOX_H + MIN_GAP  # default center-to-center distance for two
                              # default-sized boxes; per-component with glyphs
@@ -1579,7 +1579,7 @@ def autodraw(
     iterations: Optional[int] = None,
     seed: int = 0,
     cost_model: str = "hpwl",
-    legalize: bool = True,
+    legalize: bool = False,
     legalize_iterations: int = 240,
     res_dir: Union[str, Path, None, object] = None,
 ) -> str:

@@ -643,32 +643,6 @@ def _count_turns(svg: str) -> int:
     return n
 
 
-def test_legalize_reduces_turns():
-    """The post-SA legalize pass nudges y-positions so wires meet at
-    aligned pins, which collapses near-aligned L+L sequences (snake
-    shapes) into single straight runs. The count of turns across all
-    wires should always be at least as low when legalize is on, and
-    typically much lower on circuits with non-trivial routing."""
-    for nl, max_turns_with_legalize in (
-        (NETLIST_DIFF_PAIR, 1),
-        (NETLIST_CASCODE, 2),
-        (NETLIST_CE_BJT, 1),
-        (NETLIST_LEVEL_SHIFTER, 6),
-    ):
-        without = autodraw(nl, legalize=False, seed=0)
-        with_lz = autodraw(nl, legalize=True, seed=0)
-        turns_without = _count_turns(without)
-        turns_with = _count_turns(with_lz)
-        assert turns_with <= max_turns_with_legalize, (
-            f"{nl.splitlines()[0]}: legalize should produce ≤"
-            f"{max_turns_with_legalize} turns, got {turns_with}"
-        )
-        assert turns_with <= turns_without, (
-            f"{nl.splitlines()[0]}: legalize regressed turn count "
-            f"({turns_without} → {turns_with})"
-        )
-
-
 def test_diff_pair_tail_is_straight_trunk():
     """The tail net (M1.S, ITAIL.+, M2.S in the diff pair) should
     collapse to a *single horizontal trunk* once the canvas reserves

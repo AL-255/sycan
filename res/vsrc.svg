@@ -8,18 +8,18 @@
   <defs
      id="defs3" />
   <circle
-     cx="35"
+     cx="0"
      cy="23"
      r="14"
-     fill="#fff"
+     fill="#ffffff"
      stroke="#222"
      stroke-width="1.6"
      id="circle1"
      style="stroke:#000000" />
   <text
-     x="35"
+     x="0"
      y="20"
-     font-size="11"
+     font-size="11px"
      font-family="sans-serif"
      text-anchor="middle"
      fill="#222"
@@ -27,9 +27,9 @@
      id="text1"
      style="fill:#000000">+</text>
   <text
-     x="35"
+     x="0"
      y="34"
-     font-size="13"
+     font-size="13px"
      font-family="sans-serif"
      text-anchor="middle"
      fill="#222"
@@ -37,7 +37,7 @@
      style="fill:#000000">−</text>
   <circle
      id="port-n_plus"
-     cx="35"
+     cx="0"
      cy="0"
      fill="none"
      stroke="none"
@@ -45,7 +45,7 @@
      r="2" />
   <circle
      id="port-n_minus"
-     cx="35"
+     cx="0"
      cy="46"
      fill="none"
      stroke="none"
@@ -53,10 +53,10 @@
      r="2" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="M 35,2 V 9"
+     d="M 0,2 V 9"
      id="path1" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="m 35,37 v 7"
+     d="m 0,37 v 7"
      id="path2" />
 </svg>
