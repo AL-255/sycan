@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 70 46"
+   version="1.1"
+   id="svg3"
+   sodipodi:docname="ccsrc.svg"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs3" />
+  <sodipodi:namedview
+     id="namedview3"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="5.0975025"
+     inkscape:cx="16.576745"
+     inkscape:cy="-3.4330538"
+     inkscape:window-width="1280"
+     inkscape:window-height="1403"
+     inkscape:window-x="1280"
+     inkscape:window-y="0"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="svg3" />
+  <polygon
+     points="35,9 49,23 35,37 21,23"
+     fill="#fff"
+     stroke="#222"
+     stroke-width="1.6"
+     id="polygon1" />
+  <text
+     x="35"
+     y="20"
+     font-size="9"
+     font-family="sans-serif"
+     text-anchor="middle"
+     fill="#222"
+     font-weight="bold"
+     id="text1">+</text>
+  <text
+     x="35"
+     y="32"
+     font-size="11"
+     font-family="sans-serif"
+     text-anchor="middle"
+     fill="#222"
+     id="text2">−</text>
+  <circle
+     id="port-n_plus"
+     cx="35"
+     cy="0"
+     fill="none"
+     stroke="none"
+     style="stroke:#000000"
+     r="2" />
+  <circle
+     id="port-n_minus"
+     cx="35"
+     cy="46"
+     fill="none"
+     stroke="none"
+     style="stroke:#000000"
+     r="2" />
+  <circle
+     id="port-nc_plus"
+     cx="0"
+     cy="16"
+     fill="none"
+     stroke="none"
+     style="stroke:#000000"
+     r="2" />
+  <circle
+     id="port-nc_minus"
+     cx="0"
+     cy="30"
+     fill="none"
+     stroke="none"
+     style="stroke:#000000"
+     r="2" />
+  <circle
+     id="port-ctrl"
+     cx="0"
+     cy="23"
+     fill="none"
+     stroke="none"
+     r="2"
+     style="stroke:#000000" />
+  <path
+     style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
+     d="M 35,9 V 2"
+     id="path1" />
+  <path
+     style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
+     d="m 35,37 v 7"
+     id="path2" />
+  <path
+     style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
+     d="M 2,16 H 28"
+     id="path3" />
+  <path
+     style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
+     d="M 2,30 H 28"
+     id="path4" />
+</svg>

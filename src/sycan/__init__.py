@@ -32,6 +32,7 @@ from sycan.mna import (
     solve_dc,
     solve_impedance,
 )
+from sycan.autodraw import autodraw
 from sycan.schematic import draw
 from sycan.spice import parse, parse_file, parse_value
 
@@ -58,6 +59,7 @@ __all__ = [
     "VCCS",
     "VCVS",
     "VoltageSource",
+    "autodraw",
     "build_mna",
     "build_residuals",
     "draw",

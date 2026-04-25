@@ -44,8 +44,8 @@ htmlcov/
 Thumbs.db
 
 # Generated schematics
-tests/DC/diagrams/
-tests/AC/diagrams/
+tests/*/diagrams/
 
 # Plot artifacts
 *.png
+*.svg
