@@ -1,6 +1,6 @@
 import sympy as sp
 from sycan import Circuit, solve_impedance
-
+from sycan import autodraw
 # SRPP (Series-Regulated Push-Pull): two identical triodes stacked with
 # a sense resistor Rs between T2's cathode and T1's plate.
 K, mu, V_g_op, V_p_op, R_s, V_B = sp.symbols("K mu V_g_op V_p_op R_s V_B")
@@ -22,3 +22,5 @@ print()
 print("R_s -> infinity limit (== R_L optimal for 2nd-harmonic cancellation):")
 print(rf"$$\lim_{{R_s \to \infty}} Z_{{out}} = "
       f"{sp.latex(sp.simplify(sp.limit(Z_out, R_s, sp.oo)))}$$")
+
+autodraw(c, res_dir=None)

@@ -1,18 +1,20 @@
 import sympy as sp
 from sycan import parse
 from sycan.components.active import NMOS_subthreshold
+from sycan import autodraw
 
 # Classical 2-transistor sub-threshold voltage reference:
 # sub-threshold currents in two cross-connected NMOS devices with
 # different geometry / thresholds pin V(n1) to a CTAT-cancelling
 # log-of-ratio voltage.
 netlist = """2T reference
-V1 vdd 0 VDD
-M1 vdd 0 n1 NMOS_subthreshold mu_n1 Cox1 W1 L1 V_TH1 m1 V_T
+V1 VDD 0 VDD
+M1 VDD 0 n1 NMOS_subthreshold mu_n1 Cox1 W1 L1 V_TH1 m1 V_T
 M2 n1 n1 0 NMOS_subthreshold mu_n2 Cox2 W2 L2 V_TH2 m2 V_T
 .end
 """
 circuit = parse(netlist)
+autodraw(netlist, res_dir=None)
 mosfets = [c for c in circuit.components if isinstance(c, NMOS_subthreshold)]
 print(f"Parsed {len(circuit.components)} components, "
       f"including {len(mosfets)} sub-threshold NMOS devices.")

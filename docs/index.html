@@ -26,7 +26,18 @@
     border: 1px solid #bbb; border-radius: 6px;
     min-height: 160px; background: #f6f6f6; white-space: pre-wrap;
   }
+  #schematic {
+    width: 100%; box-sizing: border-box; min-height: 220px;
+    border: 1px solid #bbb; border-radius: 6px; padding: 12px;
+    background: #fff; overflow: auto;
+  }
+  #schematic.empty {
+    display: flex; align-items: center; justify-content: center;
+    color: #666; font-style: italic;
+  }
+  #schematic svg { display: block; width: 100%; height: auto; }
   @media (prefers-color-scheme: dark) { #output { background: #1a1a1a; } }
+  @media (prefers-color-scheme: dark) { #schematic.empty { color: #aaa; } }
 
   /* CodeMirror frame matches the other UI elements. */
   .CodeMirror {
@@ -63,9 +74,10 @@
 </head>
 <body>
 
-<h1>sycan REPL</h1>
+<h1>SYCAN REPL Demo</h1>
 <p class="sub">Symbolic circuit analysis (DC · AC · impedance · Monte-Carlo) running
-entirely in your browser via Pyodide. <a href="https://github.com/AL-255/sycan">Source on GitHub</a>.</p>
+entirely in your browser via Pyodide, with inline schematic rendering via
+<code>autodraw</code>. <a href="https://github.com/AL-255/sycan">Source on GitHub</a>.</p>
 
 <div id="status">Loading Pyodide…</div>
 
@@ -82,6 +94,9 @@ entirely in your browser via Pyodide. <a href="https://github.com/AL-255/sycan">
 
 <h3>Output</h3>
 <div id="output"></div>
+
+<h3>Schematic</h3>
+<div id="schematic"></div>
 
 <script>
   // MathJax v3: render any $$...$$ / \[...\] block (and $...$ / \(...\)
@@ -111,11 +126,40 @@ let py = null, cm = null;
 const status     = document.getElementById('status');
 const editorEl   = document.getElementById('editor');
 const output     = document.getElementById('output');
+const schematic  = document.getElementById('schematic');
 const runBtn     = document.getElementById('run');
 const clearBtn   = document.getElementById('clear');
 const examplesEl = document.getElementById('examples');
 
 function write(msg) { output.textContent += msg; }
+
+function resetSchematic(message = 'Run the Autodraw example to render a schematic here.') {
+  schematic.replaceChildren();
+  schematic.textContent = message;
+  schematic.classList.add('empty');
+}
+
+function isSvgDocument(text) {
+  if (typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  return trimmed.startsWith('<svg') && trimmed.endsWith('</svg>');
+}
+
+function renderSvg(svgText) {
+  const parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+  if (parsed.querySelector('parsererror')) {
+    throw new Error('Could not parse SVG returned by Python.');
+  }
+  const svg = parsed.documentElement;
+  if (!svg || svg.tagName.toLowerCase() !== 'svg') {
+    throw new Error('Python returned markup, but it was not an <svg> document.');
+  }
+  const rendered = document.importNode(svg, true);
+  rendered.removeAttribute('width');
+  rendered.removeAttribute('height');
+  schematic.replaceChildren(rendered);
+  schematic.classList.remove('empty');
+}
 
 async function loadExample(file) {
   const resp = await fetch(`./examples/${file}`);
@@ -123,6 +167,7 @@ async function loadExample(file) {
   const code = await resp.text();
   cm.setValue(code);
   output.textContent = '';
+  resetSchematic();
 }
 
 async function buildExamples() {
@@ -164,6 +209,7 @@ function initEditor() {
 
 async function boot() {
   initEditor();
+  resetSchematic();
   // Examples and Pyodide load in parallel; we only need both done before
   // enabling Run.
   const examplesP = buildExamples().catch((e) => {
@@ -172,10 +218,10 @@ async function boot() {
   });
   py = await loadPyodide();
   status.textContent = 'Installing sympy + sycan…';
-  await py.loadPackage(['sympy', 'micropip']);
+await py.loadPackage(['sympy', 'micropip']);
   await py.runPythonAsync(`
 import micropip
-await micropip.install('./sycan-0.1.1-py3-none-any.whl?v=1')
+await micropip.install('./sycan-0.1.1-py3-none-any.whl?v=2')
 import sycan
 print(f'sycan {sycan.__name__} ready')
   `);
@@ -196,12 +242,17 @@ async function typesetMath() {
 async function run() {
   if (runBtn.disabled || !py) return;
   output.textContent = '';
+  resetSchematic();
   py.setStdout({ batched: (s) => write(s + '\n') });
   py.setStderr({ batched: (s) => write(s + '\n') });
   runBtn.disabled = true;
   try {
     const result = await py.runPythonAsync(cm.getValue());
-    if (result !== undefined && result !== null) write(String(result) + '\n');
+    if (isSvgDocument(result)) {
+      renderSvg(result);
+    } else if (result !== undefined && result !== null) {
+      write(String(result) + '\n');
+    }
   } catch (e) {
     write(String(e));
   } finally {
@@ -211,7 +262,10 @@ async function run() {
 }
 
 runBtn.addEventListener('click', run);
-clearBtn.addEventListener('click', () => { output.textContent = ''; });
+clearBtn.addEventListener('click', () => {
+  output.textContent = '';
+  resetSchematic();
+});
 
 boot().catch((e) => { status.textContent = 'Failed to load Pyodide: ' + e; });
 </script>

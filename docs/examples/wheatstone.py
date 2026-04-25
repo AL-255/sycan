@@ -1,5 +1,6 @@
 import sympy as sp
 from sycan import parse, solve_dc
+from sycan import autodraw
 
 netlist = """wheatstone bridge
 V1 a 0 Vs
@@ -17,3 +18,5 @@ diff = sp.simplify(V_b - V_c)
 print(f"$$V(b) - V(c) = {sp.latex(diff)}$$")
 print()
 print("Balance condition: R1*R4 == R2*R3")
+
+autodraw(netlist, res_dir=None)

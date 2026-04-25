@@ -3,6 +3,8 @@
 - `index.html` — in-browser sycan REPL (Pyodide + CodeMirror + MathJax),
   live at <https://al-255.github.io/sycan/>.
 - `examples/` — preset example scripts loaded by the REPL on demand.
+  Python examples that evaluate to an SVG string render inline in the
+  page's schematic preview; `examples/autodraw.py` demonstrates this.
   - `manifest.json` — list of `{label, file}` entries; the page builds one
     button per entry. To add an example: drop a `.py` file in this folder
     and append a line to `manifest.json`.
