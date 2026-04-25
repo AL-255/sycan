@@ -28,7 +28,44 @@ Closed-form expectations:
 """
 import sympy as sp
 
-from sycan import Circuit, solve_ac, solve_dc, solve_impedance
+from sycan import parse, solve_ac, solve_dc, solve_impedance
+
+_DC = """\
+Triode DC test
+Vg grid 0 V_g
+Vp plate 0 V_p
+X1 plate grid 0 TRIODE K mu
+.end
+"""
+
+_AC_GAIN = """\
+Triode AC gain test
+Vin grid 0 AC v_in
+Vb hv 0 DC V_B
+RL hv plate R_L
+X1 plate grid 0 TRIODE K mu V_g_op V_p_op
+.end
+"""
+
+_ZIN = """\
+Triode Zin test
+P_in grid 0 input
+P_out plate 0 output
+Vb hv 0 DC V_B
+RL hv plate R_L
+X1 plate grid 0 TRIODE K mu V_g_op V_p_op C_gk
+.end
+"""
+
+_ZOUT = """\
+Triode Zout test
+P_in grid 0 input
+P_out plate 0 output
+Vb hv 0 DC V_B
+RL hv plate R_L
+X1 plate grid 0 TRIODE K mu V_g_op V_p_op
+.end
+"""
 
 
 def _g_m_g_p(K, mu, V_g_op, V_p_op):
@@ -42,11 +79,7 @@ def _g_m_g_p(K, mu, V_g_op, V_p_op):
 
 def test_triode_dc_plate_current():
     K, mu, V_g, V_p = sp.symbols("K mu V_g V_p")
-    c = Circuit()
-    c.add_vsource("Vg", "grid", "0", V_g)
-    c.add_vsource("Vp", "plate", "0", V_p)
-    c.add_triode("T1", plate="plate", grid="grid", cathode="0", K=K, mu=mu)
-    sol = solve_dc(c)
+    sol = solve_dc(parse(_DC))
     I_p = K * (mu * V_g + V_p) ** sp.Rational(3, 2)
     assert sp.simplify(sol[sp.Symbol("I(Vp)")] + I_p) == 0
 
@@ -55,13 +88,7 @@ def test_triode_ac_voltage_gain():
     K, mu, R_L, V_B, V_g_op, V_p_op, v_in = sp.symbols(
         "K mu R_L V_B V_g_op V_p_op v_in"
     )
-    c = Circuit()
-    c.add_vsource("Vin", "grid", "0", value=0, ac_value=v_in)
-    c.add_vsource("Vb", "hv", "0", value=V_B, ac_value=0)
-    c.add_resistor("RL", "hv", "plate", R_L)
-    c.add_triode("T1", plate="plate", grid="grid", cathode="0",
-                 K=K, mu=mu, V_g_op=V_g_op, V_p_op=V_p_op)
-    sol = solve_ac(c)
+    sol = solve_ac(parse(_AC_GAIN))
 
     g_m, g_p = _g_m_g_p(K, mu, V_g_op, V_p_op)
     expected = -g_m * v_in * R_L / (1 + g_p * R_L)
@@ -76,15 +103,7 @@ def test_triode_input_impedance():
     K, mu, R_L, V_B, V_g_op, V_p_op, C_gk = sp.symbols(
         "K mu R_L V_B V_g_op V_p_op C_gk"
     )
-    c = Circuit()
-    c.add_port("P_in",  "grid",  "0", "input")
-    c.add_port("P_out", "plate", "0", "output")
-    c.add_vsource("Vb", "hv", "0", value=V_B, ac_value=0)
-    c.add_resistor("RL", "hv", "plate", R_L)
-    c.add_triode("T1", plate="plate", grid="grid", cathode="0",
-                 K=K, mu=mu, C_gk=C_gk,
-                 V_g_op=V_g_op, V_p_op=V_p_op)
-
+    c = parse(_ZIN)
     Z_in = solve_impedance(c, "P_in", termination="auto")
     s = sp.Symbol("s")
     expected = 1 / (s * C_gk)
@@ -95,14 +114,7 @@ def test_triode_output_impedance():
     K, mu, R_L, V_B, V_g_op, V_p_op = sp.symbols(
         "K mu R_L V_B V_g_op V_p_op"
     )
-    c = Circuit()
-    c.add_port("P_in",  "grid",  "0", "input")
-    c.add_port("P_out", "plate", "0", "output")
-    c.add_vsource("Vb", "hv", "0", value=V_B, ac_value=0)
-    c.add_resistor("RL", "hv", "plate", R_L)
-    c.add_triode("T1", plate="plate", grid="grid", cathode="0",
-                 K=K, mu=mu, V_g_op=V_g_op, V_p_op=V_p_op)
-
+    c = parse(_ZOUT)
     Z_out = solve_impedance(c, "P_out", termination="auto")
     _, g_p = _g_m_g_p(K, mu, V_g_op, V_p_op)
     expected = R_L / (1 + g_p * R_L)

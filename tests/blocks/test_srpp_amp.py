@@ -48,28 +48,36 @@ which is exactly the condition the test below verifies symbolically.
 """
 import sympy as sp
 
-from sycan import Circuit, solve_impedance
+from sycan import parse, solve_impedance
+
+_SRPP = """\
+SRPP amplifier
+P_in in 0 input
+P_out out 0 output
+Vb hv 0 DC V_B
+X1 n_mid in 0 TRIODE K mu V_g_op V_p_op
+X2 hv n_mid out TRIODE K mu V_g_op V_p_op
+Rs out n_mid R_s
+.end
+"""
+
+_SRPP_LOADED = """\
+SRPP amplifier with load
+P_in in 0 input
+P_out out 0 output
+Vb hv 0 DC V_B
+X1 n_mid in 0 TRIODE K mu V_g_op V_p_op
+X2 hv n_mid out TRIODE K mu V_g_op V_p_op
+Rs out n_mid R_s
+RL out 0 R_L
+.end
+"""
 
 
 def _r_p(K, mu, V_g_op, V_p_op):
     """Small-signal plate resistance at (V_g_op, V_p_op)."""
     g_p = sp.Rational(3, 2) * K * (mu * V_g_op + V_p_op) ** sp.Rational(1, 2)
     return 1 / g_p
-
-
-def _build_srpp(K, mu, V_g_op, V_p_op, R_s, V_B, load=None):
-    c = Circuit()
-    c.add_port("P_in",  "in",  "0", "input")
-    c.add_port("P_out", "out", "0", "output")
-    c.add_vsource("Vb", "hv", "0", value=V_B, ac_value=0)
-    c.add_triode("T1", plate="n_mid", grid="in",    cathode="0",
-                 K=K, mu=mu, V_g_op=V_g_op, V_p_op=V_p_op)
-    c.add_triode("T2", plate="hv",    grid="n_mid", cathode="out",
-                 K=K, mu=mu, V_g_op=V_g_op, V_p_op=V_p_op)
-    c.add_resistor("Rs", "out", "n_mid", R_s)
-    if load is not None:
-        c.add_resistor("RL", "out", "0", load)
-    return c
 
 
 # ---------------------------------------------------------------------------
@@ -80,8 +88,7 @@ def test_srpp_zout_closed_form():
     K, mu, V_g_op, V_p_op, R_s, V_B = sp.symbols(
         "K mu V_g_op V_p_op R_s V_B"
     )
-    c = _build_srpp(K, mu, V_g_op, V_p_op, R_s, V_B)
-    Z_out = solve_impedance(c, "P_out", termination="auto")
+    Z_out = solve_impedance(parse(_SRPP), "P_out", termination="auto")
 
     r_p = _r_p(K, mu, V_g_op, V_p_op)
     expected = r_p * (R_s + r_p) / (R_s * (mu + 1) + 2 * r_p)
@@ -95,8 +102,7 @@ def test_srpp_optimal_load_for_distortion_cancellation():
     K, mu, V_g_op, V_p_op, R_s, V_B = sp.symbols(
         "K mu V_g_op V_p_op R_s V_B"
     )
-    c = _build_srpp(K, mu, V_g_op, V_p_op, R_s, V_B)
-    Z_out = solve_impedance(c, "P_out", termination="auto")
+    Z_out = solve_impedance(parse(_SRPP), "P_out", termination="auto")
 
     Z_out_limit = sp.limit(Z_out, R_s, sp.oo)
     r_p = _r_p(K, mu, V_g_op, V_p_op)
