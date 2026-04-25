@@ -13,7 +13,6 @@ c.add_nmos_l1("M1", "drain", "gate", "0",
               mu_n=mu_n, Cox=Cox, W=W, L=L, V_TH=V_TH, lam=lam,
               C_gs=C_gs, V_GS_op=V_GS_op, V_DS_op=V_DS_op)
 
-autodraw(c, res_dir=None)
 Z_in  = sp.simplify(solve_impedance(c, "P_in",  termination="auto"))
 Z_out = sp.simplify(solve_impedance(c, "P_out", termination="auto"))
 print("Z_in  = 1/(s C_gs):")
@@ -21,3 +20,5 @@ print(f"$$Z_{{in}} = {sp.latex(Z_in)}$$")
 print()
 print("Z_out = R_L || r_o:")
 print(f"$$Z_{{out}} = {sp.latex(Z_out)}$$")
+
+autodraw(c, res_dir=None)

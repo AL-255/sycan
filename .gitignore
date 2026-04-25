@@ -49,3 +49,5 @@ tests/*/diagrams/
 # Plot artifacts
 *.png
 *.svg
+
+.codex

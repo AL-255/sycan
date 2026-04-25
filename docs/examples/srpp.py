@@ -8,10 +8,10 @@ K, mu, V_g_op, V_p_op, R_s, V_B = sp.symbols("K mu V_g_op V_p_op R_s V_B")
 c = Circuit()
 c.add_port("P_in",  "in",  "0", "input")
 c.add_port("P_out", "out", "0", "output")
-c.add_vsource("Vb", "hv", "0", value=V_B, ac_value=0)
+c.add_vsource("Vb", "VDD", "0", value=V_B, ac_value=0)
 c.add_triode("T1", plate="n_mid", grid="in",    cathode="0",
              K=K, mu=mu, V_g_op=V_g_op, V_p_op=V_p_op)
-c.add_triode("T2", plate="hv",    grid="n_mid", cathode="out",
+c.add_triode("T2", plate="VDD",    grid="n_mid", cathode="out",
              K=K, mu=mu, V_g_op=V_g_op, V_p_op=V_p_op)
 c.add_resistor("Rs", "out", "n_mid", R_s)
 

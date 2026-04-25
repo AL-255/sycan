@@ -14,7 +14,6 @@ M2 n1 n1 0 NMOS_subthreshold mu_n2 Cox2 W2 L2 V_TH2 m2 V_T
 .end
 """
 circuit = parse(netlist)
-autodraw(netlist, res_dir=None)
 mosfets = [c for c in circuit.components if isinstance(c, NMOS_subthreshold)]
 print(f"Parsed {len(circuit.components)} components, "
       f"including {len(mosfets)} sub-threshold NMOS devices.")
@@ -44,3 +43,6 @@ dVdT = sp.simplify(sp.diff(V_n1_of_T, T))
 print()
 print("Setting dV(n_1)/dT = 0 gives the compensation condition:")
 print(rf"$$\frac{{dV(n_1)}}{{dT}} = {sp.latex(dVdT)} = 0$$")
+
+
+autodraw(netlist, res_dir=None)
