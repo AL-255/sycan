@@ -1,8 +1,8 @@
 # SYCAN
 
-[![CI](https://github.com/AL-255/sycan/actions/workflows/ci.yml/badge.svg)](https://github.com/AL-255/sycan/actions/workflows/ci.yml) [![Pages](https://github.com/AL-255/sycan/actions/workflows/pages/pages-build-deployment/badge.svg)](https://al-255.github.io/sycan/)
+![SYCAN Logo](res/sycan.png)
 
-SYmbolic Circuit ANalysis library
+[![CI](https://github.com/AL-255/sycan/actions/workflows/ci.yml/badge.svg)](https://github.com/AL-255/sycan/actions/workflows/ci.yml) [![Pages](https://github.com/AL-255/sycan/actions/workflows/pages/pages-build-deployment/badge.svg)](https://al-255.github.io/sycan/)
 
 ## Credits
 
