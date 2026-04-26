@@ -1927,29 +1927,82 @@ def autodraw(
         if len(terms) < 1:
             continue
 
-        if net_key in canonical_top:
+        if net_key in canonical_top or net_key in canonical_bot:
+            on_top = net_key in canonical_top
+            rail_y = rail_top_y if on_top else rail_bot_y
+            rail_cell_y = int(round(rail_y / GRID_PX))
+            rail_targets = {
+                (xx, rail_cell_y) for xx in range(grid_w)
+                if 0 <= rail_cell_y < grid_h
+                and not rg.blocked[xx][rail_cell_y]
+            }
             for p, port in terms:
                 px, py = p.pin_pos[port]
-                routed_polylines.append((f"net-{net_key}",
-                                         [(px, rail_top_y), (px, py)]))
-                # Mark trunk cells as used so future routes see congestion.
-                cx0, cy0 = to_cell(px, rail_top_y)
-                cx1, cy1 = to_cell(px, py)
-                for yy in range(min(cy0, cy1), max(cy0, cy1) + 1):
-                    if 0 <= cx0 < grid_w and 0 <= yy < grid_h:
-                        rg.used[cx0][yy] += 1
-            continue
+                side = p.pin_side.get(port)
+                # Top/bot side pins clear their own bbox by exiting along
+                # the spine, so a single straight stub is fine. A pin on
+                # a *lateral* side (e.g. an NMOS gate at the box's left
+                # edge) sits *on* its own bbox column — a straight stub
+                # would draw along the bbox edge and visually clip the
+                # body. Route those via BFS so they take an L-shape
+                # around the bbox.
+                if side in ("left", "right"):
+                    src_cell = to_cell(px, py)
+                    rg.allow_pin.add(src_cell)
+                    path = rg.lee(src_cell, rail_targets)
+                else:
+                    path = None
 
-        if net_key in canonical_bot:
-            for p, port in terms:
-                px, py = p.pin_pos[port]
-                routed_polylines.append((f"net-{net_key}",
-                                         [(px, py), (px, rail_bot_y)]))
-                cx0, cy0 = to_cell(px, py)
-                cx1, cy1 = to_cell(px, rail_bot_y)
-                for yy in range(min(cy0, cy1), max(cy0, cy1) + 1):
-                    if 0 <= cx0 < grid_w and 0 <= yy < grid_h:
-                        rg.used[cx0][yy] += 1
+                if path:
+                    rg.mark_used(path)
+                    cell_corners = _polyline_from_path(path)
+                    snapped = [
+                        (cx_ * GRID_PX, cy_ * GRID_PX)
+                        for cx_, cy_ in cell_corners
+                    ]
+                    if len(snapped) >= 2:
+                        first_horiz = snapped[0][1] == snapped[1][1]
+                        bridge = (
+                            (px, snapped[0][1]) if first_horiz
+                            else (snapped[0][0], py)
+                        )
+                        poly = [(px, py), bridge] + snapped[1:]
+                    else:
+                        poly = [(px, py), snapped[0] if snapped else (px, rail_y)]
+                    # Pin the rail-end exactly to ``rail_y`` (BFS lands
+                    # on the trunk row but at grid quantum).
+                    last_x, _ = poly[-1]
+                    poly[-1] = (last_x, rail_y)
+                    # Drop adjacent duplicates (the bridge can coincide
+                    # with the pin when the BFS first cell is already
+                    # on-axis with the pin) and collinear corners.
+                    poly = [
+                        pt for i, pt in enumerate(poly)
+                        if i == 0 or pt != poly[i - 1]
+                    ]
+                    j = 1
+                    while j < len(poly) - 1:
+                        a, b, c = poly[j - 1], poly[j], poly[j + 1]
+                        if (a[0] == b[0] == c[0]) or (a[1] == b[1] == c[1]):
+                            poly.pop(j)
+                        else:
+                            j += 1
+                    if on_top:
+                        poly.reverse()
+                else:
+                    # Spine-axis pin (or BFS unreachable): straight stub.
+                    if on_top:
+                        poly = [(px, rail_y), (px, py)]
+                    else:
+                        poly = [(px, py), (px, rail_y)]
+                    cx0, cy0 = to_cell(px, py)
+                    for yy in range(
+                        min(cy0, rail_cell_y),
+                        max(cy0, rail_cell_y) + 1,
+                    ):
+                        if 0 <= cx0 < grid_w and 0 <= yy < grid_h:
+                            rg.used[cx0][yy] += 1
+                routed_polylines.append((f"net-{net_key}", poly))
             continue
 
         if len(terms) == 1:
