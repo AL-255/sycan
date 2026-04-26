@@ -589,10 +589,16 @@ def test_2t_vref():
     _save("15_2t_vref", svg)
     _common_assertions(svg, {"V1", "M1", "M2"})
 
-    comps = {name: x for _kind, name, x, _y, _w, _h in _components(svg)}
-    # M1 and M2 form a vertical stack on the n1 spine, so they share a
-    # column.
-    assert abs(comps["M1"] - comps["M2"]) < 5
+    # M1 and M2 form a vertical stack on the n1 spine, so their *spine
+    # pin* x's must match — not their bbox-left x's. Asymmetric glyphs
+    # (gate as a side port) shift the bbox relative to the column when
+    # the SA mirrors them; what stays fixed is the spine pin sitting on
+    # the column centre, and that's what makes the n1 wire straight.
+    pads = _pads(svg)
+    by_name = {name: comp for comp in _components(svg)
+               for _kind, name, *_ in [comp]}
+    assert abs(_column_x_of(by_name["M1"], pads)
+               - _column_x_of(by_name["M2"], pads)) < 5
 
 
 def test_2t_vref_no_wire_crosses_components_across_seeds():

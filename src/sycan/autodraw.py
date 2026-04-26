@@ -1132,8 +1132,10 @@ def _route_total_wirelength(
     rail_bot_y: float,
     canonical_top: set[str],
     grid_px: int = SA_GRID_PX,
-    crossing_weight: float = 22.0,
+    crossing_weight: float = 60.0,
     unroutable_penalty: float = 4000.0,
+    clearance: bool = False,
+    cross_coupled_xnets: Optional[Sequence[tuple[str, str, int, int]]] = None,
 ) -> float:
     """Compute the actual rectilinear-routed wirelength of the layout.
 
@@ -1142,6 +1144,23 @@ def _route_total_wirelength(
     that path, repeat. Component bounding boxes block the grid (pin
     cells stay open). *Rail* nets pay the sum of vertical stub lengths
     from each pin up to the rail trunk.
+
+    When ``clearance=True`` the search becomes Dijkstra with a per-cell
+    penalty band (cells adjacent to a blocked bbox cost +2; two-away
+    cells cost +1). This mirrors :class:`_RouteGrid` and surfaces the
+    U-shape detour that occurs when two coplanar pins both sit on a
+    bbox edge — a flipped or mirrored component often hides such a
+    loop, and the plain BFS variant is loop-blind.
+
+    ``cross_coupled_xnets`` lists ``(net_w1, net_w2, a_id, b_id)`` for
+    every cross-coupled FET pair the X-router will rewrite into a
+    single diagonal (see :mod:`autodraw_hacks`). Those two coupling
+    nets are *excluded* from the Steiner-tree loop and replaced with a
+    fixed cost ``HPWL(arm_1) + HPWL(arm_2) + crossing_weight·grid_px``.
+    The Steiner-grow accounting penalises shared-row coupling-net
+    overlap with a ghost crossing per cell, so without this hook the
+    SA's "real" cost actively biases away from the row-aligned
+    placement the X-router needs.
     """
     from collections import deque
 
@@ -1170,12 +1189,74 @@ def _route_total_wirelength(
         blocked[cell_idx(cx, cy)] = 0
         pin_cells[key] = (cx, cy)
 
+    # Per-cell clearance penalty (only used when clearance=True).
+    # Mirrors _RouteGrid.finalize: distance-1 → 2, distance-2 → 1.
+    clr = bytearray(grid_w * grid_h)
+    if clearance:
+        from collections import deque as _deque
+        dist = bytearray(grid_w * grid_h)
+        for i in range(len(dist)):
+            dist[i] = 3
+        cq: "_deque[tuple[int, int]]" = _deque()
+        for x in range(grid_w):
+            base = x * grid_h
+            for y in range(grid_h):
+                if blocked[base + y]:
+                    dist[base + y] = 0
+                    cq.append((x, y))
+        while cq:
+            x, y = cq.popleft()
+            d = dist[cell_idx(x, y)]
+            if d >= 2:
+                continue
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < grid_w and 0 <= ny < grid_h):
+                    continue
+                if dist[cell_idx(nx, ny)] > d + 1:
+                    dist[cell_idx(nx, ny)] = d + 1
+                    cq.append((nx, ny))
+        for i in range(len(dist)):
+            if blocked[i]:
+                clr[i] = 0
+            elif dist[i] == 1:
+                clr[i] = 2
+            elif dist[i] == 2:
+                clr[i] = 1
+            else:
+                clr[i] = 0
+
     total = 0.0
     crossings = 0
     cell_owner = bytearray(grid_w * grid_h)
 
-    # ---- Mid nets via Steiner-tree BFS ----
+    # ---- Cross-coupled FET pairs: replace their two coupling nets
+    # ----  with one fixed "X" cost and skip them in the Steiner loop.
+    x_net_keys: set[str] = set()
+    if cross_coupled_xnets:
+        for net_w1, net_w2, a_id, b_id in cross_coupled_xnets:
+            x_net_keys.add(net_w1)
+            x_net_keys.add(net_w2)
+            try:
+                a_g = pins[(a_id, "gate")]
+                a_d = pins[(a_id, "drain")]
+                b_g = pins[(b_id, "gate")]
+                b_d = pins[(b_id, "drain")]
+            except KeyError:
+                continue
+            # Two arms, Manhattan length each (HPWL of the two endpoints).
+            # The router will redraw them as diagonals of similar length;
+            # using HPWL keeps the cost rational/scale-comparable to the
+            # other Steiner contributions in this function.
+            arm1 = abs(a_g[0] - b_d[0]) + abs(a_g[1] - b_d[1])
+            arm2 = abs(b_g[0] - a_d[0]) + abs(b_g[1] - a_d[1])
+            total += (arm1 + arm2) / grid_px       # divided out below
+            crossings += 1                          # the single X crossing
+
+    # ---- Mid nets via Steiner-tree search (BFS or Dijkstra) ----
     for net_id, (_net_key, terms) in enumerate(mid_nets.items(), start=1):
+        if _net_key in x_net_keys:
+            continue
         owner_id = (net_id % 254) + 1
         first_cell = pin_cells[terms[0]]
         tree_cells: set[tuple[int, int]] = {first_cell}
@@ -1186,27 +1267,56 @@ def _route_total_wirelength(
 
         while remaining_targets:
             parent: dict[tuple[int, int], Optional[tuple[int, int]]] = {}
-            q: deque[tuple[int, int]] = deque()
-            for c in tree_cells:
-                parent[c] = None
-                q.append(c)
-
             hit: Optional[tuple[int, int]] = None
-            while q and hit is None:
-                x, y = q.popleft()
-                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                    nx, ny = x + dx, y + dy
-                    if not (0 <= nx < grid_w and 0 <= ny < grid_h):
+
+            if not clearance:
+                q: deque[tuple[int, int]] = deque()
+                for c in tree_cells:
+                    parent[c] = None
+                    q.append(c)
+                while q and hit is None:
+                    x, y = q.popleft()
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        nx, ny = x + dx, y + dy
+                        if not (0 <= nx < grid_w and 0 <= ny < grid_h):
+                            continue
+                        if (nx, ny) in parent:
+                            continue
+                        if blocked[cell_idx(nx, ny)] and (nx, ny) not in remaining_targets:
+                            continue
+                        parent[(nx, ny)] = (x, y)
+                        if (nx, ny) in remaining_targets:
+                            hit = (nx, ny)
+                            break
+                        q.append((nx, ny))
+            else:
+                from heapq import heappush, heappop
+                cell_dist: dict[tuple[int, int], int] = {}
+                heap: list[tuple[int, int, int]] = []
+                for c in tree_cells:
+                    parent[c] = None
+                    cell_dist[c] = 0
+                    heappush(heap, (0, c[0], c[1]))
+                while heap and hit is None:
+                    cost, x, y = heappop(heap)
+                    if cost > cell_dist.get((x, y), cost):
                         continue
-                    if (nx, ny) in parent:
-                        continue
-                    if blocked[cell_idx(nx, ny)] and (nx, ny) not in remaining_targets:
-                        continue
-                    parent[(nx, ny)] = (x, y)
-                    if (nx, ny) in remaining_targets:
-                        hit = (nx, ny)
+                    if (x, y) in remaining_targets and (x, y) not in tree_cells:
+                        hit = (x, y)
                         break
-                    q.append((nx, ny))
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        nx, ny = x + dx, y + dy
+                        if not (0 <= nx < grid_w and 0 <= ny < grid_h):
+                            continue
+                        ci = cell_idx(nx, ny)
+                        if blocked[ci] and (nx, ny) not in remaining_targets:
+                            continue
+                        step = 1 + clr[ci]
+                        ncost = cost + step
+                        if ncost < cell_dist.get((nx, ny), 10 ** 9):
+                            cell_dist[(nx, ny)] = ncost
+                            parent[(nx, ny)] = (x, y)
+                            heappush(heap, (ncost, nx, ny))
 
             if hit is None:
                 total += unroutable_penalty
@@ -1398,6 +1508,7 @@ def _sa_optimize(
     seed: int = 0,
     cost_model: str = "hpwl",
     junctions: Optional[Sequence[dict]] = None,
+    reverse_isolated_branches: bool = False,
 ) -> tuple[
     list[int],
     dict[int, float],
@@ -1473,6 +1584,17 @@ def _sa_optimize(
     ]
     mirrorable = [d for d in descs if d.side_ports]
 
+    # Pre-detect cross-coupled FET pairs once. The "real" cost function
+    # uses this to substitute a flat X-cost for the two coupling nets
+    # so the SA stops penalising the row-aligned placement the X-router
+    # actually wants. HPWL ignores it (no pathology to fix there).
+    from sycan.autodraw_hacks import detect_cross_coupled_descs
+    x_pairs = detect_cross_coupled_descs(descs, uf)
+    x_pairs_for_cost = [
+        (net_w1, net_w2, id(a), id(b))
+        for a, b, net_w1, net_w2 in x_pairs
+    ]
+
     cost_fn = _route_total_hpwl if cost_model == "hpwl" else _route_total_wirelength
 
     def evaluate(co, yp, mi, fl):
@@ -1480,9 +1602,13 @@ def _sa_optimize(
         pins, boxes = _pin_positions_for_state(
             descs, branch_of, co, centers, yp, mi, fl,
         )
+        kw: dict = {}
+        if cost_model != "hpwl":
+            kw["cross_coupled_xnets"] = x_pairs_for_cost
         return cost_fn(
             pins, boxes, mid_nets, rail_nets,
             total_w, canvas_h, rail_top_y, rail_bot_y, canonical_top,
+            **kw,
         )
 
     cost = evaluate(col_order, y_pos, mirrors, flips)
@@ -1652,6 +1778,81 @@ def _sa_optimize(
                 improved += 1
         T *= decay
 
+    # ---- Greedy flip / branch-reversal pass --------------------------
+    # SA's stochastic flip moves can miss a deterministic improvement —
+    # the per-iteration probability is low (0.05) and the HPWL cost is
+    # loop-blind (it doesn't see U-shape detours that arise when an
+    # upside-down component leaves both wired pins on the same bbox
+    # edge). After the main loop, sweep two deterministic moves over
+    # the best state until neither helps:
+    #
+    #   1. Toggle a single component's spine flip.
+    #   2. Reverse the entire direction of an "isolated" branch (one
+    #      with no rail-anchored desc at either end — _build_branches
+    #      picked a direction for it greedily, but topologically both
+    #      are equally valid). Reversal toggles every desc's flip and
+    #      reverses the relative y_pos within the branch's span; the
+    #      single-flip move can't find this because toggling one desc
+    #      in a 2+ chain breaks spine abutment and balloons the cost.
+    #
+    # Each move is evaluated with the clearance-aware routed cost, a
+    # closer proxy to final routing than HPWL or plain Steiner BFS, and
+    # accepted only when it strictly lowers the cost. Mirror is
+    # intentionally excluded from both moves: it's load-bearing for
+    # the cross-coupled-X detection in autodraw_hacks (gates have to
+    # face inward) and the cost function can't see that constraint.
+    isolated_branches = [
+        b for b in branches
+        if len(b.descs) >= 2 and not any(d.rail_anchored for d in b.descs)
+    ] if reverse_isolated_branches else []
+
+    if flippable or isolated_branches:
+        def real_eval_clr(co, yp, mi, fl):
+            centers, total_w = _column_centers(branches, co, col_widths, PAD)
+            pins, boxes = _pin_positions_for_state(
+                descs, branch_of, co, centers, yp, mi, fl,
+            )
+            return _route_total_wirelength(
+                pins, boxes, mid_nets, rail_nets,
+                total_w, canvas_h, rail_top_y, rail_bot_y,
+                canonical_top, clearance=True,
+                cross_coupled_xnets=x_pairs_for_cost,
+            )
+
+        cur_clr = real_eval_clr(best_co, best_yp, best_mi, best_fl)
+        changed = True
+        while changed:
+            changed = False
+            for d in flippable:
+                trial = dict(best_fl)
+                trial[id(d)] = not trial[id(d)]
+                new_clr = real_eval_clr(best_co, best_yp, best_mi, trial)
+                if new_clr < cur_clr - 1e-6:
+                    best_fl = trial
+                    cur_clr = new_clr
+                    changed = True
+            # Whole-branch reversal sweep for isolated branches.
+            for branch in isolated_branches:
+                trial_fl = dict(best_fl)
+                trial_yp = dict(best_yp)
+                for d in branch.descs:
+                    trial_fl[id(d)] = not trial_fl[id(d)]
+                ys = [best_yp[id(d)] for d in branch.descs]
+                for d, y in zip(branch.descs, reversed(ys)):
+                    trial_yp[id(d)] = y
+                new_clr = real_eval_clr(best_co, trial_yp, best_mi, trial_fl)
+                if new_clr < cur_clr - 1e-6:
+                    best_fl = trial_fl
+                    best_yp = trial_yp
+                    cur_clr = new_clr
+                    # Reverse branch.descs so _enforce_min_pitch (run
+                    # in autodraw() after this returns) reads the descs
+                    # in their new top-to-bottom order — otherwise its
+                    # forward sweep would shuffle the y values back
+                    # toward the un-reversed direction.
+                    branch.descs.reverse()
+                    changed = True
+
     return best_co, best_yp, best_mi, best_fl, initial_cost, best_cost
 
 
@@ -1682,6 +1883,7 @@ def autodraw(
     seed: int = 0,
     cost_model: str = "hpwl",
     res_dir: Union[str, Path, None, object] = _DEFAULT_RES_DIR,
+    reverse_isolated_branches: bool = False,
 ) -> str:
     """Render ``circuit`` to an SVG schematic and return the SVG string.
 
@@ -1719,6 +1921,17 @@ def autodraw(
         and draw the labelled-rect placeholders instead. Components
         whose kinds are missing from the chosen directory fall back
         to the rect.
+    reverse_isolated_branches:
+        If ``True``, the post-SA greedy pass also considers reversing
+        the column direction of each "isolated" branch (one with no
+        rail-anchored desc at either end). The greedy walker in
+        ``_build_branches`` picks a direction (top→bot or bot→top)
+        for such branches arbitrarily, but topologically both are
+        equally valid; this move tries the opposite and keeps it when
+        routed wirelength drops. Off by default — current circuits
+        produce no fully-isolated multi-component branches, so this
+        is dormant capability for circuits / branch-builder changes
+        that introduce them.
     """
     if isinstance(circuit, str):
         from sycan.spice import parse
@@ -1828,6 +2041,7 @@ def autodraw(
             rail_top_y, rail_bot_y, canvas_w, canvas_h,
             iterations=iterations, seed=seed, cost_model=cost_model,
             junctions=junctions,
+            reverse_isolated_branches=reverse_isolated_branches,
         )
         branches = [branches[i] for i in col_order]
         for d in descs:

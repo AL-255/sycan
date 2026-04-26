@@ -181,6 +181,47 @@ def _segment_enters_bbox(
     return t_enter < t_exit
 
 
+def detect_cross_coupled_descs(
+    descs: Sequence[_CompDesc],
+    uf: _UF,
+) -> list[tuple[_CompDesc, _CompDesc, str, str]]:
+    """Topology-only X-pair detector for the SA cost evaluator.
+
+    Same predicate as :func:`detect_cross_coupled_pairs` but operating
+    on bare :class:`_CompDesc`s — no placement coordinates required, so
+    it can run *before* the SA picks column / mirror state. Returns
+    tuples of ``(desc_a, desc_b, net_w1, net_w2)`` where ``net_w1`` is
+    the union-find canonical name of the ``a.gate ↔ b.drain`` net and
+    ``net_w2`` is ``b.gate ↔ a.drain``. The geometric viability checks
+    (gates inward, no third-component clip) are deferred to
+    :func:`detect_cross_coupled_pairs` at routing time; here we only
+    care that the topology is one the X-router will *try* to realise,
+    so the cost function can stop punishing layouts that admit it.
+    """
+    pairs: list[tuple[_CompDesc, _CompDesc, str, str]] = []
+    seen: set[int] = set()
+    fets = [
+        d for d in descs
+        if d.kind in ("nmos", "pmos") and "gate" in d.side_ports
+    ]
+    for i, a in enumerate(fets):
+        if id(a) in seen:
+            continue
+        a_g = uf.find(a.port_net("gate"))
+        a_d = uf.find(a.port_net("drain"))
+        for b in fets[i + 1:]:
+            if id(b) in seen or b.kind != a.kind:
+                continue
+            b_g = uf.find(b.port_net("gate"))
+            b_d = uf.find(b.port_net("drain"))
+            if a_g == b_d and b_g == a_d and a_g != a_d:
+                pairs.append((a, b, a_g, b_g))
+                seen.add(id(a))
+                seen.add(id(b))
+                break
+    return pairs
+
+
 def detect_cross_coupled_pairs(
     placed: Sequence[_Placed],
     uf: _UF,
