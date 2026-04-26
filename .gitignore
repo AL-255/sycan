@@ -49,5 +49,9 @@ tests/*/diagrams/
 # Plot artifacts
 *.png
 *.svg
+# …but the bundled glyph library is part of the source tree (res/) and
+# also has to ship with the GitHub Pages deployment (docs/res/).
+!res/**/*.svg
+!docs/res/**/*.svg
 
 .codex
