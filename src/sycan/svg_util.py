@@ -1264,6 +1264,149 @@ def view_glyphs(
     return out_path
 
 
+# ---------------------------------------------------------------------------
+# Bode plot (independent of the schematic stack).
+# ---------------------------------------------------------------------------
+def bode_svg(
+    omegas,
+    mag_db,
+    phase_deg,
+    title: str = "",
+    *,
+    width: int = 720,
+    height: int = 460,
+    mag_range: tuple[float, float] = (-80.0, 10.0),
+) -> str:
+    """Return an inline SVG with stacked magnitude/phase Bode panels.
+
+    ``omegas`` is the angular-frequency axis (assumed log-spaced and
+    monotonically increasing). ``mag_db`` and ``phase_deg`` must be the
+    same length as ``omegas``. The phase y-axis auto-ranges to the
+    nearest 90° and a dashed -3 dB reference line is overlaid on the
+    magnitude panel.
+    """
+    omegas = list(omegas)
+    mag_db = list(mag_db)
+    phase_deg = list(phase_deg)
+    if not (len(omegas) == len(mag_db) == len(phase_deg)):
+        raise ValueError("omegas, mag_db, phase_deg must have equal length")
+
+    ML, MR, MT, MB, GAP = 64, 20, 28, 36, 32
+    panel_h = (height - MT - MB - GAP) // 2
+    plot_w = width - ML - MR
+
+    log_w = [math.log10(w) for w in omegas]
+    x0, x1 = log_w[0], log_w[-1]
+
+    def xpx(lw: float) -> float:
+        return ML + (lw - x0) / (x1 - x0) * plot_w
+
+    y1_min, y1_max = mag_range
+    def y1px(v: float) -> float:
+        v = max(min(v, y1_max), y1_min)
+        return MT + panel_h * (1 - (v - y1_min) / (y1_max - y1_min))
+
+    p_lo = 90 * math.floor(min(phase_deg) / 90)
+    p_hi = 90 * math.ceil(max(phase_deg) / 90)
+    if p_hi <= p_lo:
+        p_hi = p_lo + 90
+    def y2px(v: float) -> float:
+        return MT + panel_h + GAP + panel_h * (1 - (v - p_lo) / (p_hi - p_lo))
+
+    out = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+        f'font-family="system-ui, sans-serif" font-size="11">',
+    ]
+    if title:
+        out.append(
+            f'<text x="{width/2}" y="16" text-anchor="middle" font-size="13" '
+            f'font-weight="bold">{html_escape(title)}</text>'
+        )
+
+    # Frame each panel.
+    out.append(
+        f'<rect x="{ML}" y="{MT}" width="{plot_w}" height="{panel_h}" '
+        'fill="none" stroke="#888"/>'
+    )
+    out.append(
+        f'<rect x="{ML}" y="{MT+panel_h+GAP}" width="{plot_w}" '
+        f'height="{panel_h}" fill="none" stroke="#888"/>'
+    )
+
+    # Decade gridlines and x-axis labels.
+    for d in range(int(math.floor(x0)), int(math.ceil(x1)) + 1):
+        x = xpx(d)
+        out.append(
+            f'<line x1="{x:.1f}" y1="{MT}" x2="{x:.1f}" '
+            f'y2="{MT+panel_h}" stroke="#e0e0e0"/>'
+        )
+        out.append(
+            f'<line x1="{x:.1f}" y1="{MT+panel_h+GAP}" x2="{x:.1f}" '
+            f'y2="{MT+2*panel_h+GAP}" stroke="#e0e0e0"/>'
+        )
+        out.append(
+            f'<text x="{x:.1f}" y="{height-MB+12}" '
+            f'text-anchor="middle">10^{d}</text>'
+        )
+
+    # Magnitude y gridlines (every 20 dB).
+    v = int(y1_min)
+    while v <= int(y1_max):
+        y = y1px(v)
+        out.append(
+            f'<line x1="{ML}" y1="{y:.1f}" x2="{ML+plot_w}" '
+            f'y2="{y:.1f}" stroke="#eee"/>'
+        )
+        out.append(f'<text x="{ML-6}" y="{y+3:.1f}" text-anchor="end">{v}</text>')
+        v += 20
+
+    # Phase y gridlines: round 1/4 of span up to a 45° multiple.
+    step = max(45, int(round((p_hi - p_lo) / 4 / 45)) * 45) or 45
+    v = int(p_lo)
+    while v <= int(p_hi):
+        y = y2px(v)
+        out.append(
+            f'<line x1="{ML}" y1="{y:.1f}" x2="{ML+plot_w}" '
+            f'y2="{y:.1f}" stroke="#eee"/>'
+        )
+        out.append(f'<text x="{ML-6}" y="{y+3:.1f}" text-anchor="end">{v}</text>')
+        v += step
+
+    # -3 dB reference line.
+    y_3dB = y1px(-3)
+    out.append(
+        f'<line x1="{ML}" y1="{y_3dB:.1f}" x2="{ML+plot_w}" '
+        f'y2="{y_3dB:.1f}" stroke="#bbb" stroke-dasharray="3,3"/>'
+    )
+
+    # Curves.
+    pts_m = " ".join(
+        f"{xpx(lw):.1f},{y1px(m):.1f}" for lw, m in zip(log_w, mag_db)
+    )
+    pts_p = " ".join(
+        f"{xpx(lw):.1f},{y2px(p):.1f}" for lw, p in zip(log_w, phase_deg)
+    )
+    out.append(
+        f'<polyline points="{pts_m}" fill="none" '
+        'stroke="#1f77b4" stroke-width="1.6"/>'
+    )
+    out.append(
+        f'<polyline points="{pts_p}" fill="none" '
+        'stroke="#d62728" stroke-width="1.6"/>'
+    )
+
+    # Axis labels.
+    out.append(f'<text x="{ML}" y="{MT-8}" font-style="italic">|H| [dB]</text>')
+    out.append(
+        f'<text x="{ML}" y="{MT+panel_h+GAP-8}" font-style="italic">∠H [deg]</text>'
+    )
+    out.append(
+        f'<text x="{width/2}" y="{height-4}" text-anchor="middle">ω [rad/s]</text>'
+    )
+    out.append('</svg>')
+    return "".join(out)
+
+
 if __name__ == "__main__":
     import argparse
 

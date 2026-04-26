@@ -494,6 +494,80 @@ def test_level_shifter():
     assert abs(comps["MP0"] - comps["MP1"]) > BOX_W
 
 
+def test_level_shifter_cross_coupling_is_an_x():
+    """The two MP gates and drains are cross-coupled. The router takes
+    the rare special case of allowing non-orthogonal routing here:
+    each coupling net contains a single diagonal segment, and the two
+    diagonals cross once between the FETs — the textbook X. Each arm
+    additionally carries a short horizontal stub at the drain end so
+    the four diagonal endpoints align in two columns (the elbow on one
+    arm shares an x with the gate of the *opposite* arm), giving the
+    ``_/`` / ``\\_`` shape and a clean rectangular X bounding-box.
+    """
+    svg = autodraw(NETLIST_LEVEL_SHIFTER, seed=0)
+    cross_nets = {"net-OUT_P", "net-OUT_N"}
+    cross_polys: dict[str, list[list[tuple[float, float]]]] = {}
+    for net, pts in _wires(svg):
+        if net in cross_nets:
+            cross_polys.setdefault(net, []).append(pts)
+    assert set(cross_polys) == cross_nets, (
+        f"missing one or both cross-coupling nets: {set(cross_polys)}"
+    )
+
+    def diagonal_segs(polys):
+        return [
+            (s[0], s[1]) for poly in polys for s in _segments(poly)
+            if s[0][0] != s[1][0] and s[0][1] != s[1][1]
+        ]
+
+    def horizontal_segs(polys):
+        return [
+            (s[0], s[1]) for poly in polys for s in _segments(poly)
+            if s[0][1] == s[1][1] and s[0][0] != s[1][0]
+        ]
+
+    p_diag = diagonal_segs(cross_polys["net-OUT_P"])
+    n_diag = diagonal_segs(cross_polys["net-OUT_N"])
+    assert p_diag, "OUT_P should contain a diagonal X-arm"
+    assert n_diag, "OUT_N should contain a diagonal X-arm"
+
+    p_horiz = horizontal_segs(cross_polys["net-OUT_P"])
+    n_horiz = horizontal_segs(cross_polys["net-OUT_N"])
+    assert p_horiz, (
+        "OUT_P arm should have a horizontal stub from elbow to drain "
+        "(the ``_`` half of ``\\_``)"
+    )
+    assert n_horiz, (
+        "OUT_N arm should have a horizontal stub from elbow to drain "
+        "(the ``_`` half of ``_/``)"
+    )
+
+    def segments_cross(a, b) -> bool:
+        (ax0, ay0), (ax1, ay1) = a
+        (bx0, by0), (bx1, by1) = b
+        d = (ax1 - ax0) * (by1 - by0) - (ay1 - ay0) * (bx1 - bx0)
+        if abs(d) < 1e-9:
+            return False
+        t = ((bx0 - ax0) * (by1 - by0) - (by0 - ay0) * (bx1 - bx0)) / d
+        u = ((bx0 - ax0) * (ay1 - ay0) - (by0 - ay0) * (ax1 - ax0)) / d
+        return 0 < t < 1 and 0 < u < 1
+
+    assert any(segments_cross(p, n) for p in p_diag for n in n_diag), (
+        "the two cross-coupled diagonals must intersect inside their "
+        "open spans — that single crossing is the visual X"
+    )
+
+    # Diagonal endpoint alignment: the elbow of one arm must share an x
+    # with the gate of the opposite arm (and vice versa) — the property
+    # that turns the X corners into two clean vertical columns.
+    p_diag_xs = {round(x, 3) for seg in p_diag for x, _ in seg}
+    n_diag_xs = {round(x, 3) for seg in n_diag for x, _ in seg}
+    assert p_diag_xs == n_diag_xs, (
+        "X arms should share their diagonal-endpoint x-columns "
+        f"(OUT_P xs={p_diag_xs} vs OUT_N xs={n_diag_xs})"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 2-transistor sub-threshold voltage reference. Compact circuit but the
 # router has tight quarters: M1's source feeds n1, which is also M2's
@@ -726,16 +800,26 @@ def test_all_wires_are_manhattan():
     Regressions in BFS fallbacks or polyline cleanup can leak a
     two-point diagonal segment when the routing grid can't connect
     two pins; this test pins the invariant.
+
+    Documented exception: cross-coupled FET pairs (the level-shifter
+    latch X) intentionally use two diagonal segments, one per
+    coupling net. Those pairs are skipped here — see
+    ``test_level_shifter_cross_coupling_is_an_x`` for the diagonal
+    invariant.
     """
     netlists = [
         NETLIST_DIVIDER, NETLIST_CS_AMP, NETLIST_MIRROR,
         NETLIST_CE_BJT, NETLIST_DIFF_PAIR, NETLIST_DIODE_RC,
         NETLIST_CASCODE, NETLIST_LEVEL_SHIFTER, NETLIST_SRPP,
     ]
+    diagonal_exempt_nets = {"net-OUT_P", "net-OUT_N"}
     failures: list[str] = []
     for nl in netlists:
         svg = autodraw(nl, seed=0)
+        is_level_shifter = nl is NETLIST_LEVEL_SHIFTER
         for net, pts in _wires(svg):
+            if is_level_shifter and net in diagonal_exempt_nets:
+                continue
             for (x1, y1), (x2, y2) in _segments(pts):
                 if x1 != x2 and y1 != y2:
                     failures.append(
@@ -871,16 +955,21 @@ def test_diff_pair_tail_is_straight_trunk():
     """The diff pair's tail net (M1.S, ITAIL.+, M2.S) should run
     along an essentially horizontal trunk after layout — small jogs
     around ITAIL's bbox are allowed but the wire shouldn't fold into
-    a U-shape that spans most of the canvas vertically."""
+    a U-shape that spans most of the canvas vertically.
+
+    The compaction post-pass squeezes out blank columns that contain
+    only horizontal spans, so the trunk's horizontal run is naturally
+    shorter than the un-compacted layout. The threshold here is sized
+    to the compacted spacing — anything substantially horizontal
+    rules out a U-fold.
+    """
     svg = autodraw(NETLIST_DIFF_PAIR, seed=0)
     long_horizontal = False
     for net, pts in _wires(svg):
         if net.startswith("rail") or net.endswith("VDD") or net.endswith("-0"):
             continue
-        # Look for a horizontal sub-segment ≥ 100 px long at constant y
-        # (this is the "trunk" piece between any two pins on the tail).
         for (x1, y1), (x2, y2) in _segments(pts):
-            if y1 == y2 and abs(x2 - x1) >= 100:
+            if y1 == y2 and abs(x2 - x1) >= 30:
                 long_horizontal = True
                 break
         if long_horizontal:

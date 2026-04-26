@@ -10,6 +10,22 @@ from sycan.components.active import (
     Triode,
 )
 from sycan.components.rf import TLINE
+from sycan.network_params import (
+    abcd_to_s,
+    abcd_to_y,
+    abcd_to_z,
+    s_to_abcd,
+    s_to_t,
+    s_to_y,
+    s_to_z,
+    t_to_s,
+    y_to_abcd,
+    y_to_s,
+    y_to_z,
+    z_to_abcd,
+    z_to_s,
+    z_to_y,
+)
 from sycan.components.basic import (
     CCCS,
     CCVS,
@@ -33,8 +49,10 @@ from sycan.mna import (
     solve_impedance,
 )
 from sycan.autodraw import autodraw
+from sycan.polynomials import bessel, butterworth, chebyshev1
 from sycan.schematic import draw
 from sycan.spice import parse, parse_file, parse_value
+from sycan.svg_util import bode_svg
 
 __all__ = [
     "BJT",
@@ -56,12 +74,30 @@ __all__ = [
     "StampContext",
     "TLINE",
     "Triode",
+    "abcd_to_s",
+    "abcd_to_y",
+    "abcd_to_z",
+    "s_to_abcd",
+    "s_to_t",
+    "s_to_y",
+    "s_to_z",
+    "t_to_s",
+    "y_to_abcd",
+    "y_to_s",
+    "y_to_z",
+    "z_to_abcd",
+    "z_to_s",
+    "z_to_y",
     "VCCS",
     "VCVS",
     "VoltageSource",
     "autodraw",
+    "bessel",
+    "bode_svg",
     "build_mna",
     "build_residuals",
+    "butterworth",
+    "chebyshev1",
     "draw",
     "parse",
     "parse_file",

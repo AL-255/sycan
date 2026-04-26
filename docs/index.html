@@ -84,6 +84,23 @@ entirely in your browser via Pyodide, with inline schematic rendering via
 <h3>Examples</h3>
 <div id="examples" class="row"></div>
 
+<div id="filter-controls" class="row" style="display:none">
+  <strong>Filter:</strong>
+  <label>family
+    <select id="filter-family">
+      <option value="butterworth">Butterworth</option>
+      <option value="chebyshev">Chebyshev I</option>
+      <option value="bessel">Bessel</option>
+    </select>
+  </label>
+  <label>order
+    <input id="filter-order" type="number" min="1" max="8" value="4" style="width:60px">
+  </label>
+  <label>ripple [dB]
+    <input id="filter-ripple" type="number" min="0.1" max="10" step="0.1" value="1.0" style="width:80px">
+  </label>
+</div>
+
 <h3>Code</h3>
 <textarea id="editor" spellcheck="false"></textarea>
 
@@ -95,7 +112,7 @@ entirely in your browser via Pyodide, with inline schematic rendering via
 <h3>Output</h3>
 <div id="output"></div>
 
-<h3>Schematic</h3>
+<h3 id="schematic-heading">Schematic</h3>
 <div id="schematic"></div>
 
 <script>
@@ -133,7 +150,7 @@ const examplesEl = document.getElementById('examples');
 
 function write(msg) { output.textContent += msg; }
 
-function resetSchematic(message = 'Run the Autodraw example to render a schematic here.') {
+function resetSchematic(message = 'Run an example that returns SVG to render it here.') {
   schematic.replaceChildren();
   schematic.textContent = message;
   schematic.classList.add('empty');
@@ -168,6 +185,10 @@ async function loadExample(file) {
   cm.setValue(code);
   output.textContent = '';
   resetSchematic();
+  // Show the filter-parameter UI only for the LPF example.
+  const isLPF = (file === 'lowpass_filter.py');
+  document.getElementById('filter-controls').style.display = isLPF ? 'flex' : 'none';
+  document.getElementById('schematic-heading').textContent = isLPF ? 'Bode plot' : 'Schematic';
 }
 
 async function buildExamples() {
@@ -276,7 +297,7 @@ async function boot() {
   });
   py = await loadPyodide();
   status.textContent = 'Installing sympy + sycan…';
-await py.loadPackage(['sympy', 'micropip']);
+await py.loadPackage(['sympy', 'numpy', 'micropip']);
   await py.runPythonAsync(`
 import micropip
 await micropip.install('./sycan-0.1.3-py3-none-any.whl')
@@ -326,6 +347,22 @@ clearBtn.addEventListener('click', () => {
   output.textContent = '';
   resetSchematic();
 });
+
+// Re-run when the filter controls change (debounced, only when the
+// panel is visible — i.e., the LPF example is loaded).
+{
+  const panel = document.getElementById('filter-controls');
+  let pending = null;
+  const trigger = () => {
+    if (panel.style.display === 'none' || runBtn.disabled) return;
+    clearTimeout(pending);
+    pending = setTimeout(() => { run().catch(() => {}); }, 120);
+  };
+  ['filter-family', 'filter-order', 'filter-ripple'].forEach((id) => {
+    document.getElementById(id).addEventListener('input', trigger);
+    document.getElementById(id).addEventListener('change', trigger);
+  });
+}
 
 boot().catch((e) => { status.textContent = 'Failed to load Pyodide: ' + e; });
 </script>

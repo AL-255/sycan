@@ -486,47 +486,6 @@ class _Placed:
     pin_side: dict[str, str] = field(default_factory=dict)  # "top"/"bot"/"left"/"right"
 
 
-def _spine_junctions(
-    branches: Sequence[_Branch],
-    uf: _UF,
-    spine_index: dict[str, list[tuple[_CompDesc, str]]],
-) -> list[dict]:
-    """Identify spine-junction nets and the branches meeting at each.
-
-    A junction net (e.g. the diff-pair tail) has more than two spine
-    endpoints. Branches whose *bottom* pin lands there are "above" the
-    junction; branches whose *top* pin lands there are "below" it. For
-    the trunk wire to run through clear space (and not coincide with a
-    component bbox edge of either side), the stem must be counted into
-    the tallest arm above — i.e. the below pins must sit at least
-    ``cross_gap`` lower than the above pins. ``_enforce_min_pitch``
-    uses this info to enforce that clearance.
-
-    Junctions where only one side is populated (no above or no below
-    branch) are dropped — there's nothing to clear past.
-    """
-    def is_junction(net: str) -> bool:
-        return len({id(c) for c, _ in spine_index.get(net, ())}) > 2
-
-    by_net: dict[str, dict] = {}
-    for b in branches:
-        if not b.descs:
-            continue
-        last_net = uf.find(b.descs[-1].bot_net())
-        if is_junction(last_net):
-            entry = by_net.setdefault(
-                last_net, {"net": last_net, "above": [], "below": []}
-            )
-            entry["above"].append(b)
-        first_net = uf.find(b.descs[0].top_net())
-        if is_junction(first_net):
-            entry = by_net.setdefault(
-                first_net, {"net": first_net, "above": [], "below": []}
-            )
-            entry["below"].append(b)
-    return [info for info in by_net.values() if info["above"] and info["below"]]
-
-
 def _logical_chain_length(
     branches: Sequence[_Branch],
     uf: _UF,
@@ -968,6 +927,87 @@ def _find_solder_dots(
     return dots
 
 
+def _compact_blanks(
+    placed: list,
+    polylines: list,
+    solder_dots: list,
+    canvas_w: float,
+    min_gap: float = GRID_PX,
+) -> float:
+    """Shrink x-ranges that hold no vertical layout content.
+
+    A "blank" is an x-range where neither a component bbox nor a
+    vertical or diagonal wire segment lives — only horizontal spans
+    pass through. Each blank wider than ``min_gap`` is collapsed to
+    ``min_gap``, and everything to the right of it slides left by the
+    deficit. Horizontal segments that bridged the blank shorten
+    automatically: their endpoints sit in occupied ranges and shift
+    independently. Diagonal segments (the cross-coupled X) stay
+    intact — both endpoints live inside the same merged occupied
+    range, so they take the same shift and the slope is preserved.
+
+    Mutates ``placed`` (cx, pin_pos), ``polylines`` (point lists), and
+    ``solder_dots`` in place. Returns the new canvas width.
+    """
+    if not placed and not polylines:
+        return canvas_w
+
+    occupied: list[tuple[float, float]] = []
+    for p in placed:
+        bw = p.desc.bbox_w
+        occupied.append((p.cx - bw / 2.0, p.cx + bw / 2.0))
+    for cls, pts in polylines:
+        if cls.startswith("rail-"):
+            continue
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if abs(y0 - y1) < 1e-6:
+                continue
+            occupied.append((min(x0, x1), max(x0, x1)))
+
+    if not occupied:
+        return canvas_w
+
+    occupied.sort()
+    merged: list[list[float]] = []
+    for lo, hi in occupied:
+        if merged and lo <= merged[-1][1] + 1e-6:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+
+    shifts: list[tuple[float, float]] = []
+    cum = 0.0
+    for i in range(1, len(merged)):
+        gap = merged[i][0] - merged[i - 1][1]
+        if gap > min_gap + 1e-6:
+            cum += gap - min_gap
+            shifts.append((merged[i][0], cum))
+
+    if not shifts:
+        return canvas_w
+
+    def shift_x(x: float) -> float:
+        s = 0.0
+        for thr, c in shifts:
+            if x >= thr - 1e-6:
+                s = c
+            else:
+                break
+        return x - s
+
+    for p in placed:
+        p.cx = shift_x(p.cx)
+        for port, (px, py) in list(p.pin_pos.items()):
+            p.pin_pos[port] = (shift_x(px), py)
+
+    for i, (cls, pts) in enumerate(polylines):
+        polylines[i] = (cls, [(shift_x(x), y) for x, y in pts])
+
+    solder_dots[:] = [(shift_x(x), y) for x, y in solder_dots]
+
+    return canvas_w - shifts[-1][1]
+
+
 def _polyline_from_path(path: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
     """Compress a cell-path into corner-only points."""
     if len(path) < 2:
@@ -1284,8 +1324,9 @@ def _enforce_min_pitch(
     the post-enforcement gap below ``min_gap`` by up to GRID_PX. In
     place, idempotent.
 
-    If ``junctions`` is given (from ``_spine_junctions``), spine
-    pins meeting at each junction are kept apart by at least the
+    If ``junctions`` is given (from
+    ``autodraw_hacks.detect_spine_junctions``), spine pins meeting at
+    each junction are kept apart by at least the
     cross-column ``cross_gap = max(min_gap, 2 * PORT_LEN)``: every
     "below" branch's top pin must sit that far under the lowest
     "above" branch's bot pin. The trunk wire then has clear space to
@@ -1333,54 +1374,13 @@ def _enforce_min_pitch(
 
     per_branch_sweep(branches)
 
-    if not junctions:
-        return
-
-    # Junction clearance: drive apart any below-pin / above-pin pair that
-    # collapses onto the same row (or worse). Spine-pins live at the
-    # bbox edge of the boundary component, so collapsed pins land the
-    # trunk wire on a blocked row — the router then detours far enough
-    # to dodge the bbox edges that the trunk no longer reads as a
-    # straight line. We split the deficit symmetrically and re-sweep
-    # the touched branches to keep them inside the rail bounds.
-    import math as _math
-    touched: set[int] = set()
-    for j in junctions:
-        above = [b for b in j["above"] if b.descs]
-        below = [b for b in j["below"] if b.descs]
-        if not (above and below):
-            continue
-        max_above_y = max(
-            y_pos[id(b.descs[-1])] + b.descs[-1].bbox_h / 2.0
-            for b in above
+    if junctions:
+        # Diff-pair-tail style junction clearance lives in autodraw_hacks
+        # (lazy import to avoid a circular import at module load).
+        from sycan.autodraw_hacks import apply_junction_clearance
+        apply_junction_clearance(
+            branches, y_pos, junctions, min_gap, per_branch_sweep,
         )
-        min_below_y = min(
-            y_pos[id(b.descs[0])] - b.descs[0].bbox_h / 2.0
-            for b in below
-        )
-        deficit = max_above_y + cross_gap - min_below_y
-        if deficit <= 0:
-            continue
-        # Round the deficit up to a grid step. Pushes that aren't a
-        # multiple of GRID_PX get reverted by snap_up/snap_down in the
-        # follow-up sweep, which forces bbox-tops back onto the grid.
-        deficit_grid = _math.ceil(deficit / GRID_PX) * GRID_PX
-        # Split symmetrically; both halves are grid multiples by
-        # construction so the snap pass leaves them in place.
-        half_steps = int(deficit_grid // GRID_PX) // 2
-        push_up = half_steps * GRID_PX
-        push_down = deficit_grid - push_up
-        for b in above:
-            for d in b.descs:
-                y_pos[id(d)] -= push_up
-            touched.add(id(b))
-        for b in below:
-            for d in b.descs:
-                y_pos[id(d)] += push_down
-            touched.add(id(b))
-
-    if touched:
-        per_branch_sweep(b for b in branches if id(b) in touched)
 
 
 def _sa_optimize(
@@ -1810,13 +1810,14 @@ def autodraw(
     _, canvas_w = _column_centers(branches, initial_col_order, col_widths, x0)
     canvas_h = rail_bot_y + PAD
 
-    # ---- Spine junctions ----
+    # ---- Spine junctions (autodraw_hacks override) ----
     # Pre-compute junction info so ``_enforce_min_pitch`` (called both
     # post-SA and inside SA's inner loop) can drive apart pins meeting
     # at a junction net, preventing the trunk from collapsing onto a
     # bbox edge of either side. Branch-object refs survive SA's column
     # reorder, so this list stays valid both before and after.
-    junctions = _spine_junctions(branches, uf, spine_index)
+    from sycan.autodraw_hacks import detect_spine_junctions
+    junctions = detect_spine_junctions(branches, uf, spine_index)
 
     # ---- SA: column order + per-component y + mirror + spine flip ----
     if optimize and (len(branches) >= 2 or any(
@@ -1877,10 +1878,28 @@ def autodraw(
         rg.block_rect(x0c, y0c, x1c + 1, y1c + 1)
 
     # Allow each pin tip cell to be "passable" even if the box body is
-    # blocked next to it.
+    # blocked next to it. For *lateral* pins (left/right side), also
+    # carve a one-row clearance channel from the pin out through the
+    # bbox edge: when the pin sits a few cells inside the bbox right
+    # edge (e.g. an NPN base whose port circle is offset inward from
+    # the body), the row between pin and edge would otherwise be
+    # blocked, forcing the BFS to fail and the fallback to elbow back
+    # into the body. Allowing those cells lets the wire exit in the
+    # natural lateral direction the pin already faces.
     for p in placed:
+        bw, bh = p.desc.bbox_w, p.desc.bbox_h
+        bx0c, by0c = to_cell(p.cx - bw / 2, p.cy - bh / 2)
+        bx1c, by1c = to_cell(p.cx + bw / 2, p.cy + bh / 2)
         for port, (px, py) in p.pin_pos.items():
-            rg.allow_pin.add(to_cell(px, py))
+            cell = to_cell(px, py)
+            rg.allow_pin.add(cell)
+            side = p.pin_side.get(port)
+            if side == "right":
+                for xx in range(cell[0] + 1, bx1c + 1):
+                    rg.allow_pin.add((xx, cell[1]))
+            elif side == "left":
+                for xx in range(bx0c, cell[0]):
+                    rg.allow_pin.add((xx, cell[1]))
 
     # Compute the per-cell clearance-to-nearest-block penalty so the
     # router prefers L/S elbows that sit in open space rather than
@@ -1923,8 +1942,51 @@ def autodraw(
         len(kv[1]),
     ))
 
+    # Cross-coupled FET pairs (autodraw_hacks override): the BFS makes
+    # visually messy zigzags because the two coupling nets compete for
+    # the same column-gap channel. Detect the latch pattern (M_a.gate ↔
+    # M_b.drain and M_b.gate ↔ M_a.drain) and pre-build hand-routed
+    # symmetric X polylines. Cells along the polylines are *strongly*
+    # marked as used so the BFS routes for other nets steer clear and
+    # don't visually fuse with the X. The main loop skips these nets.
+    from sycan.autodraw_hacks import cross_coupled_pinned_polylines
+    cross_polys = cross_coupled_pinned_polylines(placed, nets, uf)
+
+    def _bresenham_cells(c0, c1):
+        x0, y0 = c0
+        x1, y1 = c1
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        while True:
+            yield x0, y0
+            if x0 == x1 and y0 == y1:
+                return
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x0 += sx
+            if e2 < dx:
+                err += dx
+                y0 += sy
+
+    for net_key, polys in cross_polys.items():
+        for poly in polys:
+            routed_polylines.append((f"net-{net_key}", poly))
+            for (sx, sy), (ex, ey) in zip(poly, poly[1:]):
+                c0 = to_cell(sx, sy)
+                c1 = to_cell(ex, ey)
+                for xx, yy in _bresenham_cells(c0, c1):
+                    if 0 <= xx < grid_w and 0 <= yy < grid_h:
+                        rg.used[xx][yy] += 8
+
     for net_key, terms in net_items:
         if len(terms) < 1:
+            continue
+        if net_key in cross_polys:
+            # Already emitted as a hand-routed cross.
             continue
 
         if net_key in canonical_top or net_key in canonical_bot:
@@ -2187,6 +2249,14 @@ def autodraw(
     # wire rays of the same net meet (T or +), to visually distinguish
     # a connection from an unrelated wire crossing.
     solder_dots = _find_solder_dots(routed_polylines)
+
+    # ---- Compact horizontal blanks ----
+    # Squeeze x-ranges that hold no vertical content (component bbox or
+    # vertical/diagonal wire segment). Horizontal-only spans — including
+    # the rails and rung-style wires — automatically shorten because
+    # their endpoints sit in occupied ranges and get shifted
+    # independently.
+    canvas_w = _compact_blanks(placed, polylines, solder_dots, canvas_w)
 
     # ---- SVG emission ----
     svg = _emit_svg(placed, polylines, canvas_w, canvas_h,
