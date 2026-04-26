@@ -50,6 +50,8 @@ if [[ ${#sources[@]} -eq 0 ]]; then
     exit 1
 fi
 
+docs_dir="$res_dir/../docs/repl/res"
+
 for src in "${sources[@]}"; do
     name="$(basename "$src")"
     dest="$res_dir/$name"
@@ -60,6 +62,10 @@ for src in "${sources[@]}"; do
         --export-overwrite \
         --export-filename="$dest" \
         >/dev/null 2>&1
+
+    if [[ -d "$docs_dir" ]]; then
+        cp "$dest" "$docs_dir/$name"
+    fi
 
     echo "  $name"
 done
