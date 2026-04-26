@@ -2,8 +2,8 @@
 
 Each constructor returns ``(numerator, denominator)`` as sympy
 expressions in a Laplace variable ``s``, with the standard normalised
-DC gain (|H(0)| = 1, except Chebyshev I of even order where the
-textbook value 1/sqrt(1+eps^2) is used).
+DC gain (``|H(0)| = 1``, except Chebyshev I of even order where the
+textbook value ``1/sqrt(1+eps^2)`` is used).
 
 Pass your own ``s`` symbol if you want the polynomials to share it
 with the rest of an expression; otherwise a fresh ``sp.Symbol("s")``

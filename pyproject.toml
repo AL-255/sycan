@@ -23,3 +23,12 @@ dev = [
     "lcapy>=1.26",
     "pytest>=9.0.3",
 ]
+docs = [
+    "sphinx>=7.4",
+    "furo>=2024.8.6",
+    "myst-parser>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/AL-255/sycan"
+Issues = "https://github.com/AL-255/sycan/issues"

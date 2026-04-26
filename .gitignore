@@ -50,11 +50,17 @@ tests/*/diagrams/
 *.png
 *.svg
 # …but the bundled glyph library is part of the source tree (res/) and
-# also has to ship with the GitHub Pages deployment (docs/res/).
+# also has to ship with the GitHub Pages deployment (docs/repl/res/).
 !res/**/*.svg
-!docs/res/**/*.svg
-!res/sycan.png
-!docs/res/sycan.png
+!docs/repl/res/**/*.svg
+!res/sycan_s.png
+!docs/repl/res/sycan_s.png
+!sphinx/_static/sycan_s.png
+
+# Sphinx build output
+sphinx/_build/
+sphinx/_autosummary/
+_site/
 
 .codex
 .claude/

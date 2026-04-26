@@ -50,15 +50,27 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Set up Python
+        run: uv python install 3.13
+
       - name: Build wheel
         run: uv build
 
-      - name: Stage docs/ with the freshly built wheel
+      - name: Stage _site/ (REPL + freshly built wheel)
         run: |
-          rm -f docs/sycan-*-py3-none-any.whl
-          cp dist/sycan-*-py3-none-any.whl docs/
-          wheel=$(basename docs/sycan-*-py3-none-any.whl)
-          sed -i -E "s|sycan-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any\.whl|${wheel}|g" docs/index.html
+          rm -rf _site
+          mkdir _site
+          cp -r docs/. _site/
+          rm -f _site/repl/sycan-*-py3-none-any.whl
+          cp dist/sycan-*-py3-none-any.whl _site/repl/
+          wheel=$(basename _site/repl/sycan-*-py3-none-any.whl)
+          sed -i -E "s|sycan-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any\.whl|${wheel}|g" _site/repl/index.html
+
+      - name: Build Sphinx site (root)
+        run: |
+          uv sync --group docs
+          uv run sphinx-build -b html --keep-going sphinx _site
+          touch _site/.nojekyll
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -66,7 +78,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deploy
