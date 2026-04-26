@@ -16,7 +16,7 @@ with γ = 2/3 (long-channel saturation).
 """
 import sympy as sp
 
-from sycan import Circuit, T_kelvin, k_B, solve_noise
+from sycan import Circuit, T_kelvin, autodraw, k_B, solve_noise
 from sycan.components.active import NMOS_L1
 from sycan.components.basic import Resistor, VoltageSource
 
@@ -49,3 +49,5 @@ print()
 print(f"Total S_V_out      =  {sp.simplify(S_total)}")
 print(f"Closed-form check  =  {sp.simplify(expected)}")
 assert sp.simplify(S_total - expected) == 0
+
+autodraw(c)

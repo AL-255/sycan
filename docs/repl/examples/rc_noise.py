@@ -11,7 +11,7 @@ whose total integrated power is the celebrated ``k_B·T / C``.
 """
 import sympy as sp
 
-from sycan import Circuit, T_kelvin, k_B, solve_noise
+from sycan import Circuit, T_kelvin, autodraw, k_B, solve_noise
 from sycan.components.basic import Capacitor, Resistor, VoltageSource
 
 R, C, omega = sp.symbols("R C omega", positive=True)
@@ -32,3 +32,5 @@ print(f"S_V_out(ω) = {sp.latex(S_omega)}")
 power = sp.integrate(S_omega, (omega, 0, sp.oo)) / (2 * sp.pi)
 print(f"Integrated noise power: {sp.simplify(power)}")
 assert sp.simplify(power - k_B * T_kelvin / C) == 0
+
+autodraw(c)

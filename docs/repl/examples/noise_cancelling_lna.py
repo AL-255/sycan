@@ -24,7 +24,7 @@ just buried inside the long-channel g_m expression.)
 """
 import sympy as sp
 
-from sycan import Circuit, solve_ac
+from sycan import Circuit, autodraw, solve_ac
 from sycan.components.basic import (
     CurrentSource, Resistor, VCCS, VCVS, VoltageSource,
 )
@@ -108,3 +108,5 @@ print(f"H_M1  @ R2 = R1/(g_m2·RS):  {H_M1_at_cond}")
 print(f"signal gain @ same R2:       {sp.factor(H_sig_at_cond)}")
 print("\nM1 thermal noise cancels in V_diff while the *signal* still")
 print("propagates through both M1 and M2 — that is the noise-canceller's trick.")
+
+autodraw(build())
