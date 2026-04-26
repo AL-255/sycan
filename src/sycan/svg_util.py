@@ -731,6 +731,149 @@ def html_escape(s: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Designator label placement.
+# ---------------------------------------------------------------------------
+def _label_rect(
+    text_x: float, text_y: float, anchor: str, text: str, font_size: float,
+) -> tuple[float, float, float, float]:
+    """Approximate the visual bounding box of an SVG ``<text>`` element.
+
+    Sans-serif glyph width averages ~0.6em; ascender + descender fit
+    into roughly one em with a ~0.8/0.2 split around the baseline. Good
+    enough for collision testing.
+    """
+    w = max(font_size * 0.6, 0.6 * font_size * len(text))
+    if anchor == "middle":
+        x0, x1 = text_x - w / 2.0, text_x + w / 2.0
+    elif anchor == "end":
+        x0, x1 = text_x - w, text_x
+    else:  # "start"
+        x0, x1 = text_x, text_x + w
+    y0 = text_y - font_size * 0.8
+    y1 = text_y + font_size * 0.2
+    return (x0, y0, x1, y1)
+
+
+def _rect_overlap_area(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> float:
+    ow = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    oh = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    return ow * oh
+
+
+def _emit_designator_labels(
+    placed: Sequence,
+    polylines: Sequence[tuple[str, list[tuple[float, float]]]],
+    canvas_w: float,
+    canvas_h: float,
+    *,
+    label_fs: int,
+    port_fs: int,
+    short_port: callable,
+) -> list[str]:
+    """Pick a low-overlap position next to each component for its label.
+
+    Builds an obstacle list of every component bbox, every wire / rail
+    segment (as a thin rect), and every pin label (also a rect). For
+    each placed component, scores a small set of cardinal + corner
+    candidate anchors by total overlap area against the obstacle list
+    plus already-placed designator rects, and emits the label at the
+    best candidate. Ties — including the all-zero "fully clear" tie —
+    fall to candidate priority order (right, left, above, below, then
+    corners), which matches the conventional schematic placement of
+    component designators.
+    """
+    obstacles: list[tuple[float, float, float, float]] = []
+
+    # Component bboxes — keep labels off the glyph ink.
+    for p in placed:
+        bw, bh = p.desc.bbox_w, p.desc.bbox_h
+        obstacles.append(
+            (p.cx - bw / 2.0, p.cy - bh / 2.0,
+             p.cx + bw / 2.0, p.cy + bh / 2.0)
+        )
+
+    # Pin label rects — match the positions used in emit_svg's port loop.
+    for p in placed:
+        for port, (px, py) in p.pin_pos.items():
+            side = p.pin_side[port]
+            text = short_port(port)
+            if side == "left":
+                tx, ty, anc = px - 4, py - 2, "end"
+            elif side == "bot":
+                tx, ty, anc = px + 4, py + 11, "start"
+            else:  # top, right
+                tx, ty, anc = px + 4, py - 2, "start"
+            obstacles.append(_label_rect(tx, ty, anc, text, port_fs))
+
+    # Wire / rail segments — thin axis-aligned rects with a small pad.
+    wire_pad = 2.0
+    for _cls, pts in polylines:
+        if not pts:
+            continue
+        for (x1, y1), (x2, y2) in zip(pts[:-1], pts[1:]):
+            obstacles.append((
+                min(x1, x2) - wire_pad, min(y1, y2) - wire_pad,
+                max(x1, x2) + wire_pad, max(y1, y2) + wire_pad,
+            ))
+
+    out: list[str] = []
+    placed_label_rects: list[tuple[float, float, float, float]] = []
+
+    for p in placed:
+        d = p.desc
+        if not getattr(d, "label", ""):
+            continue
+        bw, bh = d.bbox_w, d.bbox_h
+        cx, cy = p.cx, p.cy
+        margin = 4.0
+        half = label_fs * 0.4  # baseline offset to vertically centre
+
+        # Candidates in priority order: E, W, N, S, then four corners.
+        candidates = [
+            (cx + bw / 2 + margin, cy + half, "start"),
+            (cx - bw / 2 - margin, cy + half, "end"),
+            (cx, cy - bh / 2 - margin, "middle"),
+            (cx, cy + bh / 2 + margin + label_fs * 0.8, "middle"),
+            (cx + bw / 2 + margin, cy - bh / 2 + half, "start"),
+            (cx + bw / 2 + margin, cy + bh / 2 + half, "start"),
+            (cx - bw / 2 - margin, cy - bh / 2 + half, "end"),
+            (cx - bw / 2 - margin, cy + bh / 2 + half, "end"),
+        ]
+
+        best: Optional[tuple[float, float, str, tuple[float, float, float, float]]] = None
+        best_score = float("inf")
+        for tx, ty, anc in candidates:
+            r = _label_rect(tx, ty, anc, d.label, label_fs)
+            # Reject candidates that fall off the canvas.
+            if r[0] < 0 or r[2] > canvas_w or r[1] < 0 or r[3] > canvas_h:
+                continue
+            score = 0.0
+            for ob in obstacles:
+                score += _rect_overlap_area(r, ob)
+            for ob in placed_label_rects:
+                score += _rect_overlap_area(r, ob)
+            if score < best_score:
+                best_score = score
+                best = (tx, ty, anc, r)
+
+        if best is None:
+            # Every candidate is off-canvas — fall back to bbox centre.
+            tx, ty, anc = cx, cy + half, "middle"
+            best = (tx, ty, anc, _label_rect(tx, ty, anc, d.label, label_fs))
+
+        out.append(
+            f'<text class="lab" x="{best[0]:.1f}" y="{best[1]:.1f}" '
+            f'text-anchor="{best[2]}">{html_escape(d.label)}</text>'
+        )
+        placed_label_rects.append(best[3])
+
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Final SVG serialisation.
 # ---------------------------------------------------------------------------
 def emit_svg(
@@ -878,11 +1021,6 @@ def emit_svg(
                 f'data-name="{d.label}" '
                 f'x="{x:.1f}" y="{y:.1f}" width="{bw}" height="{bh}" rx="3" />'
             )
-        parts.append(
-            f'<text class="lab" x="{p.cx:.1f}" y="{p.cy + 4:.1f}" '
-            f'text-anchor="middle">{html_escape(d.label)}</text>'
-        )
-
         for port, (px, py) in p.pin_pos.items():
             side = p.pin_side[port]
             outside = (
@@ -938,6 +1076,18 @@ def emit_svg(
                     f'<text class="plab" x="{px + 4:.1f}" y="{py - 2:.1f}">'
                     f'{short_port(port)}</text>'
                 )
+
+    # Designator labels: deferred to after every other primitive so we
+    # can pick a position around each component bbox that overlaps the
+    # least with neighbouring geometry. Drawing them at the bbox centre
+    # (the original behaviour) made them collide with the glyph ink on
+    # any component whose body fills the bbox (triodes, op-amps, sources).
+    parts.extend(
+        _emit_designator_labels(
+            placed, polylines, canvas_w, canvas_h,
+            label_fs=label_fs, port_fs=port_fs, short_port=short_port,
+        )
+    )
 
     parts.append("</svg>")
     return "\n".join(parts)
