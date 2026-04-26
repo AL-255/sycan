@@ -1,6 +1,6 @@
 # SYCAN
 
-![SYCAN Logo](res/sycan.png)
+![SYCAN Logo](docs/res/sycan.png)
 
 [![CI](https://github.com/AL-255/sycan/actions/workflows/ci.yml/badge.svg)](https://github.com/AL-255/sycan/actions/workflows/ci.yml) [![Pages](https://github.com/AL-255/sycan/actions/workflows/pages/pages-build-deployment/badge.svg)](https://al-255.github.io/sycan/)
 

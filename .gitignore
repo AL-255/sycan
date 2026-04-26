@@ -53,5 +53,7 @@ tests/*/diagrams/
 # also has to ship with the GitHub Pages deployment (docs/res/).
 !res/**/*.svg
 !docs/res/**/*.svg
+!res/sycan.png
+!docs/res/sycan.png
 
 .codex

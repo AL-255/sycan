@@ -70,14 +70,22 @@
 
   .row { display: flex; gap: 8px; align-items: center; margin: 0.5em 0; flex-wrap: wrap; }
   h3 { margin-bottom: 0.3em; }
+
+  .header { display: flex; align-items: center; gap: 16px; }
+  .header img { height: 64px; width: auto; flex: none; }
 </style>
 </head>
 <body>
 
-<h1>SYCAN REPL Demo</h1>
-<p class="sub">Symbolic circuit analysis (DC · AC · impedance · Monte-Carlo) running
-entirely in your browser via Pyodide, with inline schematic rendering via
-<code>autodraw</code>. <a href="https://github.com/AL-255/sycan">Source on GitHub</a>.</p>
+<div class="header">
+  <img src="res/sycan.png" alt="SYCAN logo">
+  <div>
+    <h1>SYCAN REPL Demo</h1>
+    <p class="sub">Symbolic circuit analysis (DC · AC · impedance · Monte-Carlo) running
+    entirely in your browser via Pyodide, with inline schematic rendering via
+    <code>autodraw</code>. <a href="https://github.com/AL-255/sycan">Source on GitHub</a>.</p>
+  </div>
+</div>
 
 <div id="status">Loading Pyodide…</div>
 
