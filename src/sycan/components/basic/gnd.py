@@ -1,10 +1,10 @@
 """Ground reference (``GND``): pins a node to the absolute zero potential."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSpec, StampContext
 
 
 @dataclass
@@ -14,13 +14,20 @@ class GND(Component):
     Functionally equivalent to a 0 V voltage source between ``node`` and
     the implicit ground (MNA node ``"0"``). Its branch current ``I(name)``
     reports whatever net current flows out of ``node`` into the ground
-    reference.
+    reference. Noiseless; ``include_noise`` is accepted for interface
+    uniformity.
     """
 
     name: str
     node: str
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("node",)
     has_aux: ClassVar[bool] = True
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
+
+    def __post_init__(self) -> None:
+        self.include_noise = self._normalize_noise(self.include_noise)
 
     def stamp(self, ctx: StampContext) -> None:
         aux = ctx.aux(self.name)

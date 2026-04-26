@@ -3,11 +3,18 @@
 Node ``"0"`` is always ground. Components are added either in bulk via
 :meth:`Circuit.add` or through typed convenience methods that mirror
 SPICE letters (``add_resistor``, ``add_vsource``, ``add_vcvs`` ...).
+
+``Circuit.add`` reads a component's circuit nodes through the unified
+:attr:`~sycan.mna.Component.ports` interface — it does not know about
+specific component types. The catalog of available component classes is
+populated at import time via :mod:`sycan.components` and exposed by
+:meth:`Circuit.available_components`.
 """
 from __future__ import annotations
 
 from typing import Optional
 
+import sycan.components  # noqa: F401  -- triggers component auto-discovery
 from sycan.mna import Component, Value
 from sycan.components.active import (
     BJT,
@@ -47,29 +54,21 @@ class Circuit:
             self._nodes[node] = len(self._nodes)
 
     def add(self, component: Component) -> Component:
-        """Append a pre-built component, registering its referenced nodes."""
-        for attr in (
-            "n_plus",
-            "n_minus",
-            "nc_plus",
-            "nc_minus",
-            "node",
-            "drain",
-            "gate",
-            "source",
-            "collector",
-            "base",
-            "emitter",
-            "anode",
-            "cathode",
-            "plate",
-            "grid",
-        ):
-            node = getattr(component, attr, None)
-            if node is not None:
-                self._touch(node)
+        """Append a pre-built component, registering its referenced nodes.
+
+        Nodes are read through the component's
+        :attr:`~sycan.mna.Component.ports` declaration, so any new
+        :class:`Component` subclass works without changes here.
+        """
+        for node in component.iter_node_names():
+            self._touch(node)
         self.components.append(component)
         return component
+
+    @staticmethod
+    def available_components() -> dict[str, type[Component]]:
+        """Return a name → class map of every registered component type."""
+        return Component.available()
 
     def add_resistor(self, name: str, n_plus: str, n_minus: str, value: Value) -> Resistor:
         return self.add(Resistor(name, n_plus, n_minus, value))  # type: ignore[return-value]

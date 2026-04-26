@@ -1,12 +1,12 @@
 """Current-controlled voltage source (SPICE ``H``)."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSpec, StampContext
 
 
 @dataclass
@@ -14,7 +14,9 @@ class CCVS(Component):
     """CCVS: ``V(n_plus) - V(n_minus) = gain * I(ctrl)``.
 
     ``ctrl`` is the name of the controlling voltage source; ``gain`` is
-    a transresistance. SPICE form ``Hxxx N+ N- VNAM GAIN``.
+    a transresistance. SPICE form ``Hxxx N+ N- VNAM GAIN``. Ideal
+    controlled sources are noiseless; ``include_noise`` is accepted for
+    interface uniformity.
     """
 
     name: str
@@ -22,11 +24,15 @@ class CCVS(Component):
     n_minus: str
     ctrl: str
     gain: sp.Expr
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("n_plus", "n_minus")
     has_aux: ClassVar[bool] = True
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
         self.gain = sp.sympify(self.gain)
+        self.include_noise = self._normalize_noise(self.include_noise)
 
     def stamp(self, ctx: StampContext) -> None:
         aux = ctx.aux(self.name)

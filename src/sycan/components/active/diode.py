@@ -15,30 +15,62 @@ term handled by ``stamp_nonlinear``; AC analysis is currently a no-op
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, q
 
 _DEFAULT_VT = sp.Rational(2585, 100000)
 
 
 @dataclass
 class Diode(Component):
+    """Shockley diode.
+
+    Pass ``include_noise="shot"`` (or ``"all"``) to attach a shot-noise
+    current source between anode and cathode with one-sided PSD
+    ``2·q·I_op``. ``I_op`` defaults to a per-instance symbolic
+    operating-point current named ``I_op_<diode-name>``; supply a
+    sympy expression to pin it down.
+    """
+
     name: str
     anode: str
     cathode: str
     IS: sp.Expr
     N: sp.Expr = field(default_factory=lambda: sp.Integer(1))
     V_T: sp.Expr = field(default_factory=lambda: _DEFAULT_VT)
+    I_op: Optional[sp.Expr] = None
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("anode", "cathode")
     has_nonlinear: ClassVar[bool] = True
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"shot"})
 
     def __post_init__(self) -> None:
         self.IS = sp.sympify(self.IS)
         self.N = sp.sympify(self.N)
         self.V_T = sp.sympify(self.V_T)
+        if self.I_op is None:
+            self.I_op = sp.Symbol(f"I_op_{self.name}")
+        else:
+            self.I_op = sp.sympify(self.I_op)
+        self.include_noise = self._normalize_noise(self.include_noise)
+
+    def noise_sources(self) -> list[NoiseSource]:
+        out: list[NoiseSource] = []
+        if "shot" in self.include_noise:
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.shot",
+                    kind="shot",
+                    n_plus=self.anode,
+                    n_minus=self.cathode,
+                    psd=2 * q * self.I_op,
+                )
+            )
+        return out
 
     def stamp(self, ctx: StampContext) -> None:
         return None

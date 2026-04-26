@@ -29,16 +29,22 @@ a lossy version would replace ``s td`` with ``γ l = (α + s/v) l``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSpec, StampContext
 
 
 @dataclass
 class TLINE(Component):
+    """Lossless 2-port transmission line.
+
+    Lossless transmission lines are noiseless; ``include_noise`` is
+    accepted for interface uniformity.
+    """
+
     name: str
     n_in_p: str
     n_in_m: str
@@ -46,10 +52,15 @@ class TLINE(Component):
     n_out_m: str
     Z0: sp.Expr
     td: sp.Expr
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
+
+    ports: ClassVar[tuple[str, ...]] = ("n_in_p", "n_in_m", "n_out_p", "n_out_m")
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
         self.Z0 = sp.sympify(self.Z0)
         self.td = sp.sympify(self.td)
+        self.include_noise = self._normalize_noise(self.include_noise)
 
     # DC: short the inner conductor with an auxiliary branch current.
     def aux_count(self, mode: str) -> int:

@@ -5,5 +5,8 @@
   {"label": "2-T V_T reference", "file": "2t_vref.py"},
   {"label": "CS amp impedances", "file": "cs_amp.py"},
   {"label": "SRPP optimal load", "file": "srpp.py"},
-  {"label": "Wheatstone bridge", "file": "wheatstone.py"}
+  {"label": "Wheatstone bridge",       "file": "wheatstone.py"},
+  {"label": "RC noise (kT/C)",         "file": "rc_noise.py"},
+  {"label": "CS amp noise",            "file": "cs_amp_noise.py"},
+  {"label": "Noise-cancelling LNA",    "file": "noise_cancelling_lna.py"}
 ]

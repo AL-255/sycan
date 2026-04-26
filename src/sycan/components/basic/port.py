@@ -9,10 +9,10 @@ it to pick an injection point and to auto-terminate the other ports
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSpec, StampContext
 
 
 @dataclass
@@ -21,8 +21,11 @@ class Port(Component):
     n_plus: str
     n_minus: str = "0"
     role: str = "generic"  # "input", "output", or "generic"
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("n_plus", "n_minus")
     has_aux: ClassVar[bool] = False
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
         self.role = self.role.lower()
@@ -31,6 +34,7 @@ class Port(Component):
                 f"Port {self.name!r}: role must be 'input', 'output' or "
                 f"'generic', got {self.role!r}"
             )
+        self.include_noise = self._normalize_noise(self.include_noise)
 
     def stamp(self, ctx: StampContext) -> None:
         return None

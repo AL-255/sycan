@@ -50,17 +50,27 @@ Default parameters model an ideal Ebers-Moll transistor:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, q
 
 _DEFAULT_VT = sp.Rational(2585, 100000)
 
 
 @dataclass
 class BJT(Component):
+    """Gummel-Poon DC BJT.
+
+    With ``include_noise="shot"`` (or ``"all"``) two shot-noise current
+    sources are attached: one between collector and emitter with PSD
+    ``2·q·I_C_op`` (collector current shot), one between base and
+    emitter with PSD ``2·q·I_B_op`` (base current shot). Operating-point
+    currents default to per-instance symbols ``I_C_op_<name>`` and
+    ``I_B_op_<name>``; pass values to override.
+    """
+
     name: str
     collector: str
     base: str
@@ -80,8 +90,13 @@ class BJT(Component):
     ISC: sp.Expr = field(default_factory=lambda: sp.Integer(0))
     NC: sp.Expr = field(default_factory=lambda: sp.Integer(2))
     V_T: sp.Expr = field(default_factory=lambda: _DEFAULT_VT)
+    I_C_op: Optional[sp.Expr] = None
+    I_B_op: Optional[sp.Expr] = None
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("collector", "base", "emitter")
     has_nonlinear: ClassVar[bool] = True
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"shot"})
 
     def __post_init__(self) -> None:
         self.polarity = self.polarity.upper()
@@ -96,6 +111,38 @@ class BJT(Component):
             "ISE", "NE", "ISC", "NC", "V_T",
         ):
             setattr(self, attr, sp.sympify(getattr(self, attr)))
+        if self.I_C_op is None:
+            self.I_C_op = sp.Symbol(f"I_C_op_{self.name}")
+        else:
+            self.I_C_op = sp.sympify(self.I_C_op)
+        if self.I_B_op is None:
+            self.I_B_op = sp.Symbol(f"I_B_op_{self.name}")
+        else:
+            self.I_B_op = sp.sympify(self.I_B_op)
+        self.include_noise = self._normalize_noise(self.include_noise)
+
+    def noise_sources(self) -> list[NoiseSource]:
+        out: list[NoiseSource] = []
+        if "shot" in self.include_noise:
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.shot.collector",
+                    kind="shot",
+                    n_plus=self.collector,
+                    n_minus=self.emitter,
+                    psd=2 * q * self.I_C_op,
+                )
+            )
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.shot.base",
+                    kind="shot",
+                    n_plus=self.base,
+                    n_minus=self.emitter,
+                    psd=2 * q * self.I_B_op,
+                )
+            )
+        return out
 
     def stamp(self, ctx: StampContext) -> None:
         return None

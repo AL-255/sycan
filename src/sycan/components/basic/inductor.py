@@ -8,24 +8,34 @@ Behaviour depends on the analysis mode:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import ClassVar
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSpec, StampContext
 
 
 @dataclass
 class Inductor(Component):
-    """Linear inductor; ``value`` is the inductance."""
+    """Linear inductor; ``value`` is the inductance.
+
+    Ideal inductors are noiseless; the ``include_noise`` parameter is
+    accepted for interface uniformity but contributes no source.
+    """
 
     name: str
     n_plus: str
     n_minus: str
     value: sp.Expr
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
+
+    ports: ClassVar[tuple[str, ...]] = ("n_plus", "n_minus")
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
         self.value = sp.sympify(self.value)
+        self.include_noise = self._normalize_noise(self.include_noise)
 
     def aux_count(self, mode: str) -> int:
         return 1 if mode == "dc" else 0

@@ -20,11 +20,11 @@ Concrete classes :class:`NMOS_subthreshold` and
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, q
 
 # Thermal voltage kT/q at ~300 K, in volts.
 _DEFAULT_VT = sp.Rational(2585, 100000)
@@ -45,9 +45,13 @@ class _MOSFET_subthreshold(Component):
     V_TH: sp.Expr  # positive magnitude for both polarities
     m: sp.Expr = field(default_factory=lambda: _DEFAULT_M)
     V_T: sp.Expr = field(default_factory=lambda: _DEFAULT_VT)
+    I_op: Optional[sp.Expr] = None
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("drain", "gate", "source")
     has_nonlinear: ClassVar[bool] = True
     polarity: ClassVar[str] = ""  # overridden by concrete subclasses
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"shot"})
 
     def __post_init__(self) -> None:
         if self.polarity not in ("N", "P"):
@@ -62,6 +66,25 @@ class _MOSFET_subthreshold(Component):
         self.V_TH = sp.sympify(self.V_TH)
         self.m = sp.sympify(self.m)
         self.V_T = sp.sympify(self.V_T)
+        if self.I_op is None:
+            self.I_op = sp.Symbol(f"I_op_{self.name}")
+        else:
+            self.I_op = sp.sympify(self.I_op)
+        self.include_noise = self._normalize_noise(self.include_noise)
+
+    def noise_sources(self) -> list[NoiseSource]:
+        out: list[NoiseSource] = []
+        if "shot" in self.include_noise:
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.shot",
+                    kind="shot",
+                    n_plus=self.drain,
+                    n_minus=self.source,
+                    psd=2 * q * self.I_op,
+                )
+            )
+        return out
 
     @property
     def _pol(self) -> sp.Expr:

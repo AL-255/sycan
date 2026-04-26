@@ -41,13 +41,19 @@ from sycan.components.basic import (
 )
 from sycan.mna import (
     Component,
+    NoiseSource,
+    NoiseSpec,
     StampContext,
     build_mna,
     build_residuals,
+    k_B,
+    q,
     solve_ac,
     solve_dc,
     solve_impedance,
+    solve_noise,
 )
+from sycan.mna import T as T_kelvin  # avoid shadowing trans-line letter elsewhere
 from sycan.autodraw import autodraw
 from sycan.polynomials import bessel, butterworth, chebyshev1
 from sycan.schematic import draw
@@ -67,13 +73,18 @@ __all__ = [
     "Inductor",
     "NMOS_L1",
     "NMOS_subthreshold",
+    "NoiseSource",
+    "NoiseSpec",
     "PMOS_L1",
     "PMOS_subthreshold",
     "Port",
     "Resistor",
     "StampContext",
+    "T_kelvin",
     "TLINE",
     "Triode",
+    "k_B",
+    "q",
     "abcd_to_s",
     "abcd_to_y",
     "abcd_to_z",
@@ -105,4 +116,5 @@ __all__ = [
     "solve_ac",
     "solve_dc",
     "solve_impedance",
+    "solve_noise",
 ]

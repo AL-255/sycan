@@ -6,7 +6,7 @@ from typing import ClassVar, Optional
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSpec, StampContext
 
 
 @dataclass
@@ -17,7 +17,8 @@ class VoltageSource(Component):
     ``n_minus`` through the source, matching SPICE's convention.
 
     ``ac_value`` is the small-signal phasor used in AC analysis. If
-    ``None``, AC analysis reuses the DC ``value``.
+    ``None``, AC analysis reuses the DC ``value``. Ideal sources are
+    noiseless; ``include_noise`` is accepted for interface uniformity.
     """
 
     name: str
@@ -25,13 +26,17 @@ class VoltageSource(Component):
     n_minus: str
     value: sp.Expr
     ac_value: Optional[sp.Expr] = None
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("n_plus", "n_minus")
     has_aux: ClassVar[bool] = True
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
         self.value = sp.sympify(self.value)
         if self.ac_value is not None:
             self.ac_value = sp.sympify(self.ac_value)
+        self.include_noise = self._normalize_noise(self.include_noise)
 
     def stamp(self, ctx: StampContext) -> None:
         aux = ctx.aux(self.name)

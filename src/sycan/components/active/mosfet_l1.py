@@ -39,7 +39,10 @@ from typing import ClassVar, Optional
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B
+
+# Long-channel channel-thermal-noise excess factor (γ ≈ 2/3 in saturation).
+_NOISE_GAMMA = sp.Rational(2, 3)
 
 
 @dataclass
@@ -58,9 +61,12 @@ class _MOSFET_L1(Component):
     C_gd: sp.Expr = field(default_factory=lambda: sp.Integer(0))
     V_GS_op: Optional[sp.Expr] = None
     V_DS_op: Optional[sp.Expr] = None
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("drain", "gate", "source")
     has_nonlinear: ClassVar[bool] = True
     polarity: ClassVar[str] = ""  # overridden by concrete subclasses
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"thermal"})
 
     def __post_init__(self) -> None:
         if self.polarity not in ("N", "P"):
@@ -77,6 +83,22 @@ class _MOSFET_L1(Component):
             "V_GS_op", "V_DS_op",
         ):
             setattr(self, attr, sp.sympify(getattr(self, attr)))
+        self.include_noise = self._normalize_noise(self.include_noise)
+
+    def noise_sources(self) -> list[NoiseSource]:
+        out: list[NoiseSource] = []
+        if "thermal" in self.include_noise:
+            g_m, _ = self._small_signal_params()
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.thermal",
+                    kind="thermal",
+                    n_plus=self.drain,
+                    n_minus=self.source,
+                    psd=4 * k_B * T * _NOISE_GAMMA * g_m,
+                )
+            )
+        return out
 
     @property
     def _pol(self) -> sp.Expr:

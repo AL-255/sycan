@@ -36,11 +36,19 @@ from typing import ClassVar, Optional
 
 import sympy as sp
 
-from sycan.mna import Component, StampContext
+from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B
 
 
 @dataclass
 class Triode(Component):
+    """Vacuum-tube triode.
+
+    With ``include_noise="thermal"`` (or ``"all"``) a thermal noise
+    current source is attached between plate and cathode with PSD
+    ``4·k_B·T·g_m`` where ``g_m`` is the small-signal transconductance
+    evaluated at ``(V_g_op, V_p_op)``.
+    """
+
     name: str
     plate: str
     grid: str
@@ -52,8 +60,11 @@ class Triode(Component):
     C_gk: sp.Expr = field(default_factory=lambda: sp.Integer(0))
     C_gp: sp.Expr = field(default_factory=lambda: sp.Integer(0))
     C_pk: sp.Expr = field(default_factory=lambda: sp.Integer(0))
+    include_noise: NoiseSpec = field(default=None, kw_only=True)
 
+    ports: ClassVar[tuple[str, ...]] = ("plate", "grid", "cathode")
     has_nonlinear: ClassVar[bool] = True
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"thermal"})
 
     def __post_init__(self) -> None:
         if self.V_g_op is None:
@@ -62,6 +73,22 @@ class Triode(Component):
             self.V_p_op = sp.Symbol(f"V_p_op_{self.name}")
         for attr in ("K", "mu", "V_g_op", "V_p_op", "C_gk", "C_gp", "C_pk"):
             setattr(self, attr, sp.sympify(getattr(self, attr)))
+        self.include_noise = self._normalize_noise(self.include_noise)
+
+    def noise_sources(self) -> list[NoiseSource]:
+        out: list[NoiseSource] = []
+        if "thermal" in self.include_noise:
+            g_m, _ = self._small_signal_params()
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.thermal",
+                    kind="thermal",
+                    n_plus=self.plate,
+                    n_minus=self.cathode,
+                    psd=4 * k_B * T * g_m,
+                )
+            )
+        return out
 
     # ------------------------------------------------------------------
 
