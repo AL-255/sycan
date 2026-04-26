@@ -21,4 +21,4 @@ print()
 print("Z_out = R_L || r_o:")
 print(f"$$Z_{{out}} = {sp.latex(Z_out)}$$")
 
-autodraw(c, res_dir=None)
+autodraw(c)

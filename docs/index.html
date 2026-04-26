@@ -188,6 +188,58 @@ async function buildExamples() {
   }
 }
 
+// Glyph SVGs that ship in res/. Must stay in sync with KIND_GLYPHS in
+// sycan/svg_util.py — extra entries here are silently ignored, but a
+// missing entry means that component kind falls back to the labelled
+// rect on the page even though the wheel knows about it.
+const GLYPH_KINDS = [
+  'nmos', 'pmos', 'npn', 'pnp', 'triode', 'diode',
+  'vsrc', 'isrc', 'res', 'ind', 'cap', 'ccsrc', 'gnd',
+];
+const GLYPH_DIR = '/sycan_res';
+
+async function fetchGlyphs() {
+  const entries = await Promise.all(GLYPH_KINDS.map(async (kind) => {
+    const r = await fetch(`./res/${kind}.svg`);
+    if (!r.ok) {
+      // Don't fail the whole boot — just skip kinds the deployment is
+      // missing. autodraw renders those as labelled rects.
+      console.warn(`glyph ${kind}.svg missing: ${r.status}`);
+      return null;
+    }
+    return [kind, await r.text()];
+  }));
+  return entries.filter((e) => e !== null);
+}
+
+function installGlyphs(entries) {
+  // Materialize the glyphs inside Pyodide's virtual FS at GLYPH_DIR
+  // and point sycan.autodraw at it. autodraw's default is computed
+  // from __file__ at module import time, which lands on a path that
+  // doesn't exist in Pyodide; we override the module attribute so
+  // examples can call autodraw(...) without a res_dir kwarg.
+  py.FS.mkdirTree(GLYPH_DIR);
+  const enc = new TextEncoder();
+  for (const [kind, text] of entries) {
+    py.FS.writeFile(`${GLYPH_DIR}/${kind}.svg`, enc.encode(text));
+  }
+  // Python evaluates default arguments at def time, so updating the
+  // module-level _DEFAULT_RES_DIR doesn't change the already-bound
+  // default on autodraw(). Patch the keyword default in-place too so
+  // examples can omit the res_dir kwarg. Note: ``sycan/__init__.py``
+  // rebinds ``sycan.autodraw`` to the function, shadowing the
+  // submodule, so we have to fetch the module from ``sys.modules``
+  // rather than via ``import sycan.autodraw``.
+  py.runPython(`
+import sys
+from pathlib import Path
+_ad = sys.modules['sycan.autodraw']
+_p = Path(${JSON.stringify(GLYPH_DIR)})
+_ad._DEFAULT_RES_DIR = _p
+_ad.autodraw.__kwdefaults__['res_dir'] = _p
+`);
+}
+
 function initEditor() {
   const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   cm = CodeMirror.fromTextArea(editorEl, {
@@ -210,21 +262,29 @@ function initEditor() {
 async function boot() {
   initEditor();
   resetSchematic();
-  // Examples and Pyodide load in parallel; we only need both done before
-  // enabling Run.
+  // Examples, glyphs, and Pyodide all load in parallel; we only need
+  // everything done before enabling Run. Glyphs are fetched as static
+  // files from the Pages deployment and written into Pyodide's FS once
+  // it's up — see installGlyphs.
   const examplesP = buildExamples().catch((e) => {
     status.textContent = 'Failed to load examples: ' + e;
     throw e;
+  });
+  const glyphsP = fetchGlyphs().catch((e) => {
+    console.warn('Failed to fetch glyphs, falling back to rects:', e);
+    return [];
   });
   py = await loadPyodide();
   status.textContent = 'Installing sympy + sycan…';
 await py.loadPackage(['sympy', 'micropip']);
   await py.runPythonAsync(`
 import micropip
-await micropip.install('./sycan-0.1.1-py3-none-any.whl?v=2')
+await micropip.install('./sycan-0.1.3-py3-none-any.whl')
 import sycan
 print(f'sycan {sycan.__name__} ready')
   `);
+  const glyphs = await glyphsP;
+  if (glyphs.length > 0) installGlyphs(glyphs);
   await examplesP;
   status.textContent = 'Ready. Pick an example above (or edit) and hit Run.';
   runBtn.disabled = false;

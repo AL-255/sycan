@@ -45,4 +45,4 @@ print("Setting dV(n_1)/dT = 0 gives the compensation condition:")
 print(rf"$$\frac{{dV(n_1)}}{{dT}} = {sp.latex(dVdT)} = 0$$")
 
 
-autodraw(netlist, res_dir=None)
+autodraw(netlist)

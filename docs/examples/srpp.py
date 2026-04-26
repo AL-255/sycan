@@ -23,4 +23,4 @@ print("R_s -> infinity limit (== R_L optimal for 2nd-harmonic cancellation):")
 print(rf"$$\lim_{{R_s \to \infty}} Z_{{out}} = "
       f"{sp.latex(sp.simplify(sp.limit(Z_out, R_s, sp.oo)))}$$")
 
-autodraw(c, res_dir=None)
+autodraw(c)

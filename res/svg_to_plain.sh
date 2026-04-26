@@ -53,8 +53,14 @@ fi
 for src in "${sources[@]}"; do
     name="$(basename "$src")"
     dest="$res_dir/$name"
-    "$INKSCAPE" --export-plain-svg --export-overwrite \
-        --export-filename="$dest" "$src" >/dev/null 2>&1
+
+    "$INKSCAPE" "$src" \
+        --export-plain-svg \
+        --export-area-drawing \
+        --export-overwrite \
+        --export-filename="$dest" \
+        >/dev/null 2>&1
+
     echo "  $name"
 done
 

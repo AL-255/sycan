@@ -71,8 +71,8 @@ from sycan.mna import Component
 # ---------------------------------------------------------------------------
 # Layout constants (px). Tweaking these here changes the visual density.
 # ---------------------------------------------------------------------------
-COL_W = 150
-ROW_H = 95
+COL_W = 30
+ROW_H = 100
 BOX_W = 40
 BOX_H = 40
 PORT_LEN = 14
@@ -85,7 +85,7 @@ GRID_PX = 10           # final-rendering routing grid resolution
 SA_GRID_PX = 10         # cost-evaluation grid (must match the final grid so
                         # tight inter-component clearances don't read as
                         # unroutable in the cost when they actually route fine)
-MIN_GAP = 25            # min edge-to-edge clearance between two components
+MIN_GAP = 30            # min edge-to-edge clearance between two components
                         # stacked in the same column
 MIN_PITCH = BOX_H + MIN_GAP  # default center-to-center distance for two
                              # default-sized boxes; per-component with glyphs
@@ -486,6 +486,47 @@ class _Placed:
     pin_side: dict[str, str] = field(default_factory=dict)  # "top"/"bot"/"left"/"right"
 
 
+def _spine_junctions(
+    branches: Sequence[_Branch],
+    uf: _UF,
+    spine_index: dict[str, list[tuple[_CompDesc, str]]],
+) -> list[dict]:
+    """Identify spine-junction nets and the branches meeting at each.
+
+    A junction net (e.g. the diff-pair tail) has more than two spine
+    endpoints. Branches whose *bottom* pin lands there are "above" the
+    junction; branches whose *top* pin lands there are "below" it. For
+    the trunk wire to run through clear space (and not coincide with a
+    component bbox edge of either side), the stem must be counted into
+    the tallest arm above — i.e. the below pins must sit at least
+    ``cross_gap`` lower than the above pins. ``_enforce_min_pitch``
+    uses this info to enforce that clearance.
+
+    Junctions where only one side is populated (no above or no below
+    branch) are dropped — there's nothing to clear past.
+    """
+    def is_junction(net: str) -> bool:
+        return len({id(c) for c, _ in spine_index.get(net, ())}) > 2
+
+    by_net: dict[str, dict] = {}
+    for b in branches:
+        if not b.descs:
+            continue
+        last_net = uf.find(b.descs[-1].bot_net())
+        if is_junction(last_net):
+            entry = by_net.setdefault(
+                last_net, {"net": last_net, "above": [], "below": []}
+            )
+            entry["above"].append(b)
+        first_net = uf.find(b.descs[0].top_net())
+        if is_junction(first_net):
+            entry = by_net.setdefault(
+                first_net, {"net": first_net, "above": [], "below": []}
+            )
+            entry["below"].append(b)
+    return [info for info in by_net.values() if info["above"] and info["below"]]
+
+
 def _logical_chain_length(
     branches: Sequence[_Branch],
     uf: _UF,
@@ -537,15 +578,24 @@ def _column_widths(branches: Sequence[_Branch]) -> list[float]:
     """Per-branch drawing width in canvas units.
 
     Picks the widest component in the branch and adds a small gutter
-    so wires can route along the column boundary.
+    so wires can route along the column boundary. Each width is
+    rounded up to a multiple of ``2 * GRID_PX`` so that the column
+    centres themselves end up on the routing grid (otherwise different
+    anchor offsets in the same column round through banker's rules to
+    inconsistent cells).
     """
+    import math
+
+    step = 2 * GRID_PX
     out: list[float] = []
     for branch in branches:
         if not branch.descs:
             out.append(float(COL_W))
         else:
             widest = max(d.bbox_w for d in branch.descs)
-            out.append(max(float(COL_W), widest + 56.0))
+            w = max(float(COL_W), widest + 56.0)
+            w = math.ceil(w / step) * step
+            out.append(w)
     return out
 
 
@@ -654,31 +704,41 @@ def _layout(
 
     for branch in branches:
         b_idx = branch_index[id(branch)]
-        cx = col_centers[b_idx]
+        cx_raw = col_centers[b_idx]
         bw_col = col_widths[b_idx]  # noqa: F841 (kept for future extension)
         for d in branch.descs:
-            cy = y_pos[id(d)]
+            cy_raw = y_pos[id(d)]
             bw, bh = d.bbox_w, d.bbox_h
+            # Anchor the box so the *spine-top* pin lands at the column
+            # centre, regardless of bbox width. With mixed-width
+            # glyphs in the same column (e.g. a 70-wide resistor over
+            # a 60-wide NMOS), aligning bbox centres would leave their
+            # spine pins offset by (bw_a - bw_b) / 2; aligning the
+            # spine pin instead keeps the vertical wire perfectly
+            # straight. The box itself can sit asymmetrically around
+            # the column — that is the user's responsibility to
+            # design glyphs for.
+            anchor_port = d.spine_top if not d.flip else d.spine_bot
+            anchor_ox, _ = d.port_offsets.get(anchor_port, (bw / 2.0, 0))
+            if d.mirror:
+                anchor_ox = bw - anchor_ox
+            box_left = round((cx_raw - anchor_ox) / GRID_PX) * GRID_PX
+            box_top = round((cy_raw - bh / 2.0) / GRID_PX) * GRID_PX
+            cx = box_left + bw / 2.0
+            cy = box_top + bh / 2.0
             p = _Placed(d, cx, cy)
 
             # Pin positions: native offsets, with flip/mirror applied.
-            # The pin coordinates are also snapped to the routing grid
-            # so the BFS-routed wire endpoints meet the pin pad without
-            # an extra orthogonal bridge segment (those bridges add a
-            # spurious turn at every wire endpoint, which the legalize
-            # pass otherwise can't undo because BFS only visits cells).
+            # All offsets are GRID_PX multiples (the lint enforces it),
+            # and box_left is grid-aligned, so pins land on grid too.
             for port, (ox, oy) in d.port_offsets.items():
                 if d.mirror:
                     ox = bw - ox
                 if d.flip:
                     oy = bh - oy
-                px = cx - bw / 2.0 + ox
-                py = cy - bh / 2.0 + oy
-                px_snap = round(px / GRID_PX) * GRID_PX
-                py_snap = round(py / GRID_PX) * GRID_PX
-                p.pin_pos[port] = (px_snap, py_snap)
-                # Classify the pin's side (relative to the *unsnapped*
-                # box edge so the label anchor stays meaningful).
+                px = box_left + ox
+                py = box_top + oy
+                p.pin_pos[port] = (px, py)
                 if py <= cy - bh / 2.0 + 0.5:
                     p.pin_side[port] = "top"
                 elif py >= cy + bh / 2.0 - 0.5:
@@ -716,6 +776,7 @@ class _RouteGrid:
         self.h = h
         self.blocked = [[False] * h for _ in range(w)]
         self.used = [[0] * h for _ in range(w)]
+        self.clearance = [[0] * h for _ in range(w)]  # filled by finalize()
         self.allow_pin: set[tuple[int, int]] = set()
 
     def block_rect(self, x0: int, y0: int, x1: int, y1: int) -> None:
@@ -723,9 +784,56 @@ class _RouteGrid:
             for y in range(max(0, y0), min(self.h, y1)):
                 self.blocked[x][y] = True
 
+    def finalize(self) -> None:
+        """Compute a per-cell *clearance penalty* — distance band to
+        the nearest blocked cell, capped at 2. Cells adjacent to a
+        component get a higher penalty so the BFS prefers routes
+        through open space, which makes L- and S-shaped traces curve
+        *away* from components instead of running tight along their
+        edges.
+        """
+        # Multi-source BFS from blocked cells.
+        from collections import deque
+        dist = [[3] * self.h for _ in range(self.w)]
+        q: deque[tuple[int, int]] = deque()
+        for x in range(self.w):
+            for y in range(self.h):
+                if self.blocked[x][y]:
+                    dist[x][y] = 0
+                    q.append((x, y))
+        while q:
+            x, y = q.popleft()
+            d = dist[x][y]
+            if d >= 2:
+                continue
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < self.w and 0 <= ny < self.h):
+                    continue
+                if dist[nx][ny] > d + 1:
+                    dist[nx][ny] = d + 1
+                    q.append((nx, ny))
+        # Distance-band penalty: cells adjacent to a block cost the
+        # most, cells two away cost a bit less, and cells three or
+        # more away pay nothing. The BFS aggregates this across the
+        # whole path, so wires naturally curve away from component
+        # edges into open space.
+        for x in range(self.w):
+            for y in range(self.h):
+                if self.blocked[x][y]:
+                    self.clearance[x][y] = 0
+                    continue
+                d = dist[x][y]
+                if d == 1:
+                    self.clearance[x][y] = 2
+                elif d == 2:
+                    self.clearance[x][y] = 1
+                else:
+                    self.clearance[x][y] = 0
+
     def lee(self, src: tuple[int, int], dst_set: set[tuple[int, int]]
             ) -> Optional[list[tuple[int, int]]]:
-        """Shortest-path BFS, weighting congestion. Returns cell path."""
+        """Shortest-path Dijkstra. Returns cell path."""
         if not dst_set:
             return None
         if src in dst_set:
@@ -739,7 +847,6 @@ class _RouteGrid:
             return None
         dist[sx][sy] = 0
 
-        # Lazy bucket queue keyed on cost (cost stays small relative to grid).
         from heapq import heappush, heappop
         heap: list[tuple[int, int, int]] = [(0, sx, sy)]
 
@@ -758,7 +865,10 @@ class _RouteGrid:
                 if self.blocked[nx][ny] and (nx, ny) not in dst_set \
                         and (nx, ny) not in self.allow_pin:
                     continue
-                step = 1 + 4 * self.used[nx][ny]
+                # Base step + congestion penalty + clearance penalty
+                # (cells next to a component cost more; the L-shape
+                # elbow that lives in open space then wins on ties).
+                step = 1 + 4 * self.used[nx][ny] + self.clearance[nx][ny]
                 # Penalize turns slightly to prefer straight wires.
                 if (x, y) in prev:
                     px, py = prev[(x, y)]
@@ -781,6 +891,81 @@ class _RouteGrid:
     def mark_used(self, path: Iterable[tuple[int, int]]) -> None:
         for x, y in path:
             self.used[x][y] += 1
+
+
+def _find_solder_dots(
+    routed_polylines: Sequence[tuple[str, list[tuple[float, float]]]],
+    tol: float = 0.6,
+) -> list[tuple[float, float]]:
+    """Locate Steiner T-junctions where solder dots should be drawn.
+
+    A point gets a dot when 3 or more wire-rays of the *same net*
+    meet there. A "ray" is the half-line going from the candidate
+    point along a routed segment. Counting:
+
+    * a polyline endpoint at the point contributes 1 ray (the
+      direction of that segment);
+    * a polyline corner at the point contributes 2 rays (one per
+      incident segment);
+    * a polyline segment passing straight *through* the point
+      contributes 2 rays.
+
+    Two rays = a normal L-bend or a clean pin meeting; three or more
+    rays = a junction needing a connection dot.
+    """
+    by_net: dict[str, list[list[tuple[float, float]]]] = {}
+    for cls, pts in routed_polylines:
+        if not cls.startswith("net-") or len(pts) < 2:
+            continue
+        net_key = cls[len("net-"):]
+        by_net.setdefault(net_key, []).append(pts)
+
+    def _close(a: tuple[float, float], b: tuple[float, float]) -> bool:
+        return abs(a[0] - b[0]) < tol and abs(a[1] - b[1]) < tol
+
+    dots: list[tuple[float, float]] = []
+    seen: set[tuple[float, float]] = set()
+    for net, polys in by_net.items():
+        # Candidate junction points: every corner used in any
+        # polyline of this net.
+        candidates: list[tuple[float, float]] = []
+        for poly in polys:
+            for p in poly:
+                if not any(_close(p, c) for c in candidates):
+                    candidates.append(p)
+
+        for cand in candidates:
+            cx, cy = cand
+            rays = 0
+            for poly in polys:
+                for i in range(len(poly) - 1):
+                    a = poly[i]
+                    b = poly[i + 1]
+                    on_a = _close(a, cand)
+                    on_b = _close(b, cand)
+                    if on_a and on_b:
+                        # Zero-length segment — skip.
+                        continue
+                    if on_a or on_b:
+                        rays += 1
+                        continue
+                    # Strictly interior?
+                    if abs(a[0] - b[0]) < tol:
+                        # vertical
+                        if abs(cx - a[0]) < tol and \
+                           min(a[1], b[1]) + tol < cy < max(a[1], b[1]) - tol:
+                            rays += 2
+                    elif abs(a[1] - b[1]) < tol:
+                        # horizontal
+                        if abs(cy - a[1]) < tol and \
+                           min(a[0], b[0]) + tol < cx < max(a[0], b[0]) - tol:
+                            rays += 2
+            if rays >= 3:
+                key = (round(cand[0], 1), round(cand[1], 1))
+                if key not in seen:
+                    seen.add(key)
+                    dots.append(cand)
+    return dots
 
 
 def _polyline_from_path(path: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -845,30 +1030,28 @@ def _pin_positions_for_state(
     boxes: list[tuple[float, float, float, float]] = []
     for d in descs:
         b_idx = branch_of[id(d)]
-        cx = col_centers[b_idx]
-        cy = y_pos[id(d)]
+        cx_raw = col_centers[b_idx]
+        cy_raw = y_pos[id(d)]
         bw, bh = d.bbox_w, d.bbox_h
-        boxes.append((cx - bw / 2.0, cy - bh / 2.0,
-                      cx + bw / 2.0, cy + bh / 2.0))
-
         flip = flips.get(id(d), d.flip)
         mirror = mirrors.get(id(d), d.mirror)
+        # Match _layout: anchor box on the spine-top pin so its canvas
+        # x equals the column centre even when bbox widths vary
+        # between rows in the same column.
+        anchor_port = d.spine_top if not flip else d.spine_bot
+        anchor_ox, _ = d.port_offsets.get(anchor_port, (bw / 2.0, 0))
+        if mirror:
+            anchor_ox = bw - anchor_ox
+        box_left = round((cx_raw - anchor_ox) / GRID_PX) * GRID_PX
+        box_top = round((cy_raw - bh / 2.0) / GRID_PX) * GRID_PX
+        boxes.append((box_left, box_top, box_left + bw, box_top + bh))
 
-        # Each port has a native (x, y) offset relative to box top-left.
-        # Mirror swaps left/right (x -> bw - x); flip swaps top/bottom
-        # (y -> bh - y) — equivalent to rotating the glyph 180°.
-        # Pins are snapped to the routing grid so BFS path endpoints
-        # land exactly on the pad (consistent with what _layout emits).
         for port, (ox, oy) in d.port_offsets.items():
             if mirror:
                 ox = bw - ox
             if flip:
                 oy = bh - oy
-            px = cx - bw / 2.0 + ox
-            py = cy - bh / 2.0 + oy
-            px = round(px / GRID_PX) * GRID_PX
-            py = round(py / GRID_PX) * GRID_PX
-            pins[(id(d), port)] = (px, py)
+            pins[(id(d), port)] = (box_left + ox, box_top + oy)
     return pins, boxes
 
 
@@ -911,25 +1094,16 @@ def _route_total_wirelength(
     grid_px: int = SA_GRID_PX,
     crossing_weight: float = 22.0,
     unroutable_penalty: float = 4000.0,
-    turn_weight: float = 0.0,
 ) -> float:
     """Compute the actual rectilinear-routed wirelength of the layout.
 
-    Each *mid* net is grown as a Steiner tree: a Dijkstra over the grid
-    finds the path with the smallest (cell-count + ε·turn-count) from
-    the current tree to the nearest remaining terminal. The tiny turn
-    penalty inside Dijkstra breaks ties toward straighter paths so
-    BFS-equal-length L-shapes are picked over snake shapes; the
-    ``turn_weight`` parameter on top adds an explicit cost contribution
-    so the SA layer can drive layouts that admit straight wires.
-    *Rail* nets pay the sum of vertical stub lengths to the trunk.
+    Each *mid* net is grown as a Steiner tree: pick one terminal, then
+    BFS from the current tree to the nearest remaining terminal, attach
+    that path, repeat. Component bounding boxes block the grid (pin
+    cells stay open). *Rail* nets pay the sum of vertical stub lengths
+    from each pin up to the rail trunk.
     """
-    from heapq import heappush, heappop
-
-    # Direction encoded as 0..3 for (1,0), (-1,0), (0,1), (0,-1).
-    DIRS: tuple[tuple[int, int], ...] = ((1, 0), (-1, 0), (0, 1), (0, -1))
-    # Tiny turn surcharge inside Dijkstra so ties go to straighter paths.
-    TURN_TIE = 0.05
+    from collections import deque
 
     grid_w = max(2, int(canvas_w / grid_px) + 2)
     grid_h = max(2, int(canvas_h / grid_px) + 2)
@@ -958,12 +1132,9 @@ def _route_total_wirelength(
 
     total = 0.0
     crossings = 0
-    total_turns = 0
     cell_owner = bytearray(grid_w * grid_h)
 
-    INF = float("inf")
-
-    # ---- Mid nets via Steiner-tree, Dijkstra with tiny turn tie-break ----
+    # ---- Mid nets via Steiner-tree BFS ----
     for net_id, (_net_key, terms) in enumerate(mid_nets.items(), start=1):
         owner_id = (net_id % 254) + 1
         first_cell = pin_cells[terms[0]]
@@ -974,78 +1145,47 @@ def _route_total_wirelength(
         remaining_targets -= tree_cells
 
         while remaining_targets:
-            # Dijkstra on (cell, incoming_direction). Distance is cell
-            # count + ε per turn; -1 marks "no incoming direction" for
-            # tree-source cells.
-            dist: dict[tuple[int, int, int], float] = {}
-            parent: dict[tuple[int, int, int],
-                         Optional[tuple[int, int, int]]] = {}
-            pq: list[tuple[float, int, int, int]] = []
+            parent: dict[tuple[int, int], Optional[tuple[int, int]]] = {}
+            q: deque[tuple[int, int]] = deque()
             for c in tree_cells:
-                key = (c[0], c[1], -1)
-                dist[key] = 0.0
-                parent[key] = None
-                heappush(pq, (0.0, c[0], c[1], -1))
+                parent[c] = None
+                q.append(c)
 
-            hit_state: Optional[tuple[int, int, int]] = None
-            while pq:
-                d, x, y, came_from = heappop(pq)
-                state = (x, y, came_from)
-                if d > dist.get(state, INF):
-                    continue
-                if (x, y) in remaining_targets:
-                    hit_state = state
-                    break
-                for di, (dx, dy) in enumerate(DIRS):
+            hit: Optional[tuple[int, int]] = None
+            while q and hit is None:
+                x, y = q.popleft()
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                     nx, ny = x + dx, y + dy
                     if not (0 <= nx < grid_w and 0 <= ny < grid_h):
                         continue
+                    if (nx, ny) in parent:
+                        continue
                     if blocked[cell_idx(nx, ny)] and (nx, ny) not in remaining_targets:
                         continue
-                    nstate = (nx, ny, di)
-                    step = 1.0
-                    if came_from != -1 and came_from != di:
-                        step += TURN_TIE
-                    nd = d + step
-                    if nd < dist.get(nstate, INF):
-                        dist[nstate] = nd
-                        parent[nstate] = state
-                        heappush(pq, (nd, nx, ny, di))
+                    parent[(nx, ny)] = (x, y)
+                    if (nx, ny) in remaining_targets:
+                        hit = (nx, ny)
+                        break
+                    q.append((nx, ny))
 
-            if hit_state is None:
+            if hit is None:
                 total += unroutable_penalty
                 remaining_targets.pop()
                 continue
 
-            # Walk back, recording the path cells & counting turns.
-            path_cells: list[tuple[int, int]] = []
-            cur: Optional[tuple[int, int, int]] = hit_state
+            path_len = 0
+            cur: Optional[tuple[int, int]] = hit
             while cur is not None:
-                path_cells.append((cur[0], cur[1]))
-                cur = parent[cur]
-            # path_cells[0] = hit, path_cells[-1] = source.
-
-            # Update tree, owners, crossings.
-            for c in path_cells:
-                ci = cell_idx(c[0], c[1])
-                if c not in tree_cells:
+                ci = cell_idx(*cur)
+                if cur not in tree_cells:
                     if cell_owner[ci] != 0 and cell_owner[ci] != owner_id:
                         crossings += 1
                     cell_owner[ci] = owner_id
-                    tree_cells.add(c)
-            total += len(path_cells) - 1
-
-            # Count turns: a turn at index i means the step (i-1 -> i)
-            # has a different (dx, dy) than (i -> i+1), where indices
-            # run hit -> source.
-            for i in range(1, len(path_cells) - 1):
-                px_, py_ = path_cells[i + 1]   # earlier on path
-                cx_, cy_ = path_cells[i]
-                nx_, ny_ = path_cells[i - 1]   # later on path
-                if (cx_ - px_, cy_ - py_) != (nx_ - cx_, ny_ - cy_):
-                    total_turns += 1
-
-            remaining_targets.discard((hit_state[0], hit_state[1]))
+                    tree_cells.add(cur)
+                cur = parent[cur]
+                path_len += 1
+            total += path_len - 1
+            remaining_targets.discard(hit)
 
     # ---- Rail nets: vertical stubs to the trunk ----
     for net_key, terms in rail_nets.items():
@@ -1061,11 +1201,7 @@ def _route_total_wirelength(
                 if cell_owner[ci] == 0:
                     cell_owner[ci] = 255
 
-    return (
-        total * grid_px
-        + crossing_weight * crossings * grid_px
-        + turn_weight * total_turns
-    )
+    return total * grid_px + crossing_weight * crossings * grid_px
 
 
 def _route_total_hpwl(
@@ -1135,163 +1271,116 @@ def _enforce_min_pitch(
     y_pos: dict[int, float],
     rail_top_y: float,
     rail_bot_y: float,
-    min_gap: float = 24.0,
+    min_gap: float = MIN_GAP,
+    junctions: Optional[Sequence[dict]] = None,
 ) -> None:
     """Push y values into a feasible region.
 
     Row order is preserved; consecutive boxes in a column must keep at
-    least ``min_gap`` of edge-to-edge clearance, and every box must fit
-    between the two rail bounds. In-place, idempotent.
+    least ``min_gap`` of edge-to-edge clearance, and every box must
+    fit between the two rail bounds. Output y values are snapped to
+    ``GRID_PX`` (rounded *up* to the next multiple) so the subsequent
+    snap in ``_layout`` is a no-op — otherwise the snap could shrink
+    the post-enforcement gap below ``min_gap`` by up to GRID_PX. In
+    place, idempotent.
+
+    If ``junctions`` is given (from ``_spine_junctions``), spine
+    pins meeting at each junction are kept apart by at least the
+    cross-column ``cross_gap = max(min_gap, 2 * PORT_LEN)``: every
+    "below" branch's top pin must sit that far under the lowest
+    "above" branch's bot pin. The trunk wire then has clear space to
+    run horizontally between the two box rows instead of along their
+    coinciding bbox edges. The deficit (if any) is split symmetrically
+    — above branches lift up, below branches drop down — so the
+    constraint is satisfied without unfairly biasing either side.
     """
     upper = rail_top_y + RAIL_GAP
     lower = rail_bot_y - RAIL_GAP
-    for branch in branches:
-        descs = branch.descs
-        if not descs:
-            continue
-        # Forward sweep: ensure each component sits below its predecessor.
-        prev_bot = upper
-        for d in descs:
-            min_top = prev_bot if prev_bot == upper else prev_bot + min_gap
-            min_center = min_top + d.bbox_h / 2.0
-            if y_pos[id(d)] < min_center:
-                y_pos[id(d)] = min_center
-            prev_bot = y_pos[id(d)] + d.bbox_h / 2.0
-        # Back sweep: clamp the bottom of the column to the bot rail.
-        next_top = lower
-        for d in reversed(descs):
-            max_center = next_top - d.bbox_h / 2.0
-            if y_pos[id(d)] > max_center:
-                y_pos[id(d)] = max_center
-            next_top = y_pos[id(d)] - d.bbox_h / 2.0 - min_gap
+    cross_gap = max(min_gap, 2 * PORT_LEN)
 
+    def snap_up(v: float) -> float:
+        # Round up to a multiple of GRID_PX so the gap to the previous
+        # row never shrinks under snap-to-grid.
+        import math
+        return math.ceil(v / GRID_PX) * GRID_PX
 
-def _legalize_y_positions(
-    branches: list[_Branch],
-    descs: Sequence[_CompDesc],
-    uf: _UF,
-    canonical_top: set[str],
-    canonical_bot: set[str],
-    rail_top_y: float,
-    rail_bot_y: float,
-    canvas_w: float,
-    canvas_h: float,
-    y_pos: dict[int, float],
-    mirrors: dict[int, bool],
-    flips: dict[int, bool],
-    *,
-    iterations: int = 240,
-    seed: int = 0,
-    turn_weight: float = 60.0,
-) -> dict[int, float]:
-    """Refine y-positions to straighten wires after the main SA.
+    def snap_down(v: float) -> float:
+        import math
+        return math.floor(v / GRID_PX) * GRID_PX
 
-    Cost is real grid wirelength + a heavy ``turn_weight`` per BFS-path
-    corner. Only y-perturbation and pin-snap moves; the column order,
-    mirror, and spine flips are frozen — those topology choices are
-    the main SA's job and shouldn't be re-explored here. The pass is
-    short and runs at the same grid as the final router so what the
-    cost minimizes is exactly what the SVG will draw.
-    """
-    import math
-    import random
-
-    if iterations <= 0:
-        return dict(y_pos)
-
-    branch_of: dict[int, int] = {}
-    for b_idx, branch in enumerate(branches):
-        for d in branch.descs:
-            branch_of[id(d)] = b_idx
-
-    mid_nets, rail_nets = _build_routable_nets(
-        descs, uf, canonical_top, canonical_bot,
-    )
-    if not mid_nets:
-        return dict(y_pos)
-
-    col_widths = _column_widths(branches)
-    col_order = list(range(len(branches)))
-
-    def evaluate(yp: dict[int, float]) -> float:
-        centers, total_w = _column_centers(branches, col_order, col_widths, PAD)
-        pins, boxes = _pin_positions_for_state(
-            descs, branch_of, col_order, centers, yp, mirrors, flips,
-        )
-        return _route_total_wirelength(
-            pins, boxes, mid_nets, rail_nets,
-            total_w, canvas_h, rail_top_y, rail_bot_y, canonical_top,
-            grid_px=GRID_PX,                # same grid the final router uses
-            turn_weight=turn_weight,
-        )
-
-    cur_yp = dict(y_pos)
-    cur_cost = evaluate(cur_yp)
-    best_yp = dict(cur_yp)
-    best_cost = cur_cost
-
-    rng = random.Random(seed)
-    T = max(15.0, cur_cost * 0.04)
-    Tmin = max(0.4, T / 80.0)
-    decay = (Tmin / T) ** (1.0 / iterations)
-
-    for _ in range(iterations):
-        choice = rng.random()
-        if choice < 0.45:
-            # Small y-perturbation to nudge a single component.
-            d = rng.choice(descs)
-            sigma = max(4.0, GRID_PX * 0.6)
-            new_yp = dict(cur_yp)
-            new_yp[id(d)] += rng.gauss(0.0, sigma)
-            _enforce_min_pitch(branches, new_yp, rail_top_y, rail_bot_y)
-        elif choice < 0.80:
-            # Pin-snap: move ``d`` so its pin meets a partner pin's y.
-            d = rng.choice(descs)
-            ports = list(d.side_ports) + [d.spine_top, d.spine_bot]
-            port = rng.choice(ports)
-            net = uf.find(d.port_net(port))
-            partners: list[tuple[_CompDesc, str]] = []
-            for e in descs:
-                if id(e) == id(d):
-                    continue
-                for ep in (e.spine_top, e.spine_bot, *e.side_ports):
-                    if uf.find(e.port_net(ep)) == net:
-                        partners.append((e, ep))
-            if not partners:
+    def per_branch_sweep(branch_iter: Iterable[_Branch]) -> None:
+        for branch in branch_iter:
+            descs = branch.descs
+            if not descs:
                 continue
-            pe, pp = rng.choice(partners)
+            # Forward sweep: ensure each component sits below its predecessor.
+            prev_bot = upper
+            for d in descs:
+                min_top = prev_bot if prev_bot == upper else prev_bot + min_gap
+                min_center = min_top + d.bbox_h / 2.0
+                cur = max(y_pos[id(d)], min_center)
+                cur = snap_up(cur - d.bbox_h / 2.0) + d.bbox_h / 2.0
+                y_pos[id(d)] = cur
+                prev_bot = cur + d.bbox_h / 2.0
+            # Back sweep: clamp the bottom of the column to the bot rail.
+            next_top = lower
+            for d in reversed(descs):
+                max_center = next_top - d.bbox_h / 2.0
+                cur = min(y_pos[id(d)], max_center)
+                cur = snap_down(cur - d.bbox_h / 2.0) + d.bbox_h / 2.0
+                y_pos[id(d)] = cur
+                next_top = cur - d.bbox_h / 2.0 - min_gap
 
-            def _pin_dy(comp: _CompDesc, p: str) -> float:
-                _ox, oy = comp.port_offsets.get(p, (0.0, comp.bbox_h / 2.0))
-                if flips.get(id(comp), comp.flip):
-                    oy = comp.bbox_h - oy
-                return oy - comp.bbox_h / 2.0
+    per_branch_sweep(branches)
 
-            target_pin_y = cur_yp[id(pe)] + _pin_dy(pe, pp)
-            new_yp = dict(cur_yp)
-            new_yp[id(d)] = target_pin_y - _pin_dy(d, port)
-            _enforce_min_pitch(branches, new_yp, rail_top_y, rail_bot_y)
-        else:
-            # Shift a whole column en bloc so a stack can slide as a unit.
-            b_idx = rng.randrange(len(branches))
-            sigma = max(6.0, GRID_PX * 0.8)
-            delta = rng.gauss(0.0, sigma)
-            new_yp = dict(cur_yp)
-            for d in branches[b_idx].descs:
-                new_yp[id(d)] += delta
-            _enforce_min_pitch(branches, new_yp, rail_top_y, rail_bot_y)
+    if not junctions:
+        return
 
-        new_cost = evaluate(new_yp)
-        delta = new_cost - cur_cost
-        if delta <= 0.0 or rng.random() < math.exp(-delta / T):
-            cur_yp = new_yp
-            cur_cost = new_cost
-            if cur_cost < best_cost - 1e-9:
-                best_cost = cur_cost
-                best_yp = dict(cur_yp)
-        T *= decay
+    # Junction clearance: drive apart any below-pin / above-pin pair that
+    # collapses onto the same row (or worse). Spine-pins live at the
+    # bbox edge of the boundary component, so collapsed pins land the
+    # trunk wire on a blocked row — the router then detours far enough
+    # to dodge the bbox edges that the trunk no longer reads as a
+    # straight line. We split the deficit symmetrically and re-sweep
+    # the touched branches to keep them inside the rail bounds.
+    import math as _math
+    touched: set[int] = set()
+    for j in junctions:
+        above = [b for b in j["above"] if b.descs]
+        below = [b for b in j["below"] if b.descs]
+        if not (above and below):
+            continue
+        max_above_y = max(
+            y_pos[id(b.descs[-1])] + b.descs[-1].bbox_h / 2.0
+            for b in above
+        )
+        min_below_y = min(
+            y_pos[id(b.descs[0])] - b.descs[0].bbox_h / 2.0
+            for b in below
+        )
+        deficit = max_above_y + cross_gap - min_below_y
+        if deficit <= 0:
+            continue
+        # Round the deficit up to a grid step. Pushes that aren't a
+        # multiple of GRID_PX get reverted by snap_up/snap_down in the
+        # follow-up sweep, which forces bbox-tops back onto the grid.
+        deficit_grid = _math.ceil(deficit / GRID_PX) * GRID_PX
+        # Split symmetrically; both halves are grid multiples by
+        # construction so the snap pass leaves them in place.
+        half_steps = int(deficit_grid // GRID_PX) // 2
+        push_up = half_steps * GRID_PX
+        push_down = deficit_grid - push_up
+        for b in above:
+            for d in b.descs:
+                y_pos[id(d)] -= push_up
+            touched.add(id(b))
+        for b in below:
+            for d in b.descs:
+                y_pos[id(d)] += push_down
+            touched.add(id(b))
 
-    return best_yp
+    if touched:
+        per_branch_sweep(b for b in branches if id(b) in touched)
 
 
 def _sa_optimize(
@@ -1308,6 +1397,7 @@ def _sa_optimize(
     iterations: Optional[int] = None,
     seed: int = 0,
     cost_model: str = "hpwl",
+    junctions: Optional[Sequence[dict]] = None,
 ) -> tuple[
     list[int],
     dict[int, float],
@@ -1471,7 +1561,10 @@ def _sa_optimize(
             delta = rng.gauss(0.0, sigma)
             new_yp = dict(y_pos)
             new_yp[id(d)] += delta
-            _enforce_min_pitch(branches, new_yp, rail_top_y, rail_bot_y)
+            _enforce_min_pitch(
+                branches, new_yp, rail_top_y, rail_bot_y,
+                junctions=junctions,
+            )
 
         elif kind == "shift_column":
             b_idx = rng.randrange(n)
@@ -1480,7 +1573,10 @@ def _sa_optimize(
             new_yp = dict(y_pos)
             for d in branches[b_idx].descs:
                 new_yp[id(d)] += delta
-            _enforce_min_pitch(branches, new_yp, rail_top_y, rail_bot_y)
+            _enforce_min_pitch(
+                branches, new_yp, rail_top_y, rail_bot_y,
+                junctions=junctions,
+            )
 
         elif kind == "align_y":
             d = rng.choice(descs)
@@ -1490,7 +1586,10 @@ def _sa_optimize(
             target = rng.choice(branches[other_branch].descs)
             new_yp = dict(y_pos)
             new_yp[id(d)] = y_pos[id(target)]
-            _enforce_min_pitch(branches, new_yp, rail_top_y, rail_bot_y)
+            _enforce_min_pitch(
+                branches, new_yp, rail_top_y, rail_bot_y,
+                junctions=junctions,
+            )
 
         else:  # snap_y_to_rail_partner
             # Pin-level snap: pick a port on ``d`` and a partner port on
@@ -1531,7 +1630,10 @@ def _sa_optimize(
             target_d_cy = target_pin_y - d_off
             new_yp = dict(y_pos)
             new_yp[id(d)] = target_d_cy
-            _enforce_min_pitch(branches, new_yp, rail_top_y, rail_bot_y)
+            _enforce_min_pitch(
+                branches, new_yp, rail_top_y, rail_bot_y,
+                junctions=junctions,
+            )
 
         new_cost = evaluate(new_co, new_yp, new_mi, new_fl)
         delta = new_cost - cost
@@ -1579,9 +1681,7 @@ def autodraw(
     iterations: Optional[int] = None,
     seed: int = 0,
     cost_model: str = "hpwl",
-    legalize: bool = False,
-    legalize_iterations: int = 240,
-    res_dir: Union[str, Path, None, object] = None,
+    res_dir: Union[str, Path, None, object] = _DEFAULT_RES_DIR,
 ) -> str:
     """Render ``circuit`` to an SVG schematic and return the SVG string.
 
@@ -1611,13 +1711,6 @@ def autodraw(
         + rail stubs. ``"real"`` — actual rectilinear-routed wirelength
         via grid BFS that knows about component bodies; slower but
         accounts for routing detours.
-    legalize:
-        If ``True`` (default), run a short refinement pass after the
-        main SA that nudges component y-positions to minimise the
-        number of corners in routed wires. Off for deterministic
-        debugging.
-    legalize_iterations:
-        Iteration budget for the legalize pass.
     res_dir:
         Folder with per-kind SVG glyphs (``res/nmos.svg``,
         ``res/res.svg``, ...). Defaults to ``<repo>/res/`` so the
@@ -1717,6 +1810,14 @@ def autodraw(
     _, canvas_w = _column_centers(branches, initial_col_order, col_widths, x0)
     canvas_h = rail_bot_y + PAD
 
+    # ---- Spine junctions ----
+    # Pre-compute junction info so ``_enforce_min_pitch`` (called both
+    # post-SA and inside SA's inner loop) can drive apart pins meeting
+    # at a junction net, preventing the trunk from collapsing onto a
+    # bbox edge of either side. Branch-object refs survive SA's column
+    # reorder, so this list stays valid both before and after.
+    junctions = _spine_junctions(branches, uf, spine_index)
+
     # ---- SA: column order + per-component y + mirror + spine flip ----
     if optimize and (len(branches) >= 2 or any(
         len(b.descs) >= 1 and b.descs[0].side_ports for b in branches
@@ -1725,32 +1826,24 @@ def autodraw(
             branches, descs, uf, canonical_top, canonical_bot,
             rail_top_y, rail_bot_y, canvas_w, canvas_h,
             iterations=iterations, seed=seed, cost_model=cost_model,
+            junctions=junctions,
         )
         branches = [branches[i] for i in col_order]
         for d in descs:
             d.mirror = mirrors.get(id(d), d.mirror)
             d.flip = flips.get(id(d), d.flip)
-
-        # ---- Legalize: minimise wire turns ----
-        # The main SA optimised for short wires (HPWL or grid WL). The
-        # legalize pass nudges component y positions on the *real*
-        # routing grid with an explicit per-turn cost added on top, so
-        # near-aligned pins snap to perfectly-aligned (turn-free) pins.
-        if legalize:
-            mirror_map = {id(d): d.mirror for d in descs}
-            flip_map = {id(d): d.flip for d in descs}
-            y_pos = _legalize_y_positions(
-                branches, descs, uf, canonical_top, canonical_bot,
-                rail_top_y, rail_bot_y, canvas_w, canvas_h,
-                y_pos, mirror_map, flip_map,
-                iterations=legalize_iterations,
-                seed=seed + 1,
-            )
     else:
         y_pos = _default_y_positions(
             branches, rail_top_y, rail_bot_y,
             canonical_top, canonical_bot, uf,
         )
+
+    # Snap y_pos values to the routing grid so component box edges
+    # land on grid (the snap inside _layout would otherwise shrink the
+    # min-pitch gap by up to GRID_PX).
+    _enforce_min_pitch(
+        branches, y_pos, rail_top_y, rail_bot_y, junctions=junctions,
+    )
 
     # Recompute widths in the (possibly reordered) branch order, then
     # place columns left to right using those widths.
@@ -1772,11 +1865,15 @@ def autodraw(
     def to_cell(x: float, y: float) -> tuple[int, int]:
         return int(round(x / GRID_PX)), int(round(y / GRID_PX))
 
-    # Block component bodies (with a 1-cell margin on top/bottom so pins
-    # remain reachable; left/right side pins extend to PORT_LEN already).
+    # Block component bodies. Each component carries its own bbox_w /
+    # bbox_h (set by _apply_glyphs from the loaded glyph's viewBox),
+    # so glyphs of arbitrary sizes are blocked correctly — using the
+    # global default BOX_W / BOX_H here would let wires pass through
+    # any wide-glyph that's bigger than the default rect.
     for p in placed:
-        x0c, y0c = to_cell(p.cx - BOX_W / 2, p.cy - BOX_H / 2)
-        x1c, y1c = to_cell(p.cx + BOX_W / 2, p.cy + BOX_H / 2)
+        bw, bh = p.desc.bbox_w, p.desc.bbox_h
+        x0c, y0c = to_cell(p.cx - bw / 2, p.cy - bh / 2)
+        x1c, y1c = to_cell(p.cx + bw / 2, p.cy + bh / 2)
         rg.block_rect(x0c, y0c, x1c + 1, y1c + 1)
 
     # Allow each pin tip cell to be "passable" even if the box body is
@@ -1784,6 +1881,11 @@ def autodraw(
     for p in placed:
         for port, (px, py) in p.pin_pos.items():
             rg.allow_pin.add(to_cell(px, py))
+
+    # Compute the per-cell clearance-to-nearest-block penalty so the
+    # router prefers L/S elbows that sit in open space rather than
+    # along a component edge.
+    rg.finalize()
 
     # Rails as horizontal trunks: dedicate a small Y range.
     top_rail_cell = to_cell(0, rail_top_y)[1]
@@ -1886,17 +1988,62 @@ def autodraw(
                     best_idx = idx
                     best_path = path
             if best_path is None:
-                # Could not route — emit a straight line fallback so the
-                # net is still visible.
+                # Could not route — emit a rectilinear fallback so the
+                # Manhattan-only invariant still holds. Try both L-
+                # shapes (elbow at (target.x, src.y) and (src.x,
+                # target.y)) plus a U-shape that detours via the
+                # canvas margin, and pick the one that intersects the
+                # fewest component boxes.
                 p, port = remaining.pop(0)
-                # Aim at any pin already in the tree if possible (so we
-                # land on a real port), otherwise the nearest tree cell.
                 if cell_to_pin:
                     target_xy = next(iter(cell_to_pin.values()))
                 else:
                     trg = next(iter(tree_cells))
                     target_xy = (trg[0] * GRID_PX, trg[1] * GRID_PX)
-                fallback = [p.pin_pos[port], target_xy]
+                src_xy = p.pin_pos[port]
+
+                def _box_hits(poly: list[tuple[float, float]]) -> int:
+                    hits = 0
+                    for i in range(len(poly) - 1):
+                        x1, y1 = poly[i]; x2, y2 = poly[i + 1]
+                        for pp in placed:
+                            bw, bh = pp.desc.bbox_w, pp.desc.bbox_h
+                            bx0, by0 = pp.cx - bw / 2, pp.cy - bh / 2
+                            bx1, by1 = pp.cx + bw / 2, pp.cy + bh / 2
+                            seg_pads = {
+                                pp.pin_pos[port_]
+                                for port_ in pp.pin_pos
+                            }
+                            if (x1, y1) in seg_pads or (x2, y2) in seg_pads:
+                                continue
+                            if x1 == x2:
+                                if bx0 + 0.5 < x1 < bx1 - 0.5:
+                                    if max(y1, y2) > by0 + 0.5 and \
+                                       min(y1, y2) < by1 - 0.5:
+                                        hits += 1
+                            elif y1 == y2:
+                                if by0 + 0.5 < y1 < by1 - 0.5:
+                                    if max(x1, x2) > bx0 + 0.5 and \
+                                       min(x1, x2) < bx1 - 0.5:
+                                        hits += 1
+                    return hits
+
+                if src_xy[0] == target_xy[0] or src_xy[1] == target_xy[1]:
+                    fallback = [src_xy, target_xy]
+                else:
+                    candidates = [
+                        [src_xy, (target_xy[0], src_xy[1]), target_xy],
+                        [src_xy, (src_xy[0], target_xy[1]), target_xy],
+                    ]
+                    # Detour via the bottom margin (just above bot rail).
+                    detour_y = rail_bot_y - RAIL_GAP / 2
+                    candidates.append([
+                        src_xy,
+                        (src_xy[0], detour_y),
+                        (target_xy[0], detour_y),
+                        target_xy,
+                    ])
+                    fallback = min(candidates, key=_box_hits)
                 routed_polylines.append((f"net-{net_key}", fallback))
                 continue
 
@@ -1982,10 +2129,16 @@ def autodraw(
 
     polylines = rail_polylines + routed_polylines
 
+    # ---- Solder dots at same-net Steiner T-junctions ----
+    # Standard schematic notation: a filled circle at points where 3+
+    # wire rays of the same net meet (T or +), to visually distinguish
+    # a connection from an unrelated wire crossing.
+    solder_dots = _find_solder_dots(routed_polylines)
+
     # ---- SVG emission ----
     svg = _emit_svg(placed, polylines, canvas_w, canvas_h,
                     rail_top_y, rail_bot_y, top_set, bot_set, uf,
-                    glyphs=glyphs)
+                    glyphs=glyphs, solder_dots=solder_dots)
 
     if filename is not None:
         path = Path(filename)
@@ -2105,10 +2258,12 @@ def _emit_svg(
     bot_set: set[str],
     uf: _UF,
     glyphs: Optional[dict[str, dict]] = None,
+    solder_dots: Optional[Sequence[tuple[float, float]]] = None,
 ) -> str:
     return _svg_util_emit(
         placed, polylines, canvas_w, canvas_h, rail_top_y, rail_bot_y,
         label_fs=LABEL_FS, port_fs=PORT_FS,
         glyphs=glyphs, short_port=_short,
+        solder_dots=solder_dots,
     )
 

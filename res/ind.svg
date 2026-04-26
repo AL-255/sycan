@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg
-   viewBox="0 0 70 46"
+   viewBox="0 0 5.4442348 35.952713"
    version="1.1"
    id="svg2"
+   width="5.4442348"
+   height="35.952713"
    xmlns="http://www.w3.org/2000/svg"
    xmlns:svg="http://www.w3.org/2000/svg">
   <defs
      id="defs2" />
+  <rect
+     style="display:none;fill:#ff00ff;stroke:none;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4.1"
+     id="rect1"
+     width="20"
+     height="40"
+     x="-9.2783251"
+     y="-2" />
   <path
-     d="m 0,2 v 5.9013208 c 5.333331,0 5.333331,8.1377472 0,8.1377472 5.334513,-0.0012 5.334513,8.136547 0,8.137747 5.334513,-0.0012 5.334513,8.136547 0,8.137747 v 5.63815"
+     d="m 0.72167498,0 v 5.9013208 c 5.33333102,0 5.33333102,8.1377472 0,8.1377472 5.33451302,-0.0012 5.33451302,8.136547 0,8.137747 5.33451302,-0.0012 5.33451302,8.136547 0,8.137747 v 5.63815"
      fill="none"
      stroke="#222222"
      stroke-width="1.44335"
@@ -16,18 +25,18 @@
      style="stroke:#000000" />
   <circle
      id="port-n_plus"
-     cx="8.8817842e-16"
-     cy="0"
+     cx="0.72167498"
+     cy="-2"
      fill="none"
      stroke="none"
-     r="2"
-     style="fill:none;stroke:#000000" />
+     style="fill:none;stroke:#000000"
+     r="0" />
   <circle
      id="port-n_minus"
-     cx="8.8817842e-16"
-     cy="39.952709"
+     cx="0.72167498"
+     cy="38"
      fill="none"
      stroke="none"
-     r="2"
-     style="fill:none;stroke:#000000" />
+     style="fill:none;stroke:#000000"
+     r="0" />
 </svg>

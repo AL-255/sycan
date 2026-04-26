@@ -19,4 +19,4 @@ print(f"$$V(b) - V(c) = {sp.latex(diff)}$$")
 print()
 print("Balance condition: R1*R4 == R2*R3")
 
-autodraw(netlist, res_dir=None)
+autodraw(netlist)
