@@ -57,3 +57,4 @@ tests/*/diagrams/
 !docs/res/sycan.png
 
 .codex
+.claude/
