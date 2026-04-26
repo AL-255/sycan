@@ -772,6 +772,7 @@ def _emit_designator_labels(
     label_fs: int,
     port_fs: int,
     short_port: callable,
+    have_glyphs: dict,
 ) -> list[str]:
     """Pick a low-overlap position next to each component for its label.
 
@@ -784,6 +785,12 @@ def _emit_designator_labels(
     fall to candidate priority order (right, left, above, below, then
     corners), which matches the conventional schematic placement of
     component designators.
+
+    Components rendered as the labelled-rect placeholder (kind not in
+    ``have_glyphs``) keep their designator at the bbox centre — the
+    rect's interior is empty and the label is the only thing
+    identifying the part, so moving it outside hurts more than it
+    helps.
     """
     obstacles: list[tuple[float, float, float, float]] = []
 
@@ -830,6 +837,19 @@ def _emit_designator_labels(
         cx, cy = p.cx, p.cy
         margin = 4.0
         half = label_fs * 0.4  # baseline offset to vertically centre
+
+        # Rect-placeholder components (no glyph for their kind) get the
+        # designator at the bbox centre: the rect is otherwise empty,
+        # and the label is the only mark identifying the part.
+        if d.kind not in have_glyphs:
+            tx, ty, anc = cx, cy + half, "middle"
+            r = _label_rect(tx, ty, anc, d.label, label_fs)
+            out.append(
+                f'<text class="lab" x="{tx:.1f}" y="{ty:.1f}" '
+                f'text-anchor="{anc}">{html_escape(d.label)}</text>'
+            )
+            placed_label_rects.append(r)
+            continue
 
         # Candidates in priority order: E, W, N, S, then four corners.
         candidates = [
@@ -1086,6 +1106,7 @@ def emit_svg(
         _emit_designator_labels(
             placed, polylines, canvas_w, canvas_h,
             label_fs=label_fs, port_fs=port_fs, short_port=short_port,
+            have_glyphs=have_glyphs,
         )
     )
 
