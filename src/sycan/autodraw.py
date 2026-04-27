@@ -95,6 +95,19 @@ MIN_PITCH = BOX_H + MIN_GAP  # default center-to-center distance for two
 _TOP_RAIL_DEFAULT = ("VDD", "VCC", "VPP")
 _BOT_RAIL_DEFAULT = ("VSS", "VEE", "GND", "0")
 
+# Fallback SA seeds tried in order when the rendered layout has wires
+# laying on top of each other. The list is long enough to satisfy the
+# default ``max_retries=5`` even if the caller's seed already appears
+# in it. See :func:`autodraw` for the retry mechanism.
+_RETRY_SEEDS = (1, 7, 17, 31, 42, 145, 199, 999, 2025, 31415)
+
+# Cross-/same-net collinear overlap length (px) above which the
+# autodraw retry loop discards a render and tries the next seed. A
+# clean schematic produces zero — any non-trivial overlap means the
+# router was forced to fuse two segments visually, so even a small
+# threshold is enough.
+_OVERLAP_TOL = 1.0
+
 
 # ---------------------------------------------------------------------------
 # Component → spine / side port mapping.
@@ -925,6 +938,56 @@ def _find_solder_dots(
                     seen.add(key)
                     dots.append(cand)
     return dots
+
+
+def _segment_overlap_length(
+    polylines: Sequence[tuple[str, Sequence[tuple[float, float]]]],
+    tol: float = 0.5,
+) -> float:
+    """Total length over which two distinct wire segments lie collinear
+    on top of each other.
+
+    A clean schematic has zero overlap: same-net wires meet at junction
+    points (counted as a solder dot, not an overlap), and different-net
+    wires either cross at a point or stay apart. When the router is
+    forced to lay multiple segments along the same line — typically
+    because a column placement leaves no clearance for a second trunk —
+    those segments visually fuse into a single line that misrepresents
+    the netlist. The :func:`autodraw` retry loop uses this length as
+    the trigger.
+
+    Both same-net and cross-net overlaps count: same-net overlap means
+    a Steiner branch was re-routed over a trunk it should have tapped
+    via a junction, which is just as visually confusing.
+    """
+    horiz: dict[float, list[tuple[float, float, str]]] = {}
+    vert: dict[float, list[tuple[float, float, str]]] = {}
+    for cls, pts in polylines:
+        net_key = cls
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            if abs(y0 - y1) < tol and abs(x0 - x1) >= tol:
+                key = round((y0 + y1) / 2.0, 1)
+                horiz.setdefault(key, []).append(
+                    (min(x0, x1), max(x0, x1), net_key)
+                )
+            elif abs(x0 - x1) < tol and abs(y0 - y1) >= tol:
+                key = round((x0 + x1) / 2.0, 1)
+                vert.setdefault(key, []).append(
+                    (min(y0, y1), max(y0, y1), net_key)
+                )
+
+    total = 0.0
+    for bins in (horiz, vert):
+        for segs in bins.values():
+            for i in range(len(segs)):
+                a0, a1, _na = segs[i]
+                for j in range(i + 1, len(segs)):
+                    b0, b1, _nb = segs[j]
+                    lo = max(a0, b0)
+                    hi = min(a1, b1)
+                    if hi - lo > tol:
+                        total += hi - lo
+    return total
 
 
 def _compact_blanks(
@@ -1884,6 +1947,7 @@ def autodraw(
     cost_model: str = "hpwl",
     res_dir: Union[str, Path, None, object] = _DEFAULT_RES_DIR,
     reverse_isolated_branches: bool = False,
+    max_retries: int = 5,
 ) -> str:
     """Render ``circuit`` to an SVG schematic and return the SVG string.
 
@@ -1932,6 +1996,15 @@ def autodraw(
         produce no fully-isolated multi-component branches, so this
         is dormant capability for circuits / branch-builder changes
         that introduce them.
+    max_retries:
+        Maximum number of fallback render passes triggered when the
+        first pass produces wires that lay collinear on top of one
+        another. Each retry re-runs the SA + routing with the next
+        seed from a fixed sequence (:data:`_RETRY_SEEDS`); the first
+        pass whose total overlap length is at or below
+        :data:`_OVERLAP_TOL` is accepted. If every attempt has overlap
+        the lowest-overlap render is returned. Default is 5; pass 0 to
+        disable the loop.
     """
     if isinstance(circuit, str):
         from sycan.spice import parse
@@ -2032,450 +2105,491 @@ def autodraw(
     from sycan.autodraw_hacks import detect_spine_junctions
     junctions = detect_spine_junctions(branches, uf, spine_index)
 
-    # ---- SA: column order + per-component y + mirror + spine flip ----
-    if optimize and (len(branches) >= 2 or any(
-        len(b.descs) >= 1 and b.descs[0].side_ports for b in branches
-    )):
-        col_order, y_pos, mirrors, flips, _init, _final = _sa_optimize(
-            branches, descs, uf, canonical_top, canonical_bot,
-            rail_top_y, rail_bot_y, canvas_w, canvas_h,
-            iterations=iterations, seed=seed, cost_model=cost_model,
-            junctions=junctions,
-            reverse_isolated_branches=reverse_isolated_branches,
-        )
-        branches = [branches[i] for i in col_order]
+    # ---- Retry loop ----
+    # Run the seed-dependent placement + routing + emission, then check
+    # whether the rendered polylines have collinear segments lying on
+    # top of one another (visually, two distinct nets fused into a
+    # single line — see :func:`_segment_overlap_length`). If they do,
+    # restart the pass with the next seed from ``_RETRY_SEEDS`` and
+    # keep the lowest-overlap render seen so far. The loop exits as
+    # soon as a pass produces overlap at or below ``_OVERLAP_TOL``.
+    _retry_initial_branches = list(branches)
+    _retry_initial_mirrors = {id(d): d.mirror for d in descs}
+    _retry_initial_flips = {id(d): d.flip for d in descs}
+
+    _retry_seed_queue: list[int] = [seed]
+    for _retry_s in _RETRY_SEEDS:
+        if _retry_s not in _retry_seed_queue:
+            _retry_seed_queue.append(_retry_s)
+
+    _retry_attempts_left = max(1, max_retries + 1)
+    _retry_best_svg: Optional[str] = None
+    _retry_best_overlap: Optional[float] = None
+
+    while _retry_seed_queue and _retry_attempts_left > 0:
+        seed = _retry_seed_queue.pop(0)
+        _retry_attempts_left -= 1
+
+        # Reset state mutated by a previous pass before re-running SA.
+        branches = list(_retry_initial_branches)
         for d in descs:
-            d.mirror = mirrors.get(id(d), d.mirror)
-            d.flip = flips.get(id(d), d.flip)
-    else:
-        y_pos = _default_y_positions(
-            branches, rail_top_y, rail_bot_y,
-            canonical_top, canonical_bot, uf,
+            d.mirror = _retry_initial_mirrors[id(d)]
+            d.flip = _retry_initial_flips[id(d)]
+
+        # ---- SA: column order + per-component y + mirror + spine flip ----
+        if optimize and (len(branches) >= 2 or any(
+            len(b.descs) >= 1 and b.descs[0].side_ports for b in branches
+        )):
+            col_order, y_pos, mirrors, flips, _init, _final = _sa_optimize(
+                branches, descs, uf, canonical_top, canonical_bot,
+                rail_top_y, rail_bot_y, canvas_w, canvas_h,
+                iterations=iterations, seed=seed, cost_model=cost_model,
+                junctions=junctions,
+                reverse_isolated_branches=reverse_isolated_branches,
+            )
+            branches = [branches[i] for i in col_order]
+            for d in descs:
+                d.mirror = mirrors.get(id(d), d.mirror)
+                d.flip = flips.get(id(d), d.flip)
+        else:
+            y_pos = _default_y_positions(
+                branches, rail_top_y, rail_bot_y,
+                canonical_top, canonical_bot, uf,
+            )
+
+        # Snap y_pos values to the routing grid so component box edges
+        # land on grid (the snap inside _layout would otherwise shrink the
+        # min-pitch gap by up to GRID_PX).
+        _enforce_min_pitch(
+            branches, y_pos, rail_top_y, rail_bot_y, junctions=junctions,
         )
 
-    # Snap y_pos values to the routing grid so component box edges
-    # land on grid (the snap inside _layout would otherwise shrink the
-    # min-pitch gap by up to GRID_PX).
-    _enforce_min_pitch(
-        branches, y_pos, rail_top_y, rail_bot_y, junctions=junctions,
-    )
+        # Recompute widths in the (possibly reordered) branch order, then
+        # place columns left to right using those widths.
+        col_widths = _column_widths(branches)
+        final_col_order = list(range(len(branches)))
+        col_centers, canvas_w = _column_centers(
+            branches, final_col_order, col_widths, x0,
+        )
+        placed = _layout(branches, final_col_order, col_widths, col_centers, y_pos)
 
-    # Recompute widths in the (possibly reordered) branch order, then
-    # place columns left to right using those widths.
-    col_widths = _column_widths(branches)
-    final_col_order = list(range(len(branches)))
-    col_centers, canvas_w = _column_centers(
-        branches, final_col_order, col_widths, x0,
-    )
-    placed = _layout(branches, final_col_order, col_widths, col_centers, y_pos)
+        # ---- Net inventory ----
+        nets = _collect_nets(placed, uf)
 
-    # ---- Net inventory ----
-    nets = _collect_nets(placed, uf)
+        # ---- Routing ----
+        grid_w = int(canvas_w / GRID_PX) + 2
+        grid_h = int(canvas_h / GRID_PX) + 2
+        rg = _RouteGrid(grid_w, grid_h)
 
-    # ---- Routing ----
-    grid_w = int(canvas_w / GRID_PX) + 2
-    grid_h = int(canvas_h / GRID_PX) + 2
-    rg = _RouteGrid(grid_w, grid_h)
+        def to_cell(x: float, y: float) -> tuple[int, int]:
+            return int(round(x / GRID_PX)), int(round(y / GRID_PX))
 
-    def to_cell(x: float, y: float) -> tuple[int, int]:
-        return int(round(x / GRID_PX)), int(round(y / GRID_PX))
+        # Block component bodies. Each component carries its own bbox_w /
+        # bbox_h (set by _apply_glyphs from the loaded glyph's viewBox),
+        # so glyphs of arbitrary sizes are blocked correctly — using the
+        # global default BOX_W / BOX_H here would let wires pass through
+        # any wide-glyph that's bigger than the default rect.
+        for p in placed:
+            bw, bh = p.desc.bbox_w, p.desc.bbox_h
+            x0c, y0c = to_cell(p.cx - bw / 2, p.cy - bh / 2)
+            x1c, y1c = to_cell(p.cx + bw / 2, p.cy + bh / 2)
+            rg.block_rect(x0c, y0c, x1c + 1, y1c + 1)
 
-    # Block component bodies. Each component carries its own bbox_w /
-    # bbox_h (set by _apply_glyphs from the loaded glyph's viewBox),
-    # so glyphs of arbitrary sizes are blocked correctly — using the
-    # global default BOX_W / BOX_H here would let wires pass through
-    # any wide-glyph that's bigger than the default rect.
-    for p in placed:
-        bw, bh = p.desc.bbox_w, p.desc.bbox_h
-        x0c, y0c = to_cell(p.cx - bw / 2, p.cy - bh / 2)
-        x1c, y1c = to_cell(p.cx + bw / 2, p.cy + bh / 2)
-        rg.block_rect(x0c, y0c, x1c + 1, y1c + 1)
-
-    # Allow each pin tip cell to be "passable" even if the box body is
-    # blocked next to it. For *lateral* pins (left/right side), also
-    # carve a one-row clearance channel from the pin out through the
-    # bbox edge: when the pin sits a few cells inside the bbox right
-    # edge (e.g. an NPN base whose port circle is offset inward from
-    # the body), the row between pin and edge would otherwise be
-    # blocked, forcing the BFS to fail and the fallback to elbow back
-    # into the body. Allowing those cells lets the wire exit in the
-    # natural lateral direction the pin already faces.
-    for p in placed:
-        bw, bh = p.desc.bbox_w, p.desc.bbox_h
-        bx0c, by0c = to_cell(p.cx - bw / 2, p.cy - bh / 2)
-        bx1c, by1c = to_cell(p.cx + bw / 2, p.cy + bh / 2)
-        for port, (px, py) in p.pin_pos.items():
-            cell = to_cell(px, py)
-            rg.allow_pin.add(cell)
-            side = p.pin_side.get(port)
-            if side == "right":
-                for xx in range(cell[0] + 1, bx1c + 1):
-                    rg.allow_pin.add((xx, cell[1]))
-            elif side == "left":
-                for xx in range(bx0c, cell[0]):
-                    rg.allow_pin.add((xx, cell[1]))
-
-    # Compute the per-cell clearance-to-nearest-block penalty so the
-    # router prefers L/S elbows that sit in open space rather than
-    # along a component edge.
-    rg.finalize()
-
-    # Rails as horizontal trunks: dedicate a small Y range.
-    top_rail_cell = to_cell(0, rail_top_y)[1]
-    bot_rail_cell = to_cell(0, rail_bot_y)[1]
-    for x in range(grid_w):
-        rg.used[x][top_rail_cell] += 0  # nothing yet, just ensures index ok
-        rg.used[x][bot_rail_cell] += 0
-
-    # Walk nets. Spine-internal cases first to mark trunks; then everything
-    # else gets routed.
-    polylines: list[tuple[str, list[tuple[float, float]]]] = []
-
-    # Rails: single horizontal line top and bottom across the full canvas.
-    rail_polylines: list[tuple[str, list[tuple[float, float]]]] = []
-    if any(uf.find(p.desc.port_net(port)) in canonical_top
-           for p in placed for port in p.pin_pos):
-        rail_polylines.append(("rail-top",
-                               [(PAD / 2, rail_top_y),
-                                (canvas_w - PAD / 2, rail_top_y)]))
-    if any(uf.find(p.desc.port_net(port)) in canonical_bot
-           for p in placed for port in p.pin_pos):
-        rail_polylines.append(("rail-bot",
-                               [(PAD / 2, rail_bot_y),
-                                (canvas_w - PAD / 2, rail_bot_y)]))
-
-    # For each net: route. Rail-class nets connect each terminal directly
-    # to the rail trunk by a vertical stub; mid nets use BFS.
-    routed_polylines: list[tuple[str, list[tuple[float, float]]]] = []
-    # Order: route rail nets first (mostly trivial vertical stubs), then
-    # mid nets in increasing terminal count (simple ones first leave the
-    # cleanest space for harder nets).
-    net_items = list(nets.items())
-    net_items.sort(key=lambda kv: (
-        0 if kv[0] in canonical_top or kv[0] in canonical_bot else 1,
-        len(kv[1]),
-    ))
-
-    # Cross-coupled FET pairs (autodraw_hacks override): the BFS makes
-    # visually messy zigzags because the two coupling nets compete for
-    # the same column-gap channel. Detect the latch pattern (M_a.gate ↔
-    # M_b.drain and M_b.gate ↔ M_a.drain) and pre-build hand-routed
-    # symmetric X polylines. Cells along the polylines are *strongly*
-    # marked as used so the BFS routes for other nets steer clear and
-    # don't visually fuse with the X. The main loop skips these nets.
-    from sycan.autodraw_hacks import cross_coupled_pinned_polylines
-    cross_polys = cross_coupled_pinned_polylines(placed, nets, uf)
-
-    def _bresenham_cells(c0, c1):
-        x0, y0 = c0
-        x1, y1 = c1
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
-        while True:
-            yield x0, y0
-            if x0 == x1 and y0 == y1:
-                return
-            e2 = 2 * err
-            if e2 > -dy:
-                err -= dy
-                x0 += sx
-            if e2 < dx:
-                err += dx
-                y0 += sy
-
-    for net_key, polys in cross_polys.items():
-        for poly in polys:
-            routed_polylines.append((f"net-{net_key}", poly))
-            for (sx, sy), (ex, ey) in zip(poly, poly[1:]):
-                c0 = to_cell(sx, sy)
-                c1 = to_cell(ex, ey)
-                for xx, yy in _bresenham_cells(c0, c1):
-                    if 0 <= xx < grid_w and 0 <= yy < grid_h:
-                        rg.used[xx][yy] += 8
-
-    for net_key, terms in net_items:
-        if len(terms) < 1:
-            continue
-        if net_key in cross_polys:
-            # Already emitted as a hand-routed cross.
-            continue
-
-        if net_key in canonical_top or net_key in canonical_bot:
-            on_top = net_key in canonical_top
-            rail_y = rail_top_y if on_top else rail_bot_y
-            rail_cell_y = int(round(rail_y / GRID_PX))
-            rail_targets = {
-                (xx, rail_cell_y) for xx in range(grid_w)
-                if 0 <= rail_cell_y < grid_h
-                and not rg.blocked[xx][rail_cell_y]
-            }
-            for p, port in terms:
-                px, py = p.pin_pos[port]
-                side = p.pin_side.get(port)
-                # Top/bot side pins clear their own bbox by exiting along
-                # the spine, so a single straight stub is fine. A pin on
-                # a *lateral* side (e.g. an NMOS gate at the box's left
-                # edge) sits *on* its own bbox column — a straight stub
-                # would draw along the bbox edge and visually clip the
-                # body. Route those via BFS so they take an L-shape
-                # around the bbox.
-                if side in ("left", "right"):
-                    src_cell = to_cell(px, py)
-                    rg.allow_pin.add(src_cell)
-                    path = rg.lee(src_cell, rail_targets)
-                else:
-                    path = None
-
-                if path:
-                    rg.mark_used(path)
-                    cell_corners = _polyline_from_path(path)
-                    snapped = [
-                        (cx_ * GRID_PX, cy_ * GRID_PX)
-                        for cx_, cy_ in cell_corners
-                    ]
-                    if len(snapped) >= 2:
-                        first_horiz = snapped[0][1] == snapped[1][1]
-                        bridge = (
-                            (px, snapped[0][1]) if first_horiz
-                            else (snapped[0][0], py)
-                        )
-                        poly = [(px, py), bridge] + snapped[1:]
-                    else:
-                        poly = [(px, py), snapped[0] if snapped else (px, rail_y)]
-                    # Pin the rail-end exactly to ``rail_y`` (BFS lands
-                    # on the trunk row but at grid quantum).
-                    last_x, _ = poly[-1]
-                    poly[-1] = (last_x, rail_y)
-                    # Drop adjacent duplicates (the bridge can coincide
-                    # with the pin when the BFS first cell is already
-                    # on-axis with the pin) and collinear corners.
-                    poly = [
-                        pt for i, pt in enumerate(poly)
-                        if i == 0 or pt != poly[i - 1]
-                    ]
-                    j = 1
-                    while j < len(poly) - 1:
-                        a, b, c = poly[j - 1], poly[j], poly[j + 1]
-                        if (a[0] == b[0] == c[0]) or (a[1] == b[1] == c[1]):
-                            poly.pop(j)
-                        else:
-                            j += 1
-                    if on_top:
-                        poly.reverse()
-                else:
-                    # Spine-axis pin (or BFS unreachable): straight stub.
-                    if on_top:
-                        poly = [(px, rail_y), (px, py)]
-                    else:
-                        poly = [(px, py), (px, rail_y)]
-                    cx0, cy0 = to_cell(px, py)
-                    for yy in range(
-                        min(cy0, rail_cell_y),
-                        max(cy0, rail_cell_y) + 1,
-                    ):
-                        if 0 <= cx0 < grid_w and 0 <= yy < grid_h:
-                            rg.used[cx0][yy] += 1
-                routed_polylines.append((f"net-{net_key}", poly))
-            continue
-
-        if len(terms) == 1:
-            # A dangling node — nothing to draw.
-            continue
-
-        # Multi-terminal mid-net: rectilinear MST + Lee BFS per edge.
-        # Order terminals by Manhattan from current centroid; build a
-        # tree by repeatedly attaching the nearest unconnected terminal
-        # to the existing tree.
-        tree_cells: set[tuple[int, int]] = set()
-        # Map each tree cell that corresponds to a *pin terminal* to that
-        # pin's exact (x, y). Used to snap polyline endpoints back from
-        # the routing-grid quantum to the real pin position.
-        cell_to_pin: dict[tuple[int, int], tuple[float, float]] = {}
-        first_p, first_port = terms[0]
-        first_pin_pos = first_p.pin_pos[first_port]
-        first_cell = to_cell(*first_pin_pos)
-        tree_cells.add(first_cell)
-        cell_to_pin[first_cell] = first_pin_pos
-
-        remaining = list(terms[1:])
-        while remaining:
-            best = None
-            best_idx = -1
-            best_path: Optional[list[tuple[int, int]]] = None
-            for idx, (p, port) in enumerate(remaining):
-                cell = to_cell(*p.pin_pos[port])
+        # Allow each pin tip cell to be "passable" even if the box body is
+        # blocked next to it. For *lateral* pins (left/right side), also
+        # carve a one-row clearance channel from the pin out through the
+        # bbox edge: when the pin sits a few cells inside the bbox right
+        # edge (e.g. an NPN base whose port circle is offset inward from
+        # the body), the row between pin and edge would otherwise be
+        # blocked, forcing the BFS to fail and the fallback to elbow back
+        # into the body. Allowing those cells lets the wire exit in the
+        # natural lateral direction the pin already faces.
+        for p in placed:
+            bw, bh = p.desc.bbox_w, p.desc.bbox_h
+            bx0c, by0c = to_cell(p.cx - bw / 2, p.cy - bh / 2)
+            bx1c, by1c = to_cell(p.cx + bw / 2, p.cy + bh / 2)
+            for port, (px, py) in p.pin_pos.items():
+                cell = to_cell(px, py)
                 rg.allow_pin.add(cell)
-                path = rg.lee(cell, tree_cells)
-                if path is None:
-                    continue
-                length = len(path)
-                if best is None or length < best:
-                    best = length
-                    best_idx = idx
-                    best_path = path
-            if best_path is None:
-                # Could not route — emit a rectilinear fallback so the
-                # Manhattan-only invariant still holds. Try both L-
-                # shapes (elbow at (target.x, src.y) and (src.x,
-                # target.y)) plus a U-shape that detours via the
-                # canvas margin, and pick the one that intersects the
-                # fewest component boxes.
-                p, port = remaining.pop(0)
-                if cell_to_pin:
-                    target_xy = next(iter(cell_to_pin.values()))
-                else:
-                    trg = next(iter(tree_cells))
-                    target_xy = (trg[0] * GRID_PX, trg[1] * GRID_PX)
-                src_xy = p.pin_pos[port]
+                side = p.pin_side.get(port)
+                if side == "right":
+                    for xx in range(cell[0] + 1, bx1c + 1):
+                        rg.allow_pin.add((xx, cell[1]))
+                elif side == "left":
+                    for xx in range(bx0c, cell[0]):
+                        rg.allow_pin.add((xx, cell[1]))
 
-                def _box_hits(poly: list[tuple[float, float]]) -> int:
-                    hits = 0
-                    for i in range(len(poly) - 1):
-                        x1, y1 = poly[i]; x2, y2 = poly[i + 1]
-                        for pp in placed:
-                            bw, bh = pp.desc.bbox_w, pp.desc.bbox_h
-                            bx0, by0 = pp.cx - bw / 2, pp.cy - bh / 2
-                            bx1, by1 = pp.cx + bw / 2, pp.cy + bh / 2
-                            seg_pads = {
-                                pp.pin_pos[port_]
-                                for port_ in pp.pin_pos
-                            }
-                            if (x1, y1) in seg_pads or (x2, y2) in seg_pads:
-                                continue
-                            if x1 == x2:
-                                if bx0 + 0.5 < x1 < bx1 - 0.5:
-                                    if max(y1, y2) > by0 + 0.5 and \
-                                       min(y1, y2) < by1 - 0.5:
-                                        hits += 1
-                            elif y1 == y2:
-                                if by0 + 0.5 < y1 < by1 - 0.5:
-                                    if max(x1, x2) > bx0 + 0.5 and \
-                                       min(x1, x2) < bx1 - 0.5:
-                                        hits += 1
-                    return hits
+        # Compute the per-cell clearance-to-nearest-block penalty so the
+        # router prefers L/S elbows that sit in open space rather than
+        # along a component edge.
+        rg.finalize()
 
-                if src_xy[0] == target_xy[0] or src_xy[1] == target_xy[1]:
-                    fallback = [src_xy, target_xy]
-                else:
-                    candidates = [
-                        [src_xy, (target_xy[0], src_xy[1]), target_xy],
-                        [src_xy, (src_xy[0], target_xy[1]), target_xy],
-                    ]
-                    # Detour via the bottom margin (just above bot rail).
-                    detour_y = rail_bot_y - RAIL_GAP / 2
-                    candidates.append([
-                        src_xy,
-                        (src_xy[0], detour_y),
-                        (target_xy[0], detour_y),
-                        target_xy,
-                    ])
-                    fallback = min(candidates, key=_box_hits)
-                routed_polylines.append((f"net-{net_key}", fallback))
+        # Rails as horizontal trunks: dedicate a small Y range.
+        top_rail_cell = to_cell(0, rail_top_y)[1]
+        bot_rail_cell = to_cell(0, rail_bot_y)[1]
+        for x in range(grid_w):
+            rg.used[x][top_rail_cell] += 0  # nothing yet, just ensures index ok
+            rg.used[x][bot_rail_cell] += 0
+
+        # Walk nets. Spine-internal cases first to mark trunks; then everything
+        # else gets routed.
+        polylines: list[tuple[str, list[tuple[float, float]]]] = []
+
+        # Rails: single horizontal line top and bottom across the full canvas.
+        rail_polylines: list[tuple[str, list[tuple[float, float]]]] = []
+        if any(uf.find(p.desc.port_net(port)) in canonical_top
+               for p in placed for port in p.pin_pos):
+            rail_polylines.append(("rail-top",
+                                   [(PAD / 2, rail_top_y),
+                                    (canvas_w - PAD / 2, rail_top_y)]))
+        if any(uf.find(p.desc.port_net(port)) in canonical_bot
+               for p in placed for port in p.pin_pos):
+            rail_polylines.append(("rail-bot",
+                                   [(PAD / 2, rail_bot_y),
+                                    (canvas_w - PAD / 2, rail_bot_y)]))
+
+        # For each net: route. Rail-class nets connect each terminal directly
+        # to the rail trunk by a vertical stub; mid nets use BFS.
+        routed_polylines: list[tuple[str, list[tuple[float, float]]]] = []
+        # Order: route rail nets first (mostly trivial vertical stubs), then
+        # mid nets in increasing terminal count (simple ones first leave the
+        # cleanest space for harder nets).
+        net_items = list(nets.items())
+        net_items.sort(key=lambda kv: (
+            0 if kv[0] in canonical_top or kv[0] in canonical_bot else 1,
+            len(kv[1]),
+        ))
+
+        # Cross-coupled FET pairs (autodraw_hacks override): the BFS makes
+        # visually messy zigzags because the two coupling nets compete for
+        # the same column-gap channel. Detect the latch pattern (M_a.gate ↔
+        # M_b.drain and M_b.gate ↔ M_a.drain) and pre-build hand-routed
+        # symmetric X polylines. Cells along the polylines are *strongly*
+        # marked as used so the BFS routes for other nets steer clear and
+        # don't visually fuse with the X. The main loop skips these nets.
+        from sycan.autodraw_hacks import cross_coupled_pinned_polylines
+        cross_polys = cross_coupled_pinned_polylines(placed, nets, uf)
+
+        def _bresenham_cells(c0, c1):
+            x0, y0 = c0
+            x1, y1 = c1
+            dx = abs(x1 - x0)
+            dy = abs(y1 - y0)
+            sx = 1 if x0 < x1 else -1
+            sy = 1 if y0 < y1 else -1
+            err = dx - dy
+            while True:
+                yield x0, y0
+                if x0 == x1 and y0 == y1:
+                    return
+                e2 = 2 * err
+                if e2 > -dy:
+                    err -= dy
+                    x0 += sx
+                if e2 < dx:
+                    err += dx
+                    y0 += sy
+
+        for net_key, polys in cross_polys.items():
+            for poly in polys:
+                routed_polylines.append((f"net-{net_key}", poly))
+                for (sx, sy), (ex, ey) in zip(poly, poly[1:]):
+                    c0 = to_cell(sx, sy)
+                    c1 = to_cell(ex, ey)
+                    for xx, yy in _bresenham_cells(c0, c1):
+                        if 0 <= xx < grid_w and 0 <= yy < grid_h:
+                            rg.used[xx][yy] += 8
+
+        for net_key, terms in net_items:
+            if len(terms) < 1:
+                continue
+            if net_key in cross_polys:
+                # Already emitted as a hand-routed cross.
                 continue
 
-            corners = _polyline_from_path(best_path)
-            snapped = [
-                (cx * GRID_PX, cy * GRID_PX) for cx, cy in corners
-            ]
-
-            # Bridge the BFS path back to the *exact* pin coordinates.
-            # Pins live on the canvas at arbitrary (sub-grid) positions
-            # but the BFS only visits grid cells, so the snapped
-            # endpoints can sit a few pixels off the actual pin. We
-            # insert an orthogonal stub from the pin to the wire's
-            # first row/column so the wire meets the pad cleanly.
-            src_p, src_port = remaining[best_idx]
-            src_pin_pos = src_p.pin_pos[src_port]
-            hit_cell = corners[-1]
-            tgt_pin_pos = cell_to_pin.get(hit_cell)
-
-            if not snapped:
-                poly_pts: list[tuple[float, float]] = [src_pin_pos]
-            elif len(snapped) == 1:
-                end = tgt_pin_pos if tgt_pin_pos is not None else snapped[0]
-                poly_pts = [src_pin_pos, end]
-            else:
-                # Source side bridge: the first BFS segment runs in the
-                # axis (corners[0] → corners[1]) — we extend the pin
-                # position perpendicular to that axis to land on the
-                # wire's row / column.
-                first_horizontal = (corners[0][1] == corners[1][1])
-                if first_horizontal:
-                    src_bridge = (src_pin_pos[0], snapped[0][1])
-                else:
-                    src_bridge = (snapped[0][0], src_pin_pos[1])
-                # Replace ``snapped[0]`` with the bridge — they lie on
-                # the same axis as the next snapped corner, so the
-                # resulting polyline stays orthogonal end-to-end.
-                poly_pts = [src_pin_pos, src_bridge] + snapped[1:]
-
-                # Target side bridge: only when the hit is a real pin
-                # whose exact coords we know.
-                if tgt_pin_pos is not None and len(corners) >= 2:
-                    last_horizontal = (corners[-2][1] == corners[-1][1])
-                    if last_horizontal:
-                        tgt_bridge = (tgt_pin_pos[0], snapped[-1][1])
+            if net_key in canonical_top or net_key in canonical_bot:
+                on_top = net_key in canonical_top
+                rail_y = rail_top_y if on_top else rail_bot_y
+                rail_cell_y = int(round(rail_y / GRID_PX))
+                rail_targets = {
+                    (xx, rail_cell_y) for xx in range(grid_w)
+                    if 0 <= rail_cell_y < grid_h
+                    and not rg.blocked[xx][rail_cell_y]
+                }
+                for p, port in terms:
+                    px, py = p.pin_pos[port]
+                    side = p.pin_side.get(port)
+                    # Top/bot side pins clear their own bbox by exiting along
+                    # the spine, so a single straight stub is fine. A pin on
+                    # a *lateral* side (e.g. an NMOS gate at the box's left
+                    # edge) sits *on* its own bbox column — a straight stub
+                    # would draw along the bbox edge and visually clip the
+                    # body. Route those via BFS so they take an L-shape
+                    # around the bbox.
+                    if side in ("left", "right"):
+                        src_cell = to_cell(px, py)
+                        rg.allow_pin.add(src_cell)
+                        path = rg.lee(src_cell, rail_targets)
                     else:
-                        tgt_bridge = (snapped[-1][0], tgt_pin_pos[1])
-                    poly_pts.pop()  # drop the snapped last corner
-                    poly_pts.append(tgt_bridge)
-                    poly_pts.append(tgt_pin_pos)
+                        path = None
 
-            # Strip adjacent duplicate points (zero-length segments)
-            # and collinear corners — pin-snapping can leave the
-            # bridge point coinciding with both the pin and the
-            # adjacent BFS corner, which would otherwise render as a
-            # spurious "turn" in the polyline counter.
-            cleaned: list[tuple[float, float]] = []
-            for pt in poly_pts:
-                if cleaned and cleaned[-1] == pt:
+                    if path:
+                        rg.mark_used(path)
+                        cell_corners = _polyline_from_path(path)
+                        snapped = [
+                            (cx_ * GRID_PX, cy_ * GRID_PX)
+                            for cx_, cy_ in cell_corners
+                        ]
+                        if len(snapped) >= 2:
+                            first_horiz = snapped[0][1] == snapped[1][1]
+                            bridge = (
+                                (px, snapped[0][1]) if first_horiz
+                                else (snapped[0][0], py)
+                            )
+                            poly = [(px, py), bridge] + snapped[1:]
+                        else:
+                            poly = [(px, py), snapped[0] if snapped else (px, rail_y)]
+                        # Pin the rail-end exactly to ``rail_y`` (BFS lands
+                        # on the trunk row but at grid quantum).
+                        last_x, _ = poly[-1]
+                        poly[-1] = (last_x, rail_y)
+                        # Drop adjacent duplicates (the bridge can coincide
+                        # with the pin when the BFS first cell is already
+                        # on-axis with the pin) and collinear corners.
+                        poly = [
+                            pt for i, pt in enumerate(poly)
+                            if i == 0 or pt != poly[i - 1]
+                        ]
+                        j = 1
+                        while j < len(poly) - 1:
+                            a, b, c = poly[j - 1], poly[j], poly[j + 1]
+                            if (a[0] == b[0] == c[0]) or (a[1] == b[1] == c[1]):
+                                poly.pop(j)
+                            else:
+                                j += 1
+                        if on_top:
+                            poly.reverse()
+                    else:
+                        # Spine-axis pin (or BFS unreachable): straight stub.
+                        if on_top:
+                            poly = [(px, rail_y), (px, py)]
+                        else:
+                            poly = [(px, py), (px, rail_y)]
+                        cx0, cy0 = to_cell(px, py)
+                        for yy in range(
+                            min(cy0, rail_cell_y),
+                            max(cy0, rail_cell_y) + 1,
+                        ):
+                            if 0 <= cx0 < grid_w and 0 <= yy < grid_h:
+                                rg.used[cx0][yy] += 1
+                    routed_polylines.append((f"net-{net_key}", poly))
+                continue
+
+            if len(terms) == 1:
+                # A dangling node — nothing to draw.
+                continue
+
+            # Multi-terminal mid-net: rectilinear MST + Lee BFS per edge.
+            # Order terminals by Manhattan from current centroid; build a
+            # tree by repeatedly attaching the nearest unconnected terminal
+            # to the existing tree.
+            tree_cells: set[tuple[int, int]] = set()
+            # Map each tree cell that corresponds to a *pin terminal* to that
+            # pin's exact (x, y). Used to snap polyline endpoints back from
+            # the routing-grid quantum to the real pin position.
+            cell_to_pin: dict[tuple[int, int], tuple[float, float]] = {}
+            first_p, first_port = terms[0]
+            first_pin_pos = first_p.pin_pos[first_port]
+            first_cell = to_cell(*first_pin_pos)
+            tree_cells.add(first_cell)
+            cell_to_pin[first_cell] = first_pin_pos
+
+            remaining = list(terms[1:])
+            while remaining:
+                best = None
+                best_idx = -1
+                best_path: Optional[list[tuple[int, int]]] = None
+                for idx, (p, port) in enumerate(remaining):
+                    cell = to_cell(*p.pin_pos[port])
+                    rg.allow_pin.add(cell)
+                    path = rg.lee(cell, tree_cells)
+                    if path is None:
+                        continue
+                    length = len(path)
+                    if best is None or length < best:
+                        best = length
+                        best_idx = idx
+                        best_path = path
+                if best_path is None:
+                    # Could not route — emit a rectilinear fallback so the
+                    # Manhattan-only invariant still holds. Try both L-
+                    # shapes (elbow at (target.x, src.y) and (src.x,
+                    # target.y)) plus a U-shape that detours via the
+                    # canvas margin, and pick the one that intersects the
+                    # fewest component boxes.
+                    p, port = remaining.pop(0)
+                    if cell_to_pin:
+                        target_xy = next(iter(cell_to_pin.values()))
+                    else:
+                        trg = next(iter(tree_cells))
+                        target_xy = (trg[0] * GRID_PX, trg[1] * GRID_PX)
+                    src_xy = p.pin_pos[port]
+
+                    def _box_hits(poly: list[tuple[float, float]]) -> int:
+                        hits = 0
+                        for i in range(len(poly) - 1):
+                            x1, y1 = poly[i]; x2, y2 = poly[i + 1]
+                            for pp in placed:
+                                bw, bh = pp.desc.bbox_w, pp.desc.bbox_h
+                                bx0, by0 = pp.cx - bw / 2, pp.cy - bh / 2
+                                bx1, by1 = pp.cx + bw / 2, pp.cy + bh / 2
+                                seg_pads = {
+                                    pp.pin_pos[port_]
+                                    for port_ in pp.pin_pos
+                                }
+                                if (x1, y1) in seg_pads or (x2, y2) in seg_pads:
+                                    continue
+                                if x1 == x2:
+                                    if bx0 + 0.5 < x1 < bx1 - 0.5:
+                                        if max(y1, y2) > by0 + 0.5 and \
+                                           min(y1, y2) < by1 - 0.5:
+                                            hits += 1
+                                elif y1 == y2:
+                                    if by0 + 0.5 < y1 < by1 - 0.5:
+                                        if max(x1, x2) > bx0 + 0.5 and \
+                                           min(x1, x2) < bx1 - 0.5:
+                                            hits += 1
+                        return hits
+
+                    if src_xy[0] == target_xy[0] or src_xy[1] == target_xy[1]:
+                        fallback = [src_xy, target_xy]
+                    else:
+                        candidates = [
+                            [src_xy, (target_xy[0], src_xy[1]), target_xy],
+                            [src_xy, (src_xy[0], target_xy[1]), target_xy],
+                        ]
+                        # Detour via the bottom margin (just above bot rail).
+                        detour_y = rail_bot_y - RAIL_GAP / 2
+                        candidates.append([
+                            src_xy,
+                            (src_xy[0], detour_y),
+                            (target_xy[0], detour_y),
+                            target_xy,
+                        ])
+                        fallback = min(candidates, key=_box_hits)
+                    routed_polylines.append((f"net-{net_key}", fallback))
                     continue
-                cleaned.append(pt)
-            i = 1
-            while i < len(cleaned) - 1:
-                px, py = cleaned[i - 1]
-                cx_, cy_ = cleaned[i]
-                nx, ny = cleaned[i + 1]
-                if (cx_ - px, cy_ - py) == (0, 0) or (nx - cx_, ny - cy_) == (0, 0):
-                    cleaned.pop(i)
-                    continue
-                # Collinear: same axis and same direction sign.
-                same_axis_x = (px == cx_ == nx)
-                same_axis_y = (py == cy_ == ny)
-                if same_axis_x or same_axis_y:
-                    cleaned.pop(i)
-                    continue
-                i += 1
-            routed_polylines.append((f"net-{net_key}", cleaned))
-            rg.mark_used(best_path)
-            for cell in best_path:
-                tree_cells.add(cell)
-            cell_to_pin[corners[0]] = src_pin_pos
-            remaining.pop(best_idx)
 
-    polylines = rail_polylines + routed_polylines
+                corners = _polyline_from_path(best_path)
+                snapped = [
+                    (cx * GRID_PX, cy * GRID_PX) for cx, cy in corners
+                ]
 
-    # ---- Solder dots at same-net Steiner T-junctions ----
-    # Standard schematic notation: a filled circle at points where 3+
-    # wire rays of the same net meet (T or +), to visually distinguish
-    # a connection from an unrelated wire crossing.
-    solder_dots = _find_solder_dots(routed_polylines)
+                # Bridge the BFS path back to the *exact* pin coordinates.
+                # Pins live on the canvas at arbitrary (sub-grid) positions
+                # but the BFS only visits grid cells, so the snapped
+                # endpoints can sit a few pixels off the actual pin. We
+                # insert an orthogonal stub from the pin to the wire's
+                # first row/column so the wire meets the pad cleanly.
+                src_p, src_port = remaining[best_idx]
+                src_pin_pos = src_p.pin_pos[src_port]
+                hit_cell = corners[-1]
+                tgt_pin_pos = cell_to_pin.get(hit_cell)
 
-    # ---- Compact horizontal blanks ----
-    # Squeeze x-ranges that hold no vertical content (component bbox or
-    # vertical/diagonal wire segment). Horizontal-only spans — including
-    # the rails and rung-style wires — automatically shorten because
-    # their endpoints sit in occupied ranges and get shifted
-    # independently.
-    canvas_w = _compact_blanks(placed, polylines, solder_dots, canvas_w)
+                if not snapped:
+                    poly_pts: list[tuple[float, float]] = [src_pin_pos]
+                elif len(snapped) == 1:
+                    end = tgt_pin_pos if tgt_pin_pos is not None else snapped[0]
+                    poly_pts = [src_pin_pos, end]
+                else:
+                    # Source side bridge: the first BFS segment runs in the
+                    # axis (corners[0] → corners[1]) — we extend the pin
+                    # position perpendicular to that axis to land on the
+                    # wire's row / column.
+                    first_horizontal = (corners[0][1] == corners[1][1])
+                    if first_horizontal:
+                        src_bridge = (src_pin_pos[0], snapped[0][1])
+                    else:
+                        src_bridge = (snapped[0][0], src_pin_pos[1])
+                    # Replace ``snapped[0]`` with the bridge — they lie on
+                    # the same axis as the next snapped corner, so the
+                    # resulting polyline stays orthogonal end-to-end.
+                    poly_pts = [src_pin_pos, src_bridge] + snapped[1:]
 
-    # ---- SVG emission ----
-    svg = _emit_svg(placed, polylines, canvas_w, canvas_h,
-                    rail_top_y, rail_bot_y, top_set, bot_set, uf,
-                    glyphs=glyphs, solder_dots=solder_dots)
+                    # Target side bridge: only when the hit is a real pin
+                    # whose exact coords we know.
+                    if tgt_pin_pos is not None and len(corners) >= 2:
+                        last_horizontal = (corners[-2][1] == corners[-1][1])
+                        if last_horizontal:
+                            tgt_bridge = (tgt_pin_pos[0], snapped[-1][1])
+                        else:
+                            tgt_bridge = (snapped[-1][0], tgt_pin_pos[1])
+                        poly_pts.pop()  # drop the snapped last corner
+                        poly_pts.append(tgt_bridge)
+                        poly_pts.append(tgt_pin_pos)
+
+                # Strip adjacent duplicate points (zero-length segments)
+                # and collinear corners — pin-snapping can leave the
+                # bridge point coinciding with both the pin and the
+                # adjacent BFS corner, which would otherwise render as a
+                # spurious "turn" in the polyline counter.
+                cleaned: list[tuple[float, float]] = []
+                for pt in poly_pts:
+                    if cleaned and cleaned[-1] == pt:
+                        continue
+                    cleaned.append(pt)
+                i = 1
+                while i < len(cleaned) - 1:
+                    px, py = cleaned[i - 1]
+                    cx_, cy_ = cleaned[i]
+                    nx, ny = cleaned[i + 1]
+                    if (cx_ - px, cy_ - py) == (0, 0) or (nx - cx_, ny - cy_) == (0, 0):
+                        cleaned.pop(i)
+                        continue
+                    # Collinear: same axis and same direction sign.
+                    same_axis_x = (px == cx_ == nx)
+                    same_axis_y = (py == cy_ == ny)
+                    if same_axis_x or same_axis_y:
+                        cleaned.pop(i)
+                        continue
+                    i += 1
+                routed_polylines.append((f"net-{net_key}", cleaned))
+                rg.mark_used(best_path)
+                for cell in best_path:
+                    tree_cells.add(cell)
+                cell_to_pin[corners[0]] = src_pin_pos
+                remaining.pop(best_idx)
+
+        polylines = rail_polylines + routed_polylines
+
+        # ---- Solder dots at same-net Steiner T-junctions ----
+        # Standard schematic notation: a filled circle at points where 3+
+        # wire rays of the same net meet (T or +), to visually distinguish
+        # a connection from an unrelated wire crossing.
+        solder_dots = _find_solder_dots(routed_polylines)
+
+        # ---- Compact horizontal blanks ----
+        # Squeeze x-ranges that hold no vertical content (component bbox or
+        # vertical/diagonal wire segment). Horizontal-only spans — including
+        # the rails and rung-style wires — automatically shorten because
+        # their endpoints sit in occupied ranges and get shifted
+        # independently.
+        canvas_w = _compact_blanks(placed, polylines, solder_dots, canvas_w)
+
+        # ---- SVG emission ----
+        svg = _emit_svg(placed, polylines, canvas_w, canvas_h,
+                        rail_top_y, rail_bot_y, top_set, bot_set, uf,
+                        glyphs=glyphs, solder_dots=solder_dots)
+
+        _retry_overlap = _segment_overlap_length(polylines)
+        if _retry_best_overlap is None or _retry_overlap < _retry_best_overlap:
+            _retry_best_overlap = _retry_overlap
+            _retry_best_svg = svg
+        if _retry_overlap <= _OVERLAP_TOL:
+            break
+
+    # Use the lowest-overlap pass when no attempt was clean enough.
+    svg = _retry_best_svg if _retry_best_svg is not None else svg
 
     if filename is not None:
         path = Path(filename)

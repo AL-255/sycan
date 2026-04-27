@@ -20,21 +20,43 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="5.0975025"
-     inkscape:cx="32.564967"
-     inkscape:cy="-2.0598322"
-     inkscape:window-width="1280"
+     inkscape:zoom="10.926971"
+     inkscape:cx="25.761944"
+     inkscape:cy="23.840093"
+     inkscape:window-width="2560"
      inkscape:window-height="1403"
-     inkscape:window-x="1280"
+     inkscape:window-x="0"
      inkscape:window-y="0"
-     inkscape:window-maximized="0"
-     inkscape:current-layer="svg3" />
-  <polygon
-     points="40,8 54,20 40,32 26,20"
-     fill="#fff"
-     stroke="#222"
-     stroke-width="1.6"
-     id="polygon1" />
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg3"
+     showgrid="true">
+    <inkscape:grid
+       id="grid1"
+       units="px"
+       originx="0"
+       originy="0"
+       spacingx="10"
+       spacingy="10"
+       empcolor="#0099e5"
+       empopacity="0.30196078"
+       color="#0099e5"
+       opacity="0.14901961"
+       empspacing="5"
+       enabled="true"
+       visible="true" />
+  </sodipodi:namedview>
+  <rect
+     style="display:none;fill:#ff00ff;stroke:none;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4.1"
+     id="rect1"
+     width="40"
+     height="40"
+     x="20"
+     y="0"
+     inkscape:label="bbox" />
+  <path
+     id="polygon1"
+     style="fill:#ffffff;stroke:#000000;stroke-width:1.4;stroke-dasharray:none"
+     d="M 40,5.9240778 53.924386,20 40,34.075922 26.075613,20 Z" />
   <text
      x="40"
      y="17"
@@ -60,17 +82,18 @@
      stroke="none"
      style="stroke:#000000"
      r="0" />
-  <circle
+  <ellipse
      id="port-n_minus"
      cx="40"
      cy="40"
      fill="none"
      stroke="none"
      style="stroke:#000000"
-     r="0" />
+     ry="0"
+     rx="1" />
   <circle
      id="port-nc_plus"
-     cx="0"
+     cx="20"
      cy="10"
      fill="none"
      stroke="none"
@@ -78,7 +101,7 @@
      r="0" />
   <circle
      id="port-nc_minus"
-     cx="0"
+     cx="20"
      cy="30"
      fill="none"
      stroke="none"
@@ -86,7 +109,7 @@
      r="0" />
   <circle
      id="port-ctrl"
-     cx="0"
+     cx="20"
      cy="20"
      fill="none"
      stroke="none"
@@ -94,18 +117,22 @@
      r="0" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="M 40,8 V 2"
-     id="path1" />
+     d="M 40,5.9240778 V 0"
+     id="path1"
+     sodipodi:nodetypes="cc" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="m 40,32 v 8"
-     id="path2" />
+     d="M 40,34.075922 V 40"
+     id="path2"
+     sodipodi:nodetypes="cc" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="M 2,10 H 28"
-     id="path3" />
+     d="m 20,30 h 10 l 3.037807,-2.962039"
+     id="path4"
+     sodipodi:nodetypes="ccc" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1.5;stroke-miterlimit:4.1"
-     d="M 2,30 H 28"
-     id="path4" />
+     d="m 20,10 h 10 l 3.037807,2.962039"
+     id="path4-6"
+     sodipodi:nodetypes="ccc" />
 </svg>
