@@ -452,7 +452,7 @@ async function boot() {
 await py.loadPackage(['sympy', 'numpy', 'micropip']);
   await py.runPythonAsync(`
 import micropip
-await micropip.install('./sycan-0.1.4-py3-none-any.whl')
+await micropip.install('./sycan-0.1.5-py3-none-any.whl')
 import sycan
 print(f'sycan {sycan.__name__} ready')
   `);
