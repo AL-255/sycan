@@ -287,14 +287,106 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Ex
         for c in nonlinear:
             c.stamp_nonlinear(ctx)
 
-        solutions = sp.solve(residuals, list(x), dict=True)
-        if not solutions:
-            raise RuntimeError(
-                "DC solver could not close the nonlinear system. "
-                "Try pinning more node voltages or substituting numeric values."
+        # ``sp.solve`` works well for polynomial nonlinear systems
+        # (e.g. plain Shichman-Hodges Level-1 in saturation) and even
+        # for transcendental ones once the voltage sources have
+        # pinned the unknowns down to single equations
+        # (e.g. the subthreshold-MOSFET tests). It *spins forever*,
+        # though, on segmented systems where the unknowns are
+        # genuinely coupled and a ``Piecewise`` selector picks
+        # different branches based on those unknowns — that's the
+        # MOSFET_3T inverter case. Detect that combination
+        # ("residuals contain Piecewise" AND "no free parameters
+        # left to solve symbolically over") and skip straight to
+        # damped Newton; everything else still goes through the
+        # closed-form symbolic path.
+        free_params = set()
+        for r in residuals:
+            free_params |= r.free_symbols
+        free_params -= set(x)
+        has_piecewise = any(r.has(sp.Piecewise) for r in residuals)
+        try:
+            if has_piecewise and not free_params:
+                solutions = []
+            else:
+                solutions = sp.solve(residuals, list(x), dict=True)
+        except NotImplementedError:
+            solutions = []
+        if solutions:
+            sol_dict = solutions[0]
+            result = {sym: sol_dict.get(sym, sym) for sym in x}
+        else:
+            # Damped Newton over a numpy-lambdified residual. Plain
+            # ``sp.nsolve`` (mpmath's undamped Newton) hangs on
+            # MOSFET-style segmented models: when an iterate briefly
+            # leaves the physical V_DS ≥ 0 envelope the L1 triode
+            # quadratic blows up and Newton can't recover. Damping
+            # with line search keeps every step inside the basin
+            # of attraction. We also add the standard SPICE GMIN
+            # shunt (1 GΩ from every node to ground) so the Jacobian
+            # stays conditioned at flat-slope operating points such
+            # as L1 saturation with ``lam = 0``.
+            import numpy as np
+            G_MIN = sp.Float("1e-12")
+            reg_residuals = list(residuals)
+            for _name, row_idx in node_rows.items():
+                reg_residuals[row_idx] += G_MIN * x[row_idx]
+            x_list = list(x)
+            F_fn = sp.lambdify(
+                [x_list], sp.Matrix(reg_residuals), modules="numpy",
             )
-        sol_dict = solutions[0]
-        result = {sym: sol_dict.get(sym, sym) for sym in x}
+            J_fn = sp.lambdify(
+                [x_list], sp.Matrix(reg_residuals).jacobian(x_list),
+                modules="numpy",
+            )
+            xv = np.zeros(len(x_list), dtype=float)
+            ok = False
+            # Line-search trial points routinely probe transcendental
+            # branches that overflow ``exp`` — we catch the overflowed
+            # iterates via the ``isfinite`` guard below, so the warnings
+            # are noise. Suppress them locally instead of letting them
+            # leak into the user's output.
+            with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+                for _ in range(80):
+                    fv = np.asarray(F_fn(xv), dtype=float).reshape(-1)
+                    fnorm = float(np.linalg.norm(fv, np.inf))
+                    if fnorm < 1e-10:
+                        ok = True
+                        break
+                    Jm = np.asarray(J_fn(xv), dtype=float)
+                    # Regularise rank-deficient Jacobians (e.g. a fully
+                    # cut-off device makes a row all zeros).
+                    Jm = Jm + 1e-12 * np.eye(len(x_list))
+                    try:
+                        step = np.linalg.solve(Jm, fv)
+                    except np.linalg.LinAlgError:
+                        step = np.linalg.lstsq(Jm, fv, rcond=None)[0]
+                    # Backtracking line search: shrink the step until
+                    # the residual norm strictly decreases (or we
+                    # exhaust halvings, in which case we accept the
+                    # smallest step and try again).
+                    alpha = 1.0
+                    accepted = False
+                    for _ls in range(40):
+                        xv_try = xv - alpha * step
+                        fv_try = np.asarray(F_fn(xv_try), dtype=float).reshape(-1)
+                        if (np.all(np.isfinite(fv_try))
+                                and float(np.linalg.norm(fv_try)) < float(np.linalg.norm(fv))):
+                            xv = xv_try
+                            accepted = True
+                            break
+                        alpha *= 0.5
+                    if not accepted:
+                        # Take the tiniest step we tried and continue —
+                        # better than spinning at the same iterate.
+                        xv = xv - alpha * step
+            if not ok:
+                raise RuntimeError(
+                    "DC solver could not close the nonlinear system. "
+                    "Try pinning more node voltages or substituting "
+                    "numeric values."
+                )
+            result = {sym: sp.Float(float(xv[i])) for i, sym in enumerate(x_list)}
 
     if simplify:
         result = {sym: sp.simplify(expr) for sym, expr in result.items()}

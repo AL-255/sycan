@@ -8,5 +8,6 @@
   {"label": "Wheatstone bridge",       "file": "wheatstone.py"},
   {"label": "RC noise (kT/C)",         "file": "rc_noise.py"},
   {"label": "CS amp noise",            "file": "cs_amp_noise.py"},
-  {"label": "Noise-cancelling LNA",    "file": "noise_cancelling_lna.py"}
+  {"label": "Noise-cancelling LNA",    "file": "noise_cancelling_lna.py"},
+  {"label": "CMOS inverter (slider)",  "file": "inverter.py"}
 ]

@@ -117,6 +117,83 @@ class _MOSFET_L1(Component):
         )
         return pol * I_D_mag
 
+    # ------------------------------------------------------------------
+    # Numeric helpers — operating region + DC drain current.
+    #
+    # The ``stamp_*`` methods above keep the model symbolic so the MNA
+    # solver can do its symbolic work. These helpers evaluate the same
+    # device equations on plain floats so quick bias-point sweeps
+    # (parameter studies, browser demos, sanity checks) don't need a
+    # full sympy solve. ``_to_float`` accepts either a Python number or
+    # a sympy expression with all parameters already substituted.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _to_float(v) -> float:
+        if isinstance(v, (int, float)):
+            return float(v)
+        try:
+            return float(sp.sympify(v))
+        except (TypeError, ValueError) as exc:  # pragma: no cover — guard
+            raise TypeError(
+                f"cannot convert {v!r} to a float; substitute every "
+                f"symbolic parameter before calling this helper"
+            ) from exc
+
+    def operating_region(self, V_GS, V_DS) -> str:
+        """Classify the device as ``cutoff``, ``triode`` or ``saturation``.
+
+        The classification follows the standard long-channel rules:
+
+        * ``V_GS_eff < V_TH``                       -> cutoff
+        * ``V_GS_eff >= V_TH`` and ``V_DS_eff < V_GS_eff - V_TH`` -> triode
+        * ``V_GS_eff >= V_TH`` and ``V_DS_eff >= V_GS_eff - V_TH`` -> saturation
+
+        ``V_GS`` / ``V_DS`` are absolute (un-polarised) terminal-voltage
+        differences ``V(g) - V(s)`` and ``V(d) - V(s)`` — the polarity
+        flip for PMOS is applied internally so callers pass numbers
+        straight from a simulation, regardless of device type.
+        """
+        pol = 1.0 if self.polarity == "N" else -1.0
+        V_TH = self._to_float(self.V_TH)
+        V_GS_eff = pol * self._to_float(V_GS)
+        V_DS_eff = pol * self._to_float(V_DS)
+        V_ov = V_GS_eff - V_TH
+        if V_ov <= 0.0:
+            return "cutoff"
+        if V_DS_eff < V_ov:
+            return "triode"
+        return "saturation"
+
+    def dc_current(self, V_GS, V_DS) -> float:
+        """Drain current ``I_D`` (SPICE sign — positive *into* the drain).
+
+        Region-aware: returns 0 in cutoff, the long-channel triode
+        equation (with channel-length modulation) in triode, and the
+        L1 saturation equation in saturation. Unlike :meth:`_I_D_expr`
+        — which uses the saturation form everywhere because the
+        symbolic AC stamps only need it at the operating point — this
+        helper is intended for full-swing sweeps where the device
+        actually crosses regions.
+        """
+        pol = 1.0 if self.polarity == "N" else -1.0
+        V_TH = self._to_float(self.V_TH)
+        V_GS_eff = pol * self._to_float(V_GS)
+        V_DS_eff = pol * self._to_float(V_DS)
+        V_ov = V_GS_eff - V_TH
+        if V_ov <= 0.0:
+            return 0.0
+        beta = (
+            self._to_float(self.mu_n)
+            * self._to_float(self.Cox)
+            * self._to_float(self.W) / self._to_float(self.L)
+        )
+        lam = self._to_float(self.lam)
+        if V_DS_eff < V_ov:
+            I_mag = beta * (V_ov * V_DS_eff - 0.5 * V_DS_eff ** 2) * (1.0 + lam * V_DS_eff)
+        else:
+            I_mag = 0.5 * beta * V_ov ** 2 * (1.0 + lam * V_DS_eff)
+        return pol * I_mag
+
     def _small_signal_params(self) -> tuple[sp.Expr, sp.Expr]:
         _vgs, _vds = sp.Dummy("vgs"), sp.Dummy("vds")
         I_D = self._I_D_expr(_vgs, _vds)

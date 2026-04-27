@@ -294,10 +294,35 @@ def parse(text: str) -> Circuit:
                     else circuit.add_pmos_l1
                 )
                 adder(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
+            elif mtype_lc in ("nmos_3t", "pmos_3t"):
+                kwargs: dict[str, sp.Expr] = {}
+                # Parameter order matches add_nmos_3t / add_pmos_3t,
+                # which mirror MOSFET_L1 with ``m`` and ``V_T`` slotted
+                # in after the channel-length-modulation parameter.
+                if len(parts) > 10:
+                    kwargs["lam"] = parse_value(parts[10])
+                if len(parts) > 11:
+                    kwargs["m"] = parse_value(parts[11])
+                if len(parts) > 12:
+                    kwargs["V_T"] = parse_value(parts[12])
+                if len(parts) > 13:
+                    kwargs["V_GS_op"] = parse_value(parts[13])
+                if len(parts) > 14:
+                    kwargs["V_DS_op"] = parse_value(parts[14])
+                if len(parts) > 15:
+                    kwargs["C_gs"] = parse_value(parts[15])
+                if len(parts) > 16:
+                    kwargs["C_gd"] = parse_value(parts[16])
+                adder = (
+                    circuit.add_nmos_3t
+                    if mtype_lc == "nmos_3t"
+                    else circuit.add_pmos_3t
+                )
+                adder(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
             else:
                 raise ValueError(
                     f"line {lineno}: unknown MOSFET model {mtype!r}; "
-                    "expected N/PMOS_subthreshold or N/PMOS_L1"
+                    "expected N/PMOS_subthreshold, N/PMOS_L1, or N/PMOS_3T"
                 )
         elif head == "x":
             _require(parts, 5, lineno, name)

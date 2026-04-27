@@ -27,15 +27,31 @@
     min-height: 160px; background: #f6f6f6; white-space: pre-wrap;
   }
   #schematic {
-    width: 100%; box-sizing: border-box; min-height: 220px;
-    border: 1px solid #bbb; border-radius: 6px; padding: 12px;
-    background: #fff; overflow: auto;
+    width: 100%; box-sizing: border-box; height: 480px;
+    border: 1px solid #bbb; border-radius: 6px;
+    background: #fff; position: relative; overflow: hidden;
+    cursor: grab; user-select: none;
+    touch-action: none;
   }
-  #schematic.empty {
+  #schematic.dragging { cursor: grabbing; }
+  #schematic-empty {
+    position: absolute; inset: 0;
     display: flex; align-items: center; justify-content: center;
     color: #666; font-style: italic;
+    pointer-events: none;
   }
-  #schematic svg { display: block; width: 100%; height: auto; }
+  #schematic:not(.empty) #schematic-empty { display: none; }
+  #schematic-stage {
+    position: absolute; left: 0; top: 0;
+    transform-origin: 0 0;
+    /* No ``will-change: transform`` — that hint promotes the stage
+       to its own GPU layer, which the browser then scales as a
+       cached bitmap whenever ``transform: scale(...)`` runs. We
+       want the SVG re-rasterised vector-clean at every zoom level
+       instead, so we let the compositor inline-rebuild on scale. */
+  }
+  #schematic.empty #schematic-stage { display: none; }
+  #schematic svg { display: block; }
   @media (prefers-color-scheme: dark) { #output { background: #1a1a1a; } }
   @media (prefers-color-scheme: dark) { #schematic.empty { color: #aaa; } }
 
@@ -109,6 +125,16 @@
   </label>
 </div>
 
+<div id="inverter-controls" class="row" style="display:none; align-items:stretch">
+  <strong style="align-self:center">Inverter:</strong>
+  <label style="flex:1; display:flex; flex-direction:column; gap:4px">
+    <span>V<sub>in</sub> = <span id="inverter-vin-readout">0.900</span> V
+          (V<sub>DD</sub> = 1.8 V)</span>
+    <input id="inverter-vin" type="range" min="0" max="1.8" step="0.01" value="0.9"
+           style="width:100%">
+  </label>
+</div>
+
 <h3>Code</h3>
 <textarea id="editor" spellcheck="false"></textarea>
 
@@ -120,8 +146,18 @@
 <h3>Output</h3>
 <div id="output"></div>
 
-<h3 id="schematic-heading">Schematic</h3>
-<div id="schematic"></div>
+<div class="row" style="justify-content:space-between">
+  <h3 id="schematic-heading" style="margin:0">Schematic</h3>
+  <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#888">
+    Zoom
+    <input id="zoom" type="range" min="20" max="200" step="5" value="100" style="width:160px">
+    <span id="zoom-readout" style="min-width:3em; text-align:right">100%</span>
+  </label>
+</div>
+<div id="schematic" class="empty">
+  <div id="schematic-empty">Run an example that returns SVG to render it here.</div>
+  <div id="schematic-stage"></div>
+</div>
 
 <script>
   // MathJax v3: render any $$...$$ / \[...\] block (and $...$ / \(...\)
@@ -158,16 +194,109 @@ const examplesEl = document.getElementById('examples');
 
 function write(msg) { output.textContent += msg; }
 
+const stage = document.getElementById('schematic-stage');
+const emptyEl = document.getElementById('schematic-empty');
+
+// Pan / zoom state. ``tx`` / ``ty`` are translate offsets (container
+// pixels) applied to the stage; ``scale`` is the actual transform
+// multiplier on the SVG. The user-facing zoom slider, however, runs
+// in *fit-relative* units — 100 % means "the SVG exactly fills the
+// visible viewport" (constrained by whichever dimension hits first),
+// 50 % is half that, and so on. We translate between the two with
+// ``fitScale``, recomputed on every render and resize.
+let tx = 0, ty = 0, scale = 0.5, fitScale = 1.0;
+const SCALE_MIN = 0.05, SCALE_MAX = 20.0;
+
+function applyTransform() {
+  stage.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+}
+
+function svgNaturalSize() {
+  const svg = stage.querySelector('svg');
+  if (!svg) return null;
+  const w = parseFloat(svg.getAttribute('width'))
+            || (svg.viewBox.baseVal && svg.viewBox.baseVal.width)
+            || 0;
+  const h = parseFloat(svg.getAttribute('height'))
+            || (svg.viewBox.baseVal && svg.viewBox.baseVal.height)
+            || 0;
+  return (w && h) ? {w, h} : null;
+}
+
+function computeFitScale() {
+  const sz = svgNaturalSize();
+  if (!sz) return 1.0;
+  // Fit so the SVG is fully visible — limited by whichever dimension
+  // hits the container edge first.
+  return Math.min(
+    schematic.clientWidth  / sz.w,
+    schematic.clientHeight / sz.h,
+  );
+}
+
+function centerSchematic() {
+  fitScale = computeFitScale();
+  // Honour the slider value (in fit-relative %): scale = userZoom * fitScale.
+  const slider = document.getElementById('zoom');
+  scale = parseFloat(slider.value) / 100 * fitScale;
+  scale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, scale));
+  const sz = svgNaturalSize();
+  if (!sz) return;
+  tx = (schematic.clientWidth  - sz.w * scale) / 2;
+  ty = (schematic.clientHeight - sz.h * scale) / 2;
+  applyTransform();
+  syncZoomSlider();
+}
+
+function setScale(newScale, anchorX, anchorY) {
+  newScale = Math.max(SCALE_MIN, Math.min(SCALE_MAX, newScale));
+  // Keep the SVG point currently under (anchorX, anchorY) anchored
+  // there after the scale change. Solving
+  //     anchor = tx + svgPoint * scale
+  // for tx with the svgPoint held fixed gives:
+  const k = newScale / scale;
+  tx = anchorX - (anchorX - tx) * k;
+  ty = anchorY - (anchorY - ty) * k;
+  scale = newScale;
+  applyTransform();
+  syncZoomSlider();
+}
+
+function syncZoomSlider() {
+  // The slider runs in fit-relative percent — convert from absolute
+  // ``scale`` back to the percentage the user sees.
+  if (fitScale <= 0) return;
+  const userPct = Math.round(scale / fitScale * 100);
+  const slider = document.getElementById('zoom');
+  const readout = document.getElementById('zoom-readout');
+  slider.value = String(userPct);
+  readout.textContent = userPct + '%';
+}
+
 function resetSchematic(message = 'Run an example that returns SVG to render it here.') {
-  schematic.replaceChildren();
-  schematic.textContent = message;
+  stage.replaceChildren();
   schematic.classList.add('empty');
+  emptyEl.textContent = message;
+  // Reset pan to default so the next render lands cleanly centred.
+  tx = 0; ty = 0;
+  applyTransform();
 }
 
 function isSvgDocument(text) {
   if (typeof text !== 'string') return false;
   const trimmed = text.trim();
   return trimmed.startsWith('<svg') && trimmed.endsWith('</svg>');
+}
+
+function applySchematicZoom() {
+  // Slider-driven zoom anchors on the centre of the visible viewport,
+  // so dragging the slider feels like a uniform shrink/grow rather
+  // than wandering off to one corner. Wheel zoom anchors on the
+  // cursor instead — handled in the wheel listener. The slider's
+  // value is fit-relative percent, so multiply by ``fitScale`` to
+  // get the actual transform scale.
+  const z = parseFloat(document.getElementById('zoom').value);
+  setScale(z / 100 * fitScale, schematic.clientWidth / 2, schematic.clientHeight / 2);
 }
 
 function renderSvg(svgText) {
@@ -180,10 +309,21 @@ function renderSvg(svgText) {
     throw new Error('Python returned markup, but it was not an <svg> document.');
   }
   const rendered = document.importNode(svg, true);
-  rendered.removeAttribute('width');
-  rendered.removeAttribute('height');
-  schematic.replaceChildren(rendered);
+  // Keep the width/height attributes — the stage's transform handles
+  // scaling, so we want the SVG laid out at its natural pixel size
+  // (matching the autodraw viewBox) so that the transform's scale
+  // factor matches the zoom slider value.
+  const wasEmpty = schematic.classList.contains('empty');
+  stage.replaceChildren(rendered);
   schematic.classList.remove('empty');
+  if (wasEmpty) {
+    // Fresh render after a reset (or first paint) — pick a sensible
+    // centred position. Slider re-runs (inPlace mode) keep the user's
+    // current pan/zoom intact.
+    centerSchematic();
+  } else {
+    applyTransform();
+  }
 }
 
 async function loadExample(file) {
@@ -196,7 +336,11 @@ async function loadExample(file) {
   // Show the filter-parameter UI only for the LPF example.
   const isLPF = (file === 'lowpass_filter.py');
   document.getElementById('filter-controls').style.display = isLPF ? 'flex' : 'none';
-  document.getElementById('schematic-heading').textContent = isLPF ? 'Bode plot' : 'Schematic';
+  // Show the inverter slider UI only for the inverter example.
+  const isInv = (file === 'inverter.py');
+  document.getElementById('inverter-controls').style.display = isInv ? 'flex' : 'none';
+  document.getElementById('schematic-heading').textContent =
+    isLPF ? 'Bode plot' : 'Schematic';
 }
 
 async function buildExamples() {
@@ -328,22 +472,44 @@ async function typesetMath() {
   await MathJax.typesetPromise([output]);
 }
 
-async function run() {
+async function run(opts = {}) {
   if (runBtn.disabled || !py) return;
-  output.textContent = '';
-  resetSchematic();
-  py.setStdout({ batched: (s) => write(s + '\n') });
-  py.setStderr({ batched: (s) => write(s + '\n') });
+  // ``inPlace`` keeps the previous schematic / output visible while the
+  // next run is executing, so the slider triggers don't collapse the
+  // schematic to its empty state — that collapse shrinks the page,
+  // makes the browser clamp the scroll position, and the user gets a
+  // disorienting "jump to top" each time the slider moves.
+  const inPlace = !!opts.inPlace;
+  let buffer = '';
+  if (!inPlace) {
+    output.textContent = '';
+    resetSchematic();
+    py.setStdout({ batched: (s) => write(s + '\n') });
+    py.setStderr({ batched: (s) => write(s + '\n') });
+  } else {
+    py.setStdout({ batched: (s) => { buffer += s + '\n'; } });
+    py.setStderr({ batched: (s) => { buffer += s + '\n'; } });
+  }
   runBtn.disabled = true;
   try {
     const result = await py.runPythonAsync(cm.getValue());
+    let trailing = '';
     if (isSvgDocument(result)) {
       renderSvg(result);
     } else if (result !== undefined && result !== null) {
-      write(String(result) + '\n');
+      trailing = String(result) + '\n';
+    }
+    if (inPlace) {
+      // Atomic swap: only now do we replace stale text. The
+      // schematic was either already replaced by renderSvg above, or
+      // (if the script returned nothing SVG-shaped) it stays put.
+      output.textContent = buffer + trailing;
+    } else if (trailing) {
+      write(trailing);
     }
   } catch (e) {
-    write(String(e));
+    if (inPlace) output.textContent = buffer + String(e);
+    else write(String(e));
   } finally {
     runBtn.disabled = false;
     try { await typesetMath(); } catch (_) { /* MathJax errors are non-fatal */ }
@@ -357,19 +523,102 @@ clearBtn.addEventListener('click', () => {
 });
 
 // Re-run when the filter controls change (debounced, only when the
-// panel is visible — i.e., the LPF example is loaded).
+// panel is visible — i.e., the LPF example is loaded). ``inPlace``
+// keeps the previous render visible until the next one is ready so
+// the page doesn't collapse + reflow on every tick.
 {
   const panel = document.getElementById('filter-controls');
   let pending = null;
   const trigger = () => {
     if (panel.style.display === 'none' || runBtn.disabled) return;
     clearTimeout(pending);
-    pending = setTimeout(() => { run().catch(() => {}); }, 120);
+    pending = setTimeout(() => { run({inPlace: true}).catch(() => {}); }, 120);
   };
   ['filter-family', 'filter-order', 'filter-ripple'].forEach((id) => {
     document.getElementById(id).addEventListener('input', trigger);
     document.getElementById(id).addEventListener('change', trigger);
   });
+}
+
+// Same pattern for the inverter slider: re-run on change, debounced,
+// only while the inverter example is the active one. Also keep the
+// numeric readout next to the slider in sync without waiting for
+// Pyodide.
+{
+  const panel    = document.getElementById('inverter-controls');
+  const slider   = document.getElementById('inverter-vin');
+  const readout  = document.getElementById('inverter-vin-readout');
+  let pending = null;
+  slider.addEventListener('input', () => {
+    readout.textContent = parseFloat(slider.value).toFixed(3);
+    if (panel.style.display === 'none' || runBtn.disabled) return;
+    clearTimeout(pending);
+    pending = setTimeout(() => { run({inPlace: true}).catch(() => {}); }, 80);
+  });
+}
+
+// Zoom slider drives the stage's scale (anchored on the viewport
+// centre). Purely client-side — no re-run needed.
+document.getElementById('zoom').addEventListener('input', applySchematicZoom);
+
+// --- Pan / wheel zoom -------------------------------------------------
+// Mouse drag pans the stage. Wheel zooms anchored on the cursor — the
+// SVG point under the pointer stays under the pointer.
+{
+  let dragging = false;
+  let dragOriginX = 0, dragOriginY = 0;
+  let dragStartTx = 0, dragStartTy = 0;
+  schematic.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return;
+    if (schematic.classList.contains('empty')) return;
+    dragging = true;
+    dragOriginX = ev.clientX; dragOriginY = ev.clientY;
+    dragStartTx = tx; dragStartTy = ty;
+    schematic.classList.add('dragging');
+    ev.preventDefault();
+  });
+  window.addEventListener('mousemove', (ev) => {
+    if (!dragging) return;
+    tx = dragStartTx + (ev.clientX - dragOriginX);
+    ty = dragStartTy + (ev.clientY - dragOriginY);
+    applyTransform();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    schematic.classList.remove('dragging');
+  });
+
+  schematic.addEventListener('wheel', (ev) => {
+    if (schematic.classList.contains('empty')) return;
+    ev.preventDefault();
+    const rect = schematic.getBoundingClientRect();
+    const ax = ev.clientX - rect.left;
+    const ay = ev.clientY - rect.top;
+    // Smooth exponential zoom so deltaY of 100 (a typical wheel "click")
+    // gives a ~10% scale change in the corresponding direction.
+    const factor = Math.exp(-ev.deltaY * 0.001);
+    setScale(scale * factor, ax, ay);
+  }, { passive: false });
+
+  // Re-centre on container resize so the SVG doesn't drift off-screen
+  // when the user resizes the browser. Pan offset is otherwise
+  // preserved across explicit user interactions.
+  const ro = new ResizeObserver(() => {
+    if (!schematic.classList.contains('empty')) {
+      // Only re-centre if the user hasn't already panned away — i.e.,
+      // when the SVG would still be roughly centred. Otherwise leave
+      // the scroll alone so a window resize doesn't yank the user's
+      // current view.
+      const sz = svgNaturalSize();
+      if (!sz) return;
+      const expectedTx = (schematic.clientWidth - sz.w * scale) / 2;
+      // Only auto-recentre if we're within a margin of the centred
+      // position (= the user hasn't panned).
+      if (Math.abs(tx - expectedTx) < 4) centerSchematic();
+    }
+  });
+  ro.observe(schematic);
 }
 
 boot().catch((e) => { status.textContent = 'Failed to load Pyodide: ' + e; });

@@ -45,8 +45,10 @@ from sycan.circuit import Circuit
 from sycan.components.active import (
     BJT,
     Diode,
+    NMOS_3T,
     NMOS_L1,
     NMOS_subthreshold,
+    PMOS_3T,
     PMOS_L1,
     PMOS_subthreshold,
     Triode,
@@ -191,11 +193,11 @@ def _short(port: str) -> str:
 
 def _describe(c: Component) -> _CompDesc:
     """Return the spine + sides for any supported component type."""
-    if isinstance(c, (NMOS_L1, NMOS_subthreshold)):
+    if isinstance(c, (NMOS_L1, NMOS_subthreshold, NMOS_3T)):
         return _CompDesc(c, c.name, "nmos",
                          spine_top="drain", spine_bot="source",
                          side_ports=("gate",))
-    if isinstance(c, (PMOS_L1, PMOS_subthreshold)):
+    if isinstance(c, (PMOS_L1, PMOS_subthreshold, PMOS_3T)):
         return _CompDesc(c, c.name, "pmos",
                          spine_top="source", spine_bot="drain",
                          side_ports=("gate",))

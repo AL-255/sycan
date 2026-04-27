@@ -1135,7 +1135,10 @@ def emit_svg(
                 ty = top_y + i * line_h
                 text = str(line)
                 annotation_emits.append(
-                    f'<text class="bann" x="{x:.1f}" y="{ty:.1f}">'
+                    f'<text class="bann" '
+                    f'data-bann-comp="{html_escape(name)}" '
+                    f'data-bann-line="{i}" '
+                    f'x="{x:.1f}" y="{ty:.1f}">'
                     f'{html_escape(text)}</text>'
                 )
                 annotation_rects.append(

@@ -19,8 +19,10 @@ from sycan.mna import Component, Value
 from sycan.components.active import (
     BJT,
     Diode,
+    NMOS_3T,
     NMOS_L1,
     NMOS_subthreshold,
+    PMOS_3T,
     PMOS_L1,
     PMOS_subthreshold,
     Triode,
@@ -309,6 +311,49 @@ class Circuit:
             PMOS_subthreshold(
                 name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs
             )
+        )  # type: ignore[return-value]
+
+    def add_nmos_3t(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        mu_n: Value,
+        Cox: Value,
+        W: Value,
+        L: Value,
+        V_TH: Value,
+        **kwargs: Value,
+    ) -> NMOS_3T:
+        """Attach a segmented L1 + matched-weak-inversion NMOS.
+
+        Optional keyword parameters: ``lam`` (channel-length modulation),
+        ``m`` (sub-threshold slope factor), ``V_T`` (thermal voltage),
+        ``C_gs``, ``C_gd`` (intrinsic capacitances), and
+        ``V_GS_op`` / ``V_DS_op`` (AC linearisation point).
+        """
+        return self.add(
+            NMOS_3T(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
+        )  # type: ignore[return-value]
+
+    def add_pmos_3t(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        mu_n: Value,
+        Cox: Value,
+        W: Value,
+        L: Value,
+        V_TH: Value,
+        **kwargs: Value,
+    ) -> PMOS_3T:
+        """Attach a segmented L1 + matched-weak-inversion PMOS
+        (``V_TH`` is a positive magnitude)."""
+        return self.add(
+            PMOS_3T(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
         )  # type: ignore[return-value]
 
     @property
