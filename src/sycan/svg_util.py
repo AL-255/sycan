@@ -773,6 +773,7 @@ def _emit_designator_labels(
     port_fs: int,
     short_port: callable,
     have_glyphs: dict,
+    extra_obstacles: Sequence[tuple[float, float, float, float]] = (),
 ) -> list[str]:
     """Pick a low-overlap position next to each component for its label.
 
@@ -814,6 +815,10 @@ def _emit_designator_labels(
             else:  # top, right
                 tx, ty, anc = px + 4, py - 2, "start"
             obstacles.append(_label_rect(tx, ty, anc, text, port_fs))
+
+    # Caller-supplied obstacles (e.g. back-annotation rects, computed
+    # before this pass so designators dodge them).
+    obstacles.extend(extra_obstacles)
 
     # Wire / rail segments — thin axis-aligned rects with a small pad.
     wire_pad = 2.0
@@ -909,6 +914,7 @@ def emit_svg(
     glyphs: Optional[dict[str, dict]] = None,
     short_port: Optional[callable] = None,
     solder_dots: Optional[Sequence[tuple[float, float]]] = None,
+    back_annotation: Optional[dict[str, Sequence[str]]] = None,
 ) -> str:
     """Serialise a routed schematic to SVG.
 
@@ -956,7 +962,8 @@ def emit_svg(
         ".lab{fill:#222}"
         ".plab{fill:#444;font-size:%dpx}"
         ".rlab{fill:#a00;font-weight:bold}"
-        "</style>" % port_fs
+        ".bann{fill:#e07b00;font-weight:300;font-size:%dpx}"
+        "</style>" % (port_fs, max(8, port_fs))
     )
 
     # Glyph defs are intentionally inlined per-instance below (as <g>
@@ -1102,13 +1109,49 @@ def emit_svg(
     # least with neighbouring geometry. Drawing them at the bbox centre
     # (the original behaviour) made them collide with the glyph ink on
     # any component whose body fills the bbox (triodes, op-amps, sources).
+    # Back annotations: positions are computed *before* designator
+    # placement so the designator picker treats annotation rects as
+    # obstacles and routes around them. The actual text elements are
+    # appended at the very end of the SVG, so they remain the topmost
+    # layer in z-order.
+    annotation_emits: list[str] = []
+    annotation_rects: list[tuple[float, float, float, float]] = []
+    if back_annotation:
+        ann_fs = max(8, port_fs)
+        line_h = ann_fs + 1
+        margin = 4.0
+        by_label = {p.desc.label: p for p in placed if getattr(p.desc, "label", "")}
+        for name, lines in back_annotation.items():
+            p = by_label.get(name)
+            if p is None or not lines:
+                continue
+            x = p.cx + p.desc.bbox_w / 2.0 + margin
+            n = len(lines)
+            # Stack centred vertically on the bbox, baseline at top of
+            # each line — the topmost text sits ~ann_fs above centre
+            # for a 1-line annotation, two lines straddle centre, etc.
+            top_y = p.cy - (n - 1) * line_h / 2.0 + ann_fs * 0.3
+            for i, line in enumerate(lines):
+                ty = top_y + i * line_h
+                text = str(line)
+                annotation_emits.append(
+                    f'<text class="bann" x="{x:.1f}" y="{ty:.1f}">'
+                    f'{html_escape(text)}</text>'
+                )
+                annotation_rects.append(
+                    _label_rect(x, ty, "start", text, ann_fs)
+                )
+
     parts.extend(
         _emit_designator_labels(
             placed, polylines, canvas_w, canvas_h,
             label_fs=label_fs, port_fs=port_fs, short_port=short_port,
             have_glyphs=have_glyphs,
+            extra_obstacles=annotation_rects,
         )
     )
+
+    parts.extend(annotation_emits)
 
     parts.append("</svg>")
     return "\n".join(parts)

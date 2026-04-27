@@ -1947,6 +1947,7 @@ def autodraw(
     cost_model: str = "hpwl",
     res_dir: Union[str, Path, None, object] = _DEFAULT_RES_DIR,
     reverse_isolated_branches: bool = False,
+    back_annotation: Optional[dict[str, Sequence[str]]] = None,
     max_retries: int = 5,
 ) -> str:
     """Render ``circuit`` to an SVG schematic and return the SVG string.
@@ -1996,6 +1997,16 @@ def autodraw(
         produce no fully-isolated multi-component branches, so this
         is dormant capability for circuits / branch-builder changes
         that introduce them.
+    back_annotation:
+        Optional mapping of component name → sequence of annotation
+        strings. Each string is rendered as a thin orange line of text
+        on the right-hand side of the matching component, stacked top-
+        to-bottom. Useful for surfacing derived results (operating
+        points, gain numbers, noise figures, …) next to the parts they
+        belong to. Annotations are drawn as the very last layer so
+        they sit on top of every other primitive; collisions with
+        wires or labels are intentionally ignored — the caller chooses
+        what to display.
     max_retries:
         Maximum number of fallback render passes triggered when the
         first pass produces wires that lay collinear on top of one
@@ -2579,7 +2590,8 @@ def autodraw(
         # ---- SVG emission ----
         svg = _emit_svg(placed, polylines, canvas_w, canvas_h,
                         rail_top_y, rail_bot_y, top_set, bot_set, uf,
-                        glyphs=glyphs, solder_dots=solder_dots)
+                        glyphs=glyphs, solder_dots=solder_dots,
+                        back_annotation=back_annotation)
 
         _retry_overlap = _segment_overlap_length(polylines)
         if _retry_best_overlap is None or _retry_overlap < _retry_best_overlap:
@@ -2710,11 +2722,13 @@ def _emit_svg(
     uf: _UF,
     glyphs: Optional[dict[str, dict]] = None,
     solder_dots: Optional[Sequence[tuple[float, float]]] = None,
+    back_annotation: Optional[dict[str, Sequence[str]]] = None,
 ) -> str:
     return _svg_util_emit(
         placed, polylines, canvas_w, canvas_h, rail_top_y, rail_bot_y,
         label_fs=LABEL_FS, port_fs=PORT_FS,
         glyphs=glyphs, short_port=_short,
         solder_dots=solder_dots,
+        back_annotation=back_annotation,
     )
 

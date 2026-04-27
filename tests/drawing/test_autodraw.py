@@ -291,6 +291,62 @@ def test_ce_bjt_with_degen():
     assert rc[1] < q1[1] < re_[1]
 
 
+def test_ce_bjt_back_annotated_op_point():
+    """``back_annotation`` surfaces derived results next to their parts.
+
+    Compute a quick first-cut DC operating point for the CE+RE stage by
+    hand (Vbe ≈ 0.7 V, β large so I_C ≈ I_E), feed the per-component
+    numbers to ``autodraw`` as annotations, and verify each one appears
+    in the emitted SVG with the back-annotation class.
+    """
+    Vdd = 5.0
+    Vbb = 0.7
+    # Use a low-current Vbe (~0.65 V) for the operating point — the
+    # netlist's Vbb=0.7 is right on the edge of conduction; modeling
+    # the diode drop as 0.65 V puts the device weakly on, which is
+    # what a small-signal hand calc would predict.
+    Vbe = 0.65
+    RC = 4.7e3
+    RE = 1.0e3
+    # I_E ≈ (Vbb − Vbe) / RE; β >> 1 so I_C ≈ I_E.
+    I_E = max(0.0, (Vbb - Vbe) / RE)
+    I_C = I_E
+    V_RC = I_C * RC
+    V_RE = I_E * RE
+    V_C = Vdd - V_RC
+    V_E = V_RE
+    V_CE = V_C - V_E
+
+    annotation = {
+        "Q1": [f"Ic={I_C * 1e3:.2f} mA", f"Vce={V_CE:.2f} V"],
+        "RC": [f"V={V_RC:.2f} V"],
+        "RE": [f"V={V_RE:.2f} V"],
+        "Vbb": [f"Vb={Vbb:.2f} V"],
+        "Vdd": [f"{Vdd:.1f} V"],
+    }
+    svg = autodraw(NETLIST_CE_BJT, back_annotation=annotation)
+    _save("04b_ce_bjt_annotated", svg)
+    _common_assertions(svg, {"Vdd", "Vbb", "RC", "Q1", "RE"})
+
+    # Every annotation string is rendered with the back-annotation
+    # class so it picks up the orange/thin styling.
+    for lines in annotation.values():
+        for line in lines:
+            assert f'class="bann"' in svg
+            # html_escape is identity for these payloads.
+            assert f'>{line}<' in svg, f"annotation {line!r} missing"
+
+    # Annotations should be the *last* element block before </svg> —
+    # i.e., drawn on top of every other primitive.
+    last_bann = svg.rfind('class="bann"')
+    last_other = max(
+        svg.rfind('class="lab"'),
+        svg.rfind('class="plab"'),
+        svg.rfind('class="wire"'),
+    )
+    assert last_bann > last_other, "back annotations must be drawn last"
+
+
 # ---------------------------------------------------------------------------
 # Test 5 — Differential pair (NMOS) with tail current source. Two NMOS
 # whose sources merge on a tail node, which sinks through I_TAIL to
