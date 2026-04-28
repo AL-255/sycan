@@ -19,6 +19,7 @@ small-signal impedance, and noise spectral densities.
 
    getting_started
    autodraw
+   glyphs
    api
 
 New here? Start with :doc:`getting_started` for an installable end-to-end
