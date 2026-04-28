@@ -29,13 +29,13 @@
   <rect
      style="display:none;fill:#ff00ff;stroke:none;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4.1"
      id="rect1"
-     width="40"
+     width="30.000002"
      height="40"
-     x="-12"
+     x="-2"
      y="-2" />
   <path
      id="line1"
-     style="stroke:#000000;stroke-width:1.5"
+     style="display:inline;stroke:#000000;stroke-width:1.5"
      d="M 6,29 V 7" />
   <path
      id="line4"

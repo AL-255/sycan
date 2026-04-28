@@ -4,7 +4,7 @@
    version="1.1"
    id="svg4"
    sodipodi:docname="nmos.svg"
-   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   inkscape:version="1.4.3 (1:1.4.3+202512261035+0d15f75042)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -40,9 +40,9 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="13.34417"
-     inkscape:cx="12.065194"
-     inkscape:cy="26.341092"
+     inkscape:zoom="5.0219909"
+     inkscape:cx="-40.12353"
+     inkscape:cy="8.263655"
      inkscape:window-width="2560"
      inkscape:window-height="1403"
      inkscape:window-x="0"
@@ -136,4 +136,9 @@
      d="M -9.9999996,28.956084 H -5"
      id="path1"
      sodipodi:nodetypes="cc" />
+  <path
+     style="fill:none;stroke:#000000;stroke-width:1.4;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4.1;stroke-dasharray:none"
+     d="M -10.000001,20 H 8 V 34.956084 H 0"
+     id="path2"
+     sodipodi:nodetypes="cccc" />
 </svg>

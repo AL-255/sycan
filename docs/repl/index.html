@@ -11,13 +11,23 @@
 <link rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/monokai.css">
 
+<!-- Title font (Google Fonts: Michroma). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Michroma&display=swap">
+
 <style>
   :root { color-scheme: light dark; }
   body {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     max-width: 960px; margin: 2em auto; padding: 0 1em; line-height: 1.45;
   }
-  h1 { margin-bottom: 0.2em; }
+  h1 {
+    margin-bottom: 0.2em;
+    font-family: "Michroma", system-ui, sans-serif;
+    letter-spacing: 0.02em;
+  }
   .sub { color: #888; margin-top: 0; }
   #status { font-size: 0.9em; color: #888; margin: 0.5em 0; }
   #output {
@@ -366,7 +376,8 @@ async function buildExamples() {
 // missing entry means that component kind falls back to the labelled
 // rect on the page even though the wheel knows about it.
 const GLYPH_KINDS = [
-  'nmos', 'pmos', 'npn', 'pnp', 'triode', 'diode',
+  'nmos', 'pmos', 'nmos_4t', 'pmos_4t',
+  'npn', 'pnp', 'triode', 'diode',
   'vsrc', 'isrc', 'res', 'ind', 'cap', 'ccsrc', 'gnd',
 ];
 const GLYPH_DIR = '/sycan_res';
@@ -452,7 +463,7 @@ async function boot() {
 await py.loadPackage(['sympy', 'numpy', 'micropip']);
   await py.runPythonAsync(`
 import micropip
-await micropip.install('./sycan-0.1.5-py3-none-any.whl')
+await micropip.install('./sycan-0.1.6-py3-none-any.whl')
 import sycan
 print(f'sycan {sycan.__name__} ready')
   `);

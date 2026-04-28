@@ -54,6 +54,7 @@ source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 
 html_theme = "furo"
 html_static_path = ["_static"]
+html_css_files = ["sycan.css"]
 html_title = f"sycan {release}"
 html_logo = "_static/sycan_s.png"
 html_favicon = "_static/sycan_s.png"

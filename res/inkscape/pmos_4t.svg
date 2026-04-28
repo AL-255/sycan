@@ -3,7 +3,7 @@
    viewBox="-30 0 60 40"
    version="1.1"
    id="svg4"
-   sodipodi:docname="pmos.svg"
+   sodipodi:docname="pmos_4t.svg"
    inkscape:version="1.4.3 (1:1.4.3+202512261035+0d15f75042)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -40,9 +40,9 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="6.890255"
-     inkscape:cx="18.649527"
-     inkscape:cy="50.433547"
+     inkscape:zoom="13.892492"
+     inkscape:cx="33.291364"
+     inkscape:cy="31.275886"
      inkscape:window-width="1280"
      inkscape:window-height="1403"
      inkscape:window-x="1280"
@@ -72,7 +72,8 @@
      height="40"
      x="-30"
      y="0"
-     inkscape:label="bbox" />
+     inkscape:label="bbox"
+     sodipodi:insensitive="true" />
   <line
      x1="-10"
      y1="35"
@@ -124,14 +125,13 @@
      r="0"
      style="stroke:#000000" />
   <circle
-     id="gate"
-     cx="-19.010704"
+     id="port-bulk"
+     cx="10"
      cy="20"
      fill="none"
      stroke="none"
-     r="2"
-     style="stroke:#000000;stroke-width:1.5;stroke-dasharray:none"
-     inkscape:label="circ" />
+     style="stroke:#000000"
+     r="0" />
   <circle
      id="port-source"
      cx="0"
@@ -140,14 +140,23 @@
      stroke="none"
      style="stroke:#000000"
      r="0" />
+  <circle
+     id="gate"
+     cx="-19.010704"
+     cy="20"
+     fill="none"
+     stroke="none"
+     r="2"
+     style="stroke:#000000;stroke-width:1.5;stroke-dasharray:none"
+     inkscape:label="circ" />
   <path
      style="fill:none;stroke:#000000;stroke-width:1;stroke-miterlimit:4.1;stroke-dasharray:none;marker-end:url(#Triangle)"
      d="m -1.448925,11.043916 h -5"
      id="path1"
      sodipodi:nodetypes="cc" />
   <path
-     style="fill:none;stroke:#000000;stroke-width:1.4;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4.1;stroke-dasharray:none"
-     d="M -10,20 H 8.000001 V 5.043916 H 9.8807907e-7"
+     style="fill:#ff0000;stroke:#000000;stroke-width:1.4;stroke-linecap:square;stroke-linejoin:round;stroke-miterlimit:4.1"
+     d="M -10,20 H 8"
      id="path2"
-     sodipodi:nodetypes="cccc" />
+     sodipodi:nodetypes="cc" />
 </svg>

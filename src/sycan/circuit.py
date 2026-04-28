@@ -20,9 +20,11 @@ from sycan.components.active import (
     BJT,
     Diode,
     NMOS_3T,
+    NMOS_4T,
     NMOS_L1,
     NMOS_subthreshold,
     PMOS_3T,
+    PMOS_4T,
     PMOS_L1,
     PMOS_subthreshold,
     Triode,
@@ -354,6 +356,58 @@ class Circuit:
         (``V_TH`` is a positive magnitude)."""
         return self.add(
             PMOS_3T(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
+        )  # type: ignore[return-value]
+
+    def add_nmos_4t(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        bulk: str,
+        mu_n: Value,
+        Cox: Value,
+        W: Value,
+        L: Value,
+        V_TH0: Value,
+        **kwargs: Value,
+    ) -> NMOS_4T:
+        """Attach a four-terminal segmented NMOS (body-effect aware).
+
+        Optional keyword parameters: ``lam`` (channel-length modulation),
+        ``gamma`` (body-effect coefficient, V^0.5), ``phi`` (surface
+        potential 2 φ_F), ``m`` (sub-threshold slope factor), ``V_T``
+        (thermal voltage), ``C_gs``, ``C_gd``, and the AC linearisation
+        points ``V_GS_op`` / ``V_DS_op`` / ``V_BS_op``.
+        """
+        return self.add(
+            NMOS_4T(
+                name, drain, gate, source, bulk,
+                mu_n, Cox, W, L, V_TH0, **kwargs,
+            )
+        )  # type: ignore[return-value]
+
+    def add_pmos_4t(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        bulk: str,
+        mu_n: Value,
+        Cox: Value,
+        W: Value,
+        L: Value,
+        V_TH0: Value,
+        **kwargs: Value,
+    ) -> PMOS_4T:
+        """Attach a four-terminal segmented PMOS (body-effect aware,
+        ``V_TH0`` is a positive magnitude)."""
+        return self.add(
+            PMOS_4T(
+                name, drain, gate, source, bulk,
+                mu_n, Cox, W, L, V_TH0, **kwargs,
+            )
         )  # type: ignore[return-value]
 
     @property

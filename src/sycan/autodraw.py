@@ -46,9 +46,11 @@ from sycan.components.active import (
     BJT,
     Diode,
     NMOS_3T,
+    NMOS_4T,
     NMOS_L1,
     NMOS_subthreshold,
     PMOS_3T,
+    PMOS_4T,
     PMOS_L1,
     PMOS_subthreshold,
     Triode,
@@ -193,10 +195,20 @@ def _short(port: str) -> str:
 
 def _describe(c: Component) -> _CompDesc:
     """Return the spine + sides for any supported component type."""
+    if isinstance(c, NMOS_4T) and not isinstance(c, NMOS_3T):
+        # 4T body-aware NMOS gets its own glyph (extra bulk pin); the
+        # 3T wrapper falls through to the plain ``nmos`` glyph below.
+        return _CompDesc(c, c.name, "nmos_4t",
+                         spine_top="drain", spine_bot="source",
+                         side_ports=("gate", "bulk"))
     if isinstance(c, (NMOS_L1, NMOS_subthreshold, NMOS_3T)):
         return _CompDesc(c, c.name, "nmos",
                          spine_top="drain", spine_bot="source",
                          side_ports=("gate",))
+    if isinstance(c, PMOS_4T) and not isinstance(c, PMOS_3T):
+        return _CompDesc(c, c.name, "pmos_4t",
+                         spine_top="source", spine_bot="drain",
+                         side_ports=("gate", "bulk"))
     if isinstance(c, (PMOS_L1, PMOS_subthreshold, PMOS_3T)):
         return _CompDesc(c, c.name, "pmos",
                          spine_top="source", spine_bot="drain",

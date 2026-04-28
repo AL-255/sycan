@@ -1,0 +1,13 @@
+/* Title font: Michroma (Google Fonts). Applied to page H1 and the
+   sidebar brand so the project title reads with the same display face
+   as the REPL homepage. Body text and the API tables stay on the Furo
+   default stack — Michroma is too heavy for paragraph copy. */
+
+@import url("https://fonts.googleapis.com/css2?family=Michroma&display=swap");
+
+.sidebar-brand-text,
+.content h1,
+article h1 {
+  font-family: "Michroma", system-ui, sans-serif;
+  letter-spacing: 0.02em;
+}

@@ -73,6 +73,14 @@
      style="stroke:#000000"
      r="0" />
   <circle
+     id="port-bulk"
+     cx="7.9999981"
+     cy="18"
+     fill="none"
+     stroke="none"
+     style="stroke:#000000"
+     r="0" />
+  <circle
      id="port-gate"
      cx="-32"
      cy="18"
@@ -93,7 +101,7 @@
      d="m -12.000002,26.956084 h 5"
      id="path1" />
   <path
-     style="fill:none;stroke:#000000;stroke-width:1.4;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4.1;stroke-dasharray:none"
-     d="M -12.000003,18 H 5.999998 v 14.956084 h -8"
+     style="fill:#ff0000;stroke:#000000;stroke-width:1.4;stroke-linecap:square;stroke-linejoin:round;stroke-miterlimit:4.1;stroke-dasharray:none"
+     d="m -12.000002,18 h 18"
      id="path2" />
 </svg>

@@ -657,6 +657,57 @@ def test_2t_vref():
                - _column_x_of(by_name["M2"], pads)) < 5
 
 
+# ---------------------------------------------------------------------------
+# Test 16 — every MOSFET model in one schematic. Four "diode-biased
+# inverter" columns, one per cell type:
+#
+#   col 1 — NMOS_L1 + PMOS_L1                (saturation-only Level 1)
+#   col 2 — NMOS_subthreshold + PMOS_subthreshold  (weak-inversion only)
+#   col 3 — NMOS_3T + PMOS_3T                (segmented L1 + weak-inv)
+#   col 4 — NMOS_4T + PMOS_4T                (3T + bulk pin + body effect)
+#
+# All gates tie to a shared bias rail, all NMOS sources to GND, all
+# PMOS sources to VDD. The 4T cells additionally route their bulk pin
+# (NMOS bulk → GND, PMOS bulk → VDD) — that's the visual difference
+# from the 3T cells, since both pick a different glyph kind.
+# ---------------------------------------------------------------------------
+NETLIST_ALL_MOSFETS = """all MOSFET variants
+Vdd  VDD  0     1.8
+Vbias bias 0    0.9
+M1n mid1 bias 0     NMOS_L1            1e-3 1 1 1 0.5 0
+M1p mid1 bias VDD   PMOS_L1            1e-3 1 1 1 0.5 0
+M2n mid2 bias 0     NMOS_subthreshold  1e-3 1 1 1 0.5
+M2p mid2 bias VDD   PMOS_subthreshold  1e-3 1 1 1 0.5
+M3n mid3 bias 0     NMOS_3T            1e-3 1 1 1 0.5 0
+M3p mid3 bias VDD   PMOS_3T            1e-3 1 1 1 0.5 0
+M4n mid4 bias 0   0     NMOS_4T        1e-3 1 1 1 0.5 0
+M4p mid4 bias VDD VDD   PMOS_4T        1e-3 1 1 1 0.5 0
+.end
+"""
+
+
+def test_all_mosfet_variants():
+    svg = autodraw(NETLIST_ALL_MOSFETS, seed=0)
+    _save("16_all_mosfet_variants", svg)
+    _common_assertions(svg, {
+        "Vdd", "Vbias",
+        "M1n", "M1p", "M2n", "M2p",
+        "M3n", "M3p", "M4n", "M4p",
+    })
+
+    # Glyph dispatch: only the 4T cells should pick the new
+    # ``nmos_4t`` / ``pmos_4t`` kinds. L1, subthreshold, and 3T all
+    # share the plain ``nmos`` / ``pmos`` glyphs because their port
+    # set is identical (no bulk pin to draw).
+    by_name = {name: kind for kind, name, *_ in _components(svg)}
+    assert by_name["M4n"] == "nmos_4t"
+    assert by_name["M4p"] == "pmos_4t"
+    for nm in ("M1n", "M2n", "M3n"):
+        assert by_name[nm] == "nmos", f"{nm} → {by_name[nm]}"
+    for nm in ("M1p", "M2p", "M3p"):
+        assert by_name[nm] == "pmos", f"{nm} → {by_name[nm]}"
+
+
 def test_2t_vref_no_wire_crosses_components_across_seeds():
     """The wire-no-cross-component invariant must hold for every SA
     seed on the 2T VR — M2's gate ties back to its own drain, so the

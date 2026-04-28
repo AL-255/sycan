@@ -25,7 +25,8 @@ BBox = Tuple[float, float, float, float]
 # Component kinds that the SVG layer knows how to look up under res/.
 # ---------------------------------------------------------------------------
 KIND_GLYPHS: tuple[str, ...] = (
-    "nmos", "pmos", "npn", "pnp", "triode", "diode",
+    "nmos", "pmos", "nmos_4t", "pmos_4t",
+    "npn", "pnp", "triode", "diode",
     "vsrc", "isrc", "res", "ind", "cap", "tline",
     "ccsrc", "port", "gnd",
 )

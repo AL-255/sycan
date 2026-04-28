@@ -258,6 +258,42 @@ def parse(text: str) -> Circuit:
             )
         elif head == "m":
             _require(parts, 10, lineno, name)
+            # Four-terminal MOSFETs slot a ``bulk`` node between
+            # ``source`` and the model-type keyword, so detect them by
+            # peeking at parts[5] before consuming the standard 3-node
+            # layout. Everything else (L1, subthreshold, 3T) keeps the
+            # original parts[4] = model layout.
+            if len(parts) > 5 and parts[5].lower() in ("nmos_4t", "pmos_4t"):
+                _require(parts, 11, lineno, name)
+                drain, gate, source, bulk, mtype = (
+                    parts[1], parts[2], parts[3], parts[4], parts[5],
+                )
+                mu_n  = parse_value(parts[6])
+                Cox   = parse_value(parts[7])
+                W     = parse_value(parts[8])
+                L     = parse_value(parts[9])
+                V_TH0 = parse_value(parts[10])
+                mtype_lc = mtype.lower()
+                kwargs: dict[str, sp.Expr] = {}
+                opt_names = (
+                    "lam", "gamma", "phi", "m", "V_T",
+                    "V_GS_op", "V_DS_op", "V_BS_op",
+                    "C_gs", "C_gd",
+                )
+                for i, key in enumerate(opt_names):
+                    idx = 11 + i
+                    if len(parts) > idx:
+                        kwargs[key] = parse_value(parts[idx])
+                adder = (
+                    circuit.add_nmos_4t
+                    if mtype_lc == "nmos_4t"
+                    else circuit.add_pmos_4t
+                )
+                adder(
+                    name, drain, gate, source, bulk,
+                    mu_n, Cox, W, L, V_TH0, **kwargs,
+                )
+                continue
             drain, gate, source, mtype = parts[1], parts[2], parts[3], parts[4]
             mu_n = parse_value(parts[5])
             Cox = parse_value(parts[6])
@@ -322,7 +358,8 @@ def parse(text: str) -> Circuit:
             else:
                 raise ValueError(
                     f"line {lineno}: unknown MOSFET model {mtype!r}; "
-                    "expected N/PMOS_subthreshold, N/PMOS_L1, or N/PMOS_3T"
+                    "expected N/PMOS_subthreshold, N/PMOS_L1, "
+                    "N/PMOS_3T, or N/PMOS_4T"
                 )
         elif head == "x":
             _require(parts, 5, lineno, name)

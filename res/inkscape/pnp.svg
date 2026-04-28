@@ -4,7 +4,7 @@
    version="1.1"
    id="svg4"
    sodipodi:docname="pnp.svg"
-   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   inkscape:version="1.4.3 (1:1.4.3+202512261035+0d15f75042)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -40,9 +40,9 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="9.8158282"
-     inkscape:cx="-6.9275866"
-     inkscape:cy="9.4235553"
+     inkscape:zoom="6.7020554"
+     inkscape:cx="17.233519"
+     inkscape:cy="14.696984"
      inkscape:window-width="1280"
      inkscape:window-height="1403"
      inkscape:window-x="0"
@@ -68,14 +68,14 @@
   <rect
      style="display:none;fill:#ff00ff;stroke:none;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4.1"
      id="rect1"
-     width="40"
+     width="30.000002"
      height="40"
-     x="0"
+     x="10"
      y="0"
      inkscape:label="bbox" />
   <path
      id="line1"
-     style="stroke:#000000;stroke-width:1.5"
+     style="display:inline;stroke:#000000;stroke-width:1.5"
      d="M 18,31 V 9"
      sodipodi:nodetypes="cc" />
   <path
