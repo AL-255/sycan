@@ -43,6 +43,7 @@ from sycan.components.basic import (
     VCVS,
     VoltageSource,
 )
+from sycan.headroom import HeadroomResult, solve_headroom
 from sycan.mna import (
     Component,
     NoiseSource,
@@ -74,6 +75,7 @@ __all__ = [
     "CurrentSource",
     "Diode",
     "GND",
+    "HeadroomResult",
     "Inductor",
     "NMOS_3T",
     "NMOS_4T",
@@ -123,6 +125,7 @@ __all__ = [
     "parse_value",
     "solve_ac",
     "solve_dc",
+    "solve_headroom",
     "solve_impedance",
     "solve_noise",
 ]

@@ -10,5 +10,6 @@
   {"label": "CS amp noise",            "file": "cs_amp_noise.py"},
   {"label": "Noise-cancelling LNA",    "file": "noise_cancelling_lna.py"},
   {"label": "CMOS inverter (slider)",  "file": "inverter.py"},
-  {"label": "NAND2 stacking effect",   "file": "nand2_stacking.py"}
+  {"label": "NAND2 stacking effect",   "file": "nand2_stacking.py"},
+  {"label": "Headroom",     "file": "headroom.py"}
 ]
