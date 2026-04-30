@@ -1,18 +1,24 @@
 [
-  {"label": "Voltage divider",   "file": "voltage_divider.py"},
-  {"label": "RC low-pass (AC)",  "file": "rc_lowpass.py"},
-  {"label": "LPF prototypes",    "file": "lowpass_filter.py"},
-  {"label": "2-T V_T reference", "file": "2t_vref.py"},
-  {"label": "CS amp impedances", "file": "cs_amp.py"},
-  {"label": "SRPP optimal load", "file": "srpp.py"},
-  {"label": "Wheatstone bridge",       "file": "wheatstone.py"},
-  {"label": "RC noise (kT/C)",         "file": "rc_noise.py"},
-  {"label": "CS amp noise",            "file": "cs_amp_noise.py"},
-  {"label": "Noise-cancelling LNA",    "file": "noise_cancelling_lna.py"},
-  {"label": "CMOS inverter (slider)",  "file": "inverter.py"},
-  {"label": "NAND2 stacking effect",   "file": "nand2_stacking.py"},
-  {"label": "CS amp Headroom",     "file": "headroom.py"},
-  {"label": "5T-OTA Headroom", "file": "ota_5t.py"},
-  {"label": "Σ-Δ modulator",   "file": "sigma_delta.py"},
-  {"label": "Type-II PLL", "file": "pll.py"}
+  {"category": "DC analysis",    "label": "Voltage divider",      "file": "voltage_divider.py"},
+  {"category": "DC analysis",    "label": "Wheatstone bridge",    "file": "wheatstone.py"},
+  {"category": "DC analysis",    "label": "2-T V_T reference",    "file": "2t_vref.py"},
+
+  {"category": "Headroom",       "label": "CS amp headroom",      "file": "headroom.py"},
+  {"category": "Headroom",       "label": "5T-OTA headroom",      "file": "ota_5t.py"},
+  {"category": "Headroom",       "label": "Regulated cascode",    "file": "regulated_cascode.py"},
+
+  {"category": "AC / impedance", "label": "RC low-pass",          "file": "rc_lowpass.py"},
+  {"category": "AC / impedance", "label": "LPF prototypes",       "file": "lowpass_filter.py"},
+  {"category": "AC / impedance", "label": "CS amp impedances",    "file": "cs_amp.py"},
+  {"category": "AC / impedance", "label": "SRPP optimal load",    "file": "srpp.py"},
+
+  {"category": "Noise",          "label": "RC noise (kT/C)",      "file": "rc_noise.py"},
+  {"category": "Noise",          "label": "CS amp noise",         "file": "cs_amp_noise.py"},
+  {"category": "Noise",          "label": "Noise-cancelling LNA", "file": "noise_cancelling_lna.py"},
+
+  {"category": "CMOS digital",   "label": "CMOS inverter",        "file": "inverter.py"},
+  {"category": "CMOS digital",   "label": "NAND2 stacking",       "file": "nand2_stacking.py"},
+
+  {"category": "Mixed-signal",   "label": "Σ-Δ modulator",      "file": "sigma_delta.py"},
+  {"category": "Mixed-signal",   "label": "Type-II PLL",          "file": "pll.py"}
 ]

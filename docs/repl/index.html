@@ -82,16 +82,19 @@
   }
   button:hover:not(:disabled) { background: #d8d8d8; }
   button:disabled { opacity: 0.5; cursor: wait; }
-  button.example {
-    padding: 4px 10px; font-size: 13px;
-    background: #f3f3f3;
-  }
-  button.example:hover:not(:disabled) { background: #e3e3e3; }
   @media (prefers-color-scheme: dark) {
     button          { background: #2a2a2a; color: #eee; border-color: #555; }
     button:hover:not(:disabled) { background: #3a3a3a; }
-    button.example  { background: #232323; }
-    button.example:hover:not(:disabled) { background: #323232; }
+  }
+
+  select#examples {
+    padding: 6px 10px; font-size: 14px;
+    border: 1px solid #888; border-radius: 6px;
+    background: #f3f3f3; color: #111;
+    min-width: 260px;
+  }
+  @media (prefers-color-scheme: dark) {
+    select#examples { background: #232323; color: #eee; border-color: #555; }
   }
 
   .row { display: flex; gap: 8px; align-items: center; margin: 0.5em 0; flex-wrap: wrap; }
@@ -116,7 +119,9 @@
 <div id="status">Loading Pyodide…</div>
 
 <h3>Examples</h3>
-<div id="examples" class="row"></div>
+<div class="row">
+  <select id="examples"></select>
+</div>
 
 <div id="filter-controls" class="row" style="display:none">
   <strong>Filter:</strong>
@@ -357,16 +362,32 @@ async function buildExamples() {
   const resp = await fetch('./examples/manifest.json');
   if (!resp.ok) throw new Error(`Could not fetch manifest: ${resp.status}`);
   const manifest = await resp.json();
-  for (const {label, file} of manifest) {
-    const b = document.createElement('button');
-    b.className = 'example';
-    b.textContent = label;
-    b.addEventListener('click', () => {
-      loadExample(file).catch((e) => write(String(e) + '\n'));
-    });
-    examplesEl.appendChild(b);
+  // Group by category, preserving manifest order for both categories
+  // and the items inside each one.
+  const groups = new Map();
+  for (const item of manifest) {
+    const cat = item.category || 'Examples';
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(item);
   }
+  for (const [category, items] of groups) {
+    const og = document.createElement('optgroup');
+    og.label = category;
+    for (const {label, file} of items) {
+      const opt = document.createElement('option');
+      opt.value = file;
+      opt.textContent = label;
+      og.appendChild(opt);
+    }
+    examplesEl.appendChild(og);
+  }
+  examplesEl.addEventListener('change', () => {
+    if (examplesEl.value) {
+      loadExample(examplesEl.value).catch((e) => write(String(e) + '\n'));
+    }
+  });
   if (manifest.length > 0) {
+    examplesEl.value = manifest[0].file;
     await loadExample(manifest[0].file);
   }
 }
