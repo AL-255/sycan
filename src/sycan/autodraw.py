@@ -68,6 +68,13 @@ from sycan.components.basic import (
     VCVS,
     VoltageSource,
 )
+from sycan.components.blocks import (
+    Gain,
+    Integrator,
+    Quantizer,
+    Summer,
+    TransferFunction,
+)
 from sycan.components.rf import TLINE
 from sycan.mna import Component
 
@@ -169,7 +176,7 @@ class _CompDesc:
 
 def _short(port: str) -> str:
     """One/two-letter glyph used at port pins."""
-    return {
+    table = {
         "drain": "D",
         "gate": "G",
         "source": "S",
@@ -190,7 +197,20 @@ def _short(port: str) -> str:
         "n_in_m": "1-",
         "n_out_p": "2+",
         "n_out_m": "2-",
-    }.get(port, port[:2])
+        "in_p": "i+",
+        "in_m": "i-",
+        "out_p": "o+",
+        "out_m": "o-",
+    }
+    if port in table:
+        return table[port]
+    # Variable-arity Summer inputs: in<N>_p / in<N>_m.
+    import re
+    m = re.match(r"in(\d+)_(p|m)$", port)
+    if m:
+        idx, sign = m.groups()
+        return f"{idx}{'+' if sign == 'p' else '-'}"
+    return port[:2]
 
 
 def _describe(c: Component) -> _CompDesc:
@@ -261,6 +281,38 @@ def _describe(c: Component) -> _CompDesc:
     if isinstance(c, GND):
         return _CompDesc(c, c.name, "gnd",
                          spine_top="node", spine_bot="node")
+    if isinstance(c, TransferFunction):
+        return _CompDesc(c, c.name, "tf",
+                         spine_top="in_p", spine_bot="out_p",
+                         side_ports=("in_m", "out_m"))
+    if isinstance(c, Integrator):
+        return _CompDesc(c, c.name, "integ",
+                         spine_top="in_p", spine_bot="out_p",
+                         side_ports=("in_m", "out_m"))
+    if isinstance(c, Gain):
+        return _CompDesc(c, c.name, "gain",
+                         spine_top="in_p", spine_bot="out_p",
+                         side_ports=("in_m", "out_m"))
+    if isinstance(c, Quantizer):
+        return _CompDesc(c, c.name, "quant",
+                         spine_top="in_p", spine_bot="out_p",
+                         side_ports=("in_m", "out_m"))
+    if isinstance(c, Summer):
+        # Summer has a variable number of inputs; expose them as side
+        # ports ``in0_p``/``in0_m``/``in1_p``/... synthesised on the
+        # instance in :meth:`Summer.__post_init__`. The first input is
+        # promoted to the spine so the block placer threads it through
+        # the column rather than treating it as a sideways branch.
+        n = len(c.inputs)
+        side_ports: list[str] = []
+        for i in range(1, n):
+            side_ports.append(f"in{i}_p")
+            side_ports.append(f"in{i}_m")
+        side_ports.append("in0_m")
+        side_ports.append("out_m")
+        return _CompDesc(c, c.name, "sum",
+                         spine_top="in0_p", spine_bot="out_p",
+                         side_ports=tuple(side_ports))
     raise TypeError(f"autodraw: unsupported component {type(c).__name__}")
 
 

@@ -13,6 +13,13 @@ from sycan.components.active import (
     PMOS_subthreshold,
     Triode,
 )
+from sycan.components.blocks import (
+    Gain,
+    Integrator,
+    Quantizer,
+    Summer,
+    TransferFunction,
+)
 from sycan.components.rf import TLINE
 from sycan.network_params import (
     abcd_to_s,
@@ -75,8 +82,10 @@ __all__ = [
     "CurrentSource",
     "Diode",
     "GND",
+    "Gain",
     "HeadroomResult",
     "Inductor",
+    "Integrator",
     "NMOS_3T",
     "NMOS_4T",
     "NMOS_L1",
@@ -88,10 +97,13 @@ __all__ = [
     "PMOS_L1",
     "PMOS_subthreshold",
     "Port",
+    "Quantizer",
     "Resistor",
     "StampContext",
+    "Summer",
     "T_kelvin",
     "TLINE",
+    "TransferFunction",
     "Triode",
     "k_B",
     "q",

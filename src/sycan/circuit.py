@@ -29,6 +29,13 @@ from sycan.components.active import (
     PMOS_subthreshold,
     Triode,
 )
+from sycan.components.blocks import (
+    Gain,
+    Integrator,
+    Quantizer,
+    Summer,
+    TransferFunction,
+)
 from sycan.components.rf import TLINE
 from sycan.components.basic import (
     CCCS,
@@ -408,6 +415,87 @@ class Circuit:
                 name, drain, gate, source, bulk,
                 mu_n, Cox, W, L, V_TH0, **kwargs,
             )
+        )  # type: ignore[return-value]
+
+    def add_transfer_function(
+        self,
+        name: str,
+        in_p: str,
+        in_m: str,
+        out_p: str,
+        out_m: str,
+        H: Value,
+        var: Optional[Value] = None,
+        dc_gain: Optional[Value] = None,
+    ) -> TransferFunction:
+        """Attach a generic LTI block ``V(out) = H(s) * V(in)``."""
+        kwargs: dict = {}
+        if var is not None:
+            kwargs["var"] = var
+        if dc_gain is not None:
+            kwargs["dc_gain"] = dc_gain
+        return self.add(
+            TransferFunction(name, in_p, in_m, out_p, out_m, H, **kwargs)
+        )  # type: ignore[return-value]
+
+    def add_integrator(
+        self,
+        name: str,
+        in_p: str,
+        in_m: str,
+        out_p: str,
+        out_m: str,
+        k: Value = 1,
+        leak: Value = 0,
+    ) -> Integrator:
+        """Attach a continuous-time integrator ``H(s) = k / (s + leak)``."""
+        return self.add(
+            Integrator(name, in_p, in_m, out_p, out_m, k=k, leak=leak)
+        )  # type: ignore[return-value]
+
+    def add_gain(
+        self,
+        name: str,
+        in_p: str,
+        in_m: str,
+        out_p: str,
+        out_m: str,
+        k: Value,
+    ) -> Gain:
+        """Attach a static gain ``V(out) = k * V(in)``."""
+        return self.add(Gain(name, in_p, in_m, out_p, out_m, k))  # type: ignore[return-value]
+
+    def add_summer(
+        self,
+        name: str,
+        out_p: str,
+        out_m: str,
+        inputs: list,
+    ) -> Summer:
+        """Attach a weighted summing junction.
+
+        ``inputs`` is a list of ``(in_p, in_m, weight)`` tuples or
+        ``(node, weight)`` 2-tuples for inputs referenced to ground.
+        """
+        return self.add(Summer(name, out_p, out_m, inputs))  # type: ignore[return-value]
+
+    def add_quantizer(
+        self,
+        name: str,
+        in_p: str,
+        in_m: str,
+        out_p: str,
+        out_m: str,
+        k_q: Value = 1,
+        qnoise: Optional[Value] = None,
+    ) -> Quantizer:
+        """Attach a linear-model quantizer ``V(out) = k_q * V(in) + V_q``.
+
+        ``qnoise`` overrides the additive-noise sympy symbol; pass
+        ``0`` to model an ideal noiseless gain.
+        """
+        return self.add(
+            Quantizer(name, in_p, in_m, out_p, out_m, k_q=k_q, qnoise=qnoise)
         )  # type: ignore[return-value]
 
     @property
