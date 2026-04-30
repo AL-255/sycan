@@ -1532,7 +1532,8 @@ def bode_svg(
         return MT + panel_h + GAP + panel_h * (1 - (v - p_lo) / (p_hi - p_lo))
 
     out = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
         f'font-family="system-ui, sans-serif" font-size="11">',
     ]
     if title:
