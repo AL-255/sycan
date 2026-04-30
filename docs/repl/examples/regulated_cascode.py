@@ -28,18 +28,7 @@ c.add_nmos_l1("Q3", "n3",  "n3", "0",  mu_n=beta, Cox=1, W=1, L=1, V_TH=V_TH, la
 c.add_nmos_l1("Q2", "d2",  "n3", "0",  mu_n=beta, Cox=1, W=1, L=1, V_TH=V_TH, lam=0)
 c.add_nmos_l1("Q1", "out", "g1", "d2", mu_n=beta, Cox=1, W=1, L=1, V_TH=V_TH, lam=0)
 
-autodraw(c)
-
-# Estimated operating point for initial guess of the solver
-op = {
-    sp.Symbol("V(Vbias)"): V_bias,
-    sp.Symbol("V(n3)"):    V_n3,
-    sp.Symbol("V(d2)"):    V_d2,
-    sp.Symbol("V(g1)"):    V_g1,
-    sp.Symbol("V(out)"):   V_out,
-}
-
-r = solve_headroom(c, "Vout", var=V_out, op_point=op)
+r = solve_headroom(c, "Vout", var=V_out)
 
 # --- Symbolic output -----------------------------------------------------
 lo, hi = r.interval
@@ -50,3 +39,4 @@ print(r"With $V_{bias} = V_{OV}$ (Q2 just at its saturation knee), the "
       r"output node settles to the wide-swing minimum "
       r"$V(\text{out})_{\min} = 2 V_{OV}$.")
 
+autodraw(c)
