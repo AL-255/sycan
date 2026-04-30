@@ -11,5 +11,6 @@
   {"label": "Noise-cancelling LNA",    "file": "noise_cancelling_lna.py"},
   {"label": "CMOS inverter (slider)",  "file": "inverter.py"},
   {"label": "NAND2 stacking effect",   "file": "nand2_stacking.py"},
-  {"label": "Headroom",     "file": "headroom.py"}
+  {"label": "CS Headroom",     "file": "headroom.py"},
+  {"label": "5T-OTA Headroom", "file": "ota_5t.py"}
 ]

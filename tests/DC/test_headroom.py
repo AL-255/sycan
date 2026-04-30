@@ -154,6 +154,46 @@ MN out in 0 NMOS_L1 8e-4 1 1 1 0.45 0
         solve_headroom(c, "Vmissing")
 
 
+# ---------------------------------------------------------------------------
+# op_point injection — for circuits sp.solve cannot close in one shot.
+# The OTA-style flow: derive V(node)(x) yourself by sequential elimination,
+# pass the dict in, and solve_headroom does the predicate / boundary phase
+# entirely symbolically.
+# ---------------------------------------------------------------------------
+def test_op_point_injection_skips_sp_solve():
+    V_DD, V_TH, beta, R_L = sp.symbols("V_DD V_TH beta R_L", positive=True)
+    V_in = sp.Symbol("V_in", real=True)
+
+    c = Circuit()
+    c.add_vsource("Vdd", "VDD", "0", V_DD)
+    c.add_vsource("Vin", "in",  "0", V_in)
+    c.add_resistor("RL", "VDD", "out", R_L)
+    c.add_nmos_l1("MN", "out", "in", "0",
+                  mu_n=beta, Cox=1, W=1, L=1, V_TH=V_TH, lam=0)
+
+    # Hand-derived operating point (V_out = V_DD − R_L · I_D_sat).
+    op = {
+        sp.Symbol("V(VDD)"): V_DD,
+        sp.Symbol("V(in)"):  V_in,
+        sp.Symbol("V(out)"): V_DD - sp.Rational(1, 2) * R_L * beta * (V_in - V_TH) ** 2,
+    }
+    r = solve_headroom(c, "Vin", var=V_in, op_point=op)
+
+    # Predicates substitute the injected V(out), so MN.overdrive becomes
+    # V_DD − (1/2) β R_L (V_in − V_TH)² + V_TH − V_in.
+    c2 = r.predicates["MN"][1]
+    expected = (V_DD - sp.Rational(1, 2) * R_L * beta * (V_in - V_TH) ** 2
+                + V_TH - V_in)
+    assert sp.simplify(c2 - expected) == 0
+
+    # And the upper edge from solving c2 = 0 lands on the same closed
+    # form as the no-op-point path.
+    upper_expected = V_TH + (sp.sqrt(2 * R_L * V_DD * beta + 1) - 1) / (R_L * beta)
+    assert r.interval is not None
+    _, hi = r.interval
+    assert sp.simplify(hi - upper_expected) == 0
+
+
 def test_constant_only_dict_raises():
     """A dict whose every entry is a number has no input variable to sweep."""
     netlist = """CS amp

@@ -6,22 +6,26 @@ all tied to one common scalar variable — :func:`solve_headroom`
 returns the symbolic interval of that variable for which every
 MOSFET in the circuit is in saturation.
 
-The analysis is fully symbolic. For each MOSFET it builds two
-saturation predicates straight from the device equations,
+For each MOSFET the analysis builds two saturation predicates
+straight from the device equations,
 
 * ``c1 = V_GS_eff - V_TH(V_SB) > 0``        (above threshold, in inversion)
 * ``c2 = V_DS_eff - (V_GS_eff - V_TH) >= 0`` (V_DS past the overdrive knee)
 
-and ties them to a symbolic operating-point that is solved with the
-saturation form of every device's drain current — no triode / weak
-inversion branches, only ``I_D = (1/2) β (V_GS_eff − V_TH)² (1 + λ V_DS_eff)``
-with the long-channel body-effect threshold for 4T cells. Substituting
-the solved node voltages turns each predicate into an expression in
-the input variable (and any leftover symbolic parameters), so the
-interval edges are obtained by ``sp.solve`` of each predicate against
-the input, not by sweeping. If the answer is purely numeric, you get
-numbers; if some parameter is left as a symbol, the boundary is a
-sympy expression in those symbols.
+with the long-channel body-effect threshold for 4T cells. The DC
+operating point is solved with the saturation-form drain currents —
+``I_D = (1/2) β (V_GS_eff − V_TH)² (1 + λ V_DS_eff)`` — so ``sp.solve``
+sees a polynomial system. Substituting the solved node voltages
+turns each predicate into an expression in the input variable (and
+any leftover symbolic parameters); the interval edges then come from
+``sp.solve`` of each predicate against the input, never from a
+numeric sweep.
+
+For circuits whose KCLs ``sp.solve`` can't close in one shot — the
+canonical case is a 5T-OTA with a diode-connected current mirror —
+pass a pre-computed ``op_point=`` mapping. Compute it however you
+like (sequential elimination, hand algebra, your own solver) and the
+analysis will pick up from there with the predicates / boundaries.
 
 Typical use::
 
@@ -55,7 +59,7 @@ from sycan.components.active.mosfet_l1 import _MOSFET_L1
 from sycan.components.active.mosfet_4t import _MOSFET_4T
 from sycan.components.basic.current_source import CurrentSource
 from sycan.components.basic.voltage_source import VoltageSource
-from sycan.mna import build_mna
+from sycan.mna import build_mna, solve_dc
 
 
 SourceSpec = Union[str, Mapping[str, sp.Expr]]
@@ -311,6 +315,15 @@ def _classify_boundary(
 
 
 def _solve_real_roots(expr: sp.Expr, var: sp.Symbol) -> list[sp.Expr]:
+    # Skip predicates with non-integer powers of ``var`` — sympy's
+    # general radical solver typically can't close them and tends to
+    # spin indefinitely. The 5T-OTA's M2 / M4 overdrive predicates
+    # nest ``sqrt(V_OV5²/2 − x²)`` inside another quadratic; we leave
+    # those for the user to solve by hand (or with concrete numerics).
+    for pw in expr.atoms(sp.Pow):
+        base, exp = pw.as_base_exp()
+        if base.has(var) and not exp.is_Integer:
+            return []
     try:
         sols = sp.solve(sp.Eq(sp.together(expr), 0), var)
     except (NotImplementedError, sp.PolynomialError):
@@ -425,6 +438,8 @@ def solve_headroom(
     circuit: Circuit,
     sources: SourceSpec,
     var: Optional[sp.Symbol] = None,
+    *,
+    op_point: Optional[Mapping[sp.Symbol, sp.Expr]] = None,
     simplify: bool = True,
 ) -> HeadroomResult:
     """Symbolic headroom: input range that keeps every MOSFET in saturation.
@@ -445,11 +460,18 @@ def solve_headroom(
         The swept input variable. Optional for the single-source form;
         for the dict form, it is auto-detected as the unique symbol
         common to all expressions, or pass it explicitly to override.
+    op_point
+        Optional pre-computed operating-point map ``{V(node): expr}``.
+        When provided, the analysis skips ``sp.solve`` of the
+        saturation-form DC system and uses these values directly to
+        substitute into the predicates. Useful for circuits whose KCLs
+        ``sp.solve`` can't close in one shot (5T-OTA with a current
+        mirror): derive the operating point yourself with sequential
+        elimination and feed it in. Only the node voltages your
+        predicates actually reference need to be present.
     simplify
         Run ``sp.simplify`` on the operating-point voltages and the
-        saturation predicates before returning them. Off for circuits
-        whose closed forms are big and the simplification cost is not
-        worth the readability gain.
+        saturation predicates before returning them.
 
     Returns
     -------
@@ -470,44 +492,46 @@ def solve_headroom(
 
     var, pairs = _resolve_sources(circuit, sources, var)
 
-    # Mutate the source values for the symbolic solve, then put them
-    # back when we're done — keep the caller's circuit pristine.
-    originals = [(src, src.value) for src, _ in pairs]
-    try:
-        for src, expr in pairs:
-            src.value = sp.sympify(expr)
-        x, residuals = _build_sat_residuals(circuit)
+    if op_point is not None:
+        node_voltages = {sp.sympify(k): sp.sympify(v) for k, v in op_point.items()}
+    else:
+        originals = [(src, src.value) for src, _ in pairs]
         try:
-            sols = sp.solve(residuals, list(x), dict=True)
-        except (NotImplementedError, sp.PolynomialError) as exc:
-            raise RuntimeError(
-                "could not solve the saturation-form DC system in closed "
-                "form (sp.solve gave up). The headroom analysis only "
-                "supports circuits sp.solve can close — typically L1 or "
-                "small 3T networks. Underlying error: " + str(exc)
-            ) from exc
-        if not sols:
-            raise RuntimeError(
-                "no saturation-form DC solution exists for this circuit; "
-                "the headroom interval is therefore empty."
-            )
-        sol = sols[0]
-        node_voltages = {sym: sol.get(sym, sym) for sym in x}
-    finally:
-        for src, val in originals:
-            src.value = val
+            for src, expr in pairs:
+                src.value = sp.sympify(expr)
+            x, residuals = _build_sat_residuals(circuit)
+            try:
+                sols = sp.solve(residuals, list(x), dict=True)
+            except (NotImplementedError, sp.PolynomialError) as exc:
+                raise RuntimeError(
+                    "could not solve the saturation-form DC system in "
+                    "closed form (sp.solve gave up). For circuits with "
+                    "strongly coupled nonlinear feedback (e.g. current "
+                    "mirrors), derive the operating point separately by "
+                    "sequential elimination and pass it via op_point=. "
+                    "Underlying error: " + str(exc)
+                ) from exc
+            if not sols:
+                raise RuntimeError(
+                    "no saturation-form DC solution exists for this "
+                    "circuit; the headroom interval is therefore empty."
+                )
+            sol = sols[0]
+            node_voltages = {sym: sol.get(sym, sym) for sym in x}
+        finally:
+            for src, val in originals:
+                src.value = val
 
     # Build saturation predicates per device, substituting the solved
     # node voltages so they end up as functions of ``var`` (and any
     # leftover symbolic params).
     predicates: dict[str, list[sp.Expr]] = {}
-    sym_subs = node_voltages
     for m in mosfets:
-        V_g = sym_subs.get(sp.Symbol(f"V({m.gate})"), sp.Integer(0)) if m.gate != "0" else sp.Integer(0)
-        V_d = sym_subs.get(sp.Symbol(f"V({m.drain})"), sp.Integer(0)) if m.drain != "0" else sp.Integer(0)
-        V_s = sym_subs.get(sp.Symbol(f"V({m.source})"), sp.Integer(0)) if m.source != "0" else sp.Integer(0)
+        V_g = node_voltages.get(sp.Symbol(f"V({m.gate})"), sp.Integer(0)) if m.gate != "0" else sp.Integer(0)
+        V_d = node_voltages.get(sp.Symbol(f"V({m.drain})"), sp.Integer(0)) if m.drain != "0" else sp.Integer(0)
+        V_s = node_voltages.get(sp.Symbol(f"V({m.source})"), sp.Integer(0)) if m.source != "0" else sp.Integer(0)
         if isinstance(m, _MOSFET_4T):
-            V_b = sym_subs.get(sp.Symbol(f"V({m.bulk})"), sp.Integer(0)) if m.bulk != "0" else sp.Integer(0)
+            V_b = node_voltages.get(sp.Symbol(f"V({m.bulk})"), sp.Integer(0)) if m.bulk != "0" else sp.Integer(0)
             V_BS = V_b - V_s
         else:
             V_BS = None
@@ -521,7 +545,6 @@ def solve_headroom(
         node_voltages = {k: sp.simplify(v) for k, v in node_voltages.items()}
 
     interval, boundaries, binding = _interval_from_boundaries(var, predicates)
-
     return HeadroomResult(
         var=var,
         node_voltages=node_voltages,
