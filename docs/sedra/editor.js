@@ -203,9 +203,10 @@ function render() {
     const viewY = -state.pan.y / state.zoom;
     const viewW = wrap.clientWidth  / state.zoom;
     const viewH = wrap.clientHeight / state.zoom;
-    // Amber crosshair (#ffb405) — distinct from the blue selection
-    // accent so it never gets confused with a selected wire.
-    const crossColor = '#ffb405';
+    // Theme-aware crosshair: amber (#ffb405) on dark backgrounds,
+    // dark navy (#003266) on light. The `--cross` CSS variable
+    // declared in index.html resolves per `prefers-color-scheme`.
+    const crossColor = 'var(--cross)';
     el('path', {
       d: `M${viewX - 1},${cy} h${viewW + 2} ` +
          `M${cx},${viewY - 1} v${viewH + 2}`,

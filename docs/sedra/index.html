@@ -27,6 +27,9 @@
     --preview: #1976d2;
     --terminal: #444;
     --node: #666;
+    /* Cursor crosshair colour. Dark navy on light backgrounds for
+       contrast; the dark-theme override below swaps in amber. */
+    --cross: #003266;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -44,6 +47,7 @@
       --preview: #6cb4ff;
       --terminal: #aaa;
       --node: #888;
+      --cross: #ffb405;
     }
   }
 
