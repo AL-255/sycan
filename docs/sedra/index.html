@@ -30,6 +30,9 @@
     /* Cursor crosshair colour. Dark navy on light backgrounds for
        contrast; the dark-theme override below swaps in amber. */
     --cross: #003266;
+    /* Net-highlight overlay colour. Persimmon orange — distinct from
+       both the select blue and the crosshair amber/navy. */
+    --highlight: #ff7e29;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -48,6 +51,7 @@
       --terminal: #aaa;
       --node: #888;
       --cross: #ffb405;
+      --highlight: #ffa45a;
     }
   }
 
@@ -127,6 +131,7 @@
   #canvas-wrap.tool-select { cursor: default; }
   #canvas-wrap.tool-delete { cursor: not-allowed; }
   #canvas-wrap.tool-rotate { cursor: alias; }
+  #canvas-wrap.tool-highlight { cursor: crosshair; }
   #canvas-wrap.panning { cursor: grabbing; }
   #canvas-wrap.moving  { cursor: move; }
   #canvas-wrap.picking-anchor { cursor: crosshair; }
@@ -300,6 +305,18 @@
     fill: none; stroke: var(--select); stroke-width: 3;
     stroke-dasharray: 6 4; opacity: 0.7;
     pointer-events: none;
+  }
+  /* Net-highlight overlay (Net Highlight tool). Wider, solid stroke at
+     reduced opacity so it reads as a wash *under* the wire stroke
+     rather than competing with it. */
+  .net-highlight {
+    fill: none; stroke: var(--highlight); stroke-width: 6;
+    stroke-linecap: round; stroke-linejoin: round;
+    opacity: 0.42; pointer-events: none;
+  }
+  .net-highlight-term {
+    fill: var(--highlight); stroke: none;
+    opacity: 0.42; pointer-events: none;
   }
   .preview {
     fill: none; stroke: var(--preview); stroke-width: 1.6;
@@ -483,6 +500,19 @@
               stroke="currentColor" stroke-width="1.5"/>
       </svg>
       <span class="label">Rotate</span>
+    </button>
+    <button class="tool" data-tool="highlight"
+            title="Net Highlight: click a wire to highlight its net (and any wires sharing the same name)">
+      <svg width="22" height="14" viewBox="-11 -7 22 14" aria-hidden="true">
+        <!-- A wire under an orange wash, mirroring the canvas overlay. -->
+        <path d="M-10,3 L-3,3 L-3,-3 L10,-3" fill="none"
+              stroke="#ff7e29" stroke-width="4" opacity="0.45"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M-10,3 L-3,3 L-3,-3 L10,-3" fill="none"
+              stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="label">Highlight</span>
     </button>
   </div>
   <div class="group" data-group="file">

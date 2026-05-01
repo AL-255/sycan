@@ -73,6 +73,14 @@ const state = {
   // Most recent calc-node result for the highlight overlay.
   //   { node: string, gridPoints: Set<"x,y"> }
   calcNodeHighlight: null,
+  // Net Highlight tool result. Set by clicking a wire / terminal while
+  // tool === 'highlight'. The overlay covers every wire and terminal in
+  // the connected component plus every wire elsewhere whose user label
+  // matches the picked net's name (cross-component name propagation).
+  // Cleared by clicking empty space, by structural edits (pushHistory),
+  // and by Esc while the highlight tool is active.
+  //   { node: string, gridPoints: Set<"x,y"> }
+  netHighlightOverlay: null,
 };
 
 // Clipboard. Holds both parts and wires; positions are offsets from
@@ -179,6 +187,11 @@ function render() {
   // Layer 2.5: highlight the most recently picked calc-node net.
   drawCalcNodeHighlight();
 
+  // Layer 2.6: Net Highlight overlay (orange wash on every wire and
+  // terminal that belongs to the picked net, including cross-component
+  // hits that share the same user label).
+  drawNetHighlight();
+
   // Layer 3: node dots at junctions where >=3 endpoints meet
   drawJunctions();
 
@@ -281,13 +294,36 @@ function drawGrid() {
   }, svg);
 }
 
-// Render net-label tags for every wire that has a `label`. The tag
-// rides the midpoint of the wire's longest axis-aligned segment; we
-// pad the background rect with `getBBox` after appending the <text>
-// so the box hugs the actual rendered glyph metrics.
+// Render net-label tags for every labelled net. After
+// `propagateLabels` the same label may sit on every wire of a
+// connected component; we draw exactly one tag per (component, label)
+// pair so the canvas isn't littered with duplicate stickers. Within a
+// component we pick the wire with the longest single segment so the
+// tag has the most room to sit comfortably.
 function drawNetLabels() {
+  const wireRoot = wireComponentRoots();
+  const longestSeg = (w) => {
+    let best = 0;
+    for (let i = 1; i < w.points.length; i++) {
+      const len = Math.abs(w.points[i][0] - w.points[i - 1][0]) +
+                  Math.abs(w.points[i][1] - w.points[i - 1][1]);
+      if (len > best) best = len;
+    }
+    return best;
+  };
+  const picked = new Map();   // `${root}|${label}` -> wire
   for (const w of state.wires) {
-    if (!w.label) continue;
+    const lab = sanitizeNetLabel(w.label);
+    if (!lab) continue;
+    if (!w.points.length) continue;
+    const r = wireRoot.get(w.id);
+    if (!r) continue;
+    const key = `${r}|${lab}`;
+    const cur = picked.get(key);
+    if (!cur || longestSeg(w) > longestSeg(cur)) picked.set(key, w);
+  }
+
+  for (const w of picked.values()) {
     const a = wireLabelAnchor(w);
     if (!a) continue;
     // Offset the tag a bit off the segment so it doesn't sit on the
@@ -317,6 +353,40 @@ function drawNetLabels() {
       });
       // Insert behind the text so the text remains legible.
       svg.insertBefore(rect, text);
+    }
+  }
+}
+
+// Net Highlight overlay — orange wash on every wire and terminal in
+// the picked net's grid-point set. The set is computed by
+// `finalizeNetHighlight` and stored on `state.netHighlightOverlay`,
+// using both the connected component (physical) and any cross-component
+// wires whose user label matches the picked net's name.
+function drawNetHighlight() {
+  if (!state.netHighlightOverlay) return;
+  const set = state.netHighlightOverlay.gridPoints;
+  if (!set || !set.size) return;
+  const isPt = (x, y) => set.has(`${x},${y}`);
+  for (const w of state.wires) {
+    // A wire belongs to the highlight if any of its vertices are in
+    // the set — wires are normalised by `coalesceJunctions` so a
+    // single wire never straddles two distinct nets.
+    if (w.points.length && w.points.some(([x, y]) => isPt(x, y))) {
+      el('path', {
+        d: wirePath(w.points),
+        class: 'net-highlight',
+        'vector-effect': 'non-scaling-stroke',
+      }, svg);
+    }
+  }
+  for (const p of state.parts) {
+    for (const t of partTerminals(p)) {
+      if (isPt(t.pos[0], t.pos[1])) {
+        el('circle', {
+          cx: t.pos[0], cy: t.pos[1], r: 6,
+          class: 'net-highlight-term',
+        }, svg);
+      }
     }
   }
 }
@@ -483,6 +553,118 @@ function coalesceJunctions() {
   }
 }
 
+// ------------------------------------------------------------------
+// Connectivity helper
+//
+// Returns Map<wireId, componentRootKey>. Two wires share a root iff
+// they are physically connected — either by sharing a vertex or by
+// meeting at a part terminal. The returned root keys are opaque
+// strings (just one of the underlying grid-point keys); only equality
+// matters.
+//
+// `propagateLabels`, `drawNetLabels`, and the per-wire label commit
+// all use this. The DSU itself is small and rebuilt each call — at
+// schematic sizes we care about that's cheaper than threading a
+// shared dirty flag through every mutator.
+// ------------------------------------------------------------------
+function wireComponentRoots() {
+  const dsu = new Map();
+  const find = (k) => {
+    while (dsu.get(k) !== k) {
+      dsu.set(k, dsu.get(dsu.get(k))); k = dsu.get(k);
+    }
+    return k;
+  };
+  const union = (a, b) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) dsu.set(ra, rb);
+  };
+  const seen = (k) => { if (!dsu.has(k)) dsu.set(k, k); };
+
+  // Part terminals participate in connectivity (two wires that meet at
+  // a terminal must end up in the same component) but they don't carry
+  // labels themselves.
+  for (const p of state.parts) {
+    for (const t of partTerminals(p)) seen(`${t.pos[0]},${t.pos[1]}`);
+  }
+  for (const w of state.wires) {
+    for (const pt of w.points) seen(`${pt[0]},${pt[1]}`);
+    for (let i = 1; i < w.points.length; i++) {
+      union(`${w.points[i - 1][0]},${w.points[i - 1][1]}`,
+            `${w.points[i][0]},${w.points[i][1]}`);
+    }
+  }
+  const wireRoot = new Map();
+  for (const w of state.wires) {
+    if (!w.points.length) continue;
+    wireRoot.set(w.id, find(`${w.points[0][0]},${w.points[0][1]}`));
+  }
+  return wireRoot;
+}
+
+// Wires in the same connected component as `wire` (inclusive).
+function wireIdsInSameComponent(wire) {
+  const ids = new Set();
+  if (!wire || !wire.points || !wire.points.length) return ids;
+  const wireRoot = wireComponentRoots();
+  const target = wireRoot.get(wire.id);
+  if (!target) { ids.add(wire.id); return ids; }
+  for (const [id, root] of wireRoot) if (root === target) ids.add(id);
+  return ids;
+}
+
+// ------------------------------------------------------------------
+// Net-label propagation
+//
+// Companion to `coalesceJunctions`. After the schematic is in canonical
+// Steiner-T form we know which wires share a connected component (any
+// two wires whose vertex sets touch — through a shared vertex or via
+// a part terminal). Within each component:
+//
+//   * If exactly one distinct user label appears, every *unlabelled*
+//     wire in the same component inherits that label. This is the
+//     "named has priority over unnamed" rule — drawing a fresh wire
+//     into a labelled net silently extends the label to the new wire.
+//
+//   * If multiple distinct labels appear, we leave them alone. The
+//     netlist generator surfaces a warning, and silently overwriting
+//     one of two user-supplied names would be surprising. The
+//     refreshProps label-commit handler explicitly normalises the
+//     component name on user rename, so multiple distinct labels
+//     normally only arise from JSON imports or undo into mid-edit
+//     states.
+//
+//   * If no labels appear, nothing happens.
+//
+// Run from `pushHistory` so every committed state has labels in their
+// fully-propagated form. That makes the in-memory model authoritative:
+// the Net Highlight tool, the netlist generator, and any future
+// feature that asks "what label sits on this wire?" can read
+// `wire.label` directly without re-deriving the propagation.
+// ------------------------------------------------------------------
+function propagateLabels() {
+  const wireRoot = wireComponentRoots();
+  // root -> Set(labels). Multiple distinct entries → no propagation.
+  const labelsByRoot = new Map();
+  for (const w of state.wires) {
+    const lab = sanitizeNetLabel(w.label);
+    if (!lab) continue;
+    const r = wireRoot.get(w.id);
+    if (!r) continue;
+    if (!labelsByRoot.has(r)) labelsByRoot.set(r, new Set());
+    labelsByRoot.get(r).add(lab);
+  }
+  for (const w of state.wires) {
+    if (sanitizeNetLabel(w.label)) continue;  // already named
+    const r = wireRoot.get(w.id);
+    if (!r) continue;
+    const labels = labelsByRoot.get(r);
+    if (!labels || labels.size !== 1) continue;
+    const [only] = labels;
+    w.label = only;
+  }
+}
+
 function drawWirePreview() {
   const wd = state.wireDraft;
   if (!wd) return;
@@ -563,6 +745,10 @@ function refreshHint() {
     h = 'Delete: click a part or wire to remove it.';
   } else if (t === 'rotate') {
     h = 'Rotate: click a part to rotate 90°.';
+  } else if (t === 'highlight') {
+    h = 'Net Highlight: click a wire or terminal to wash its net. ' +
+        'Wires elsewhere with the same label join the highlight. ' +
+        'Click empty space to clear.';
   } else if (t === 'WIRE') {
     h = 'Wire: click to start. Each click adds a Manhattan corner; <kbd>double-click</kbd> to finish.';
   } else if (ELEM_TYPES[t]) {
@@ -843,6 +1029,10 @@ wrap.addEventListener('click', (e) => {
       handleWireClick(cur, world);
       break;
 
+    case 'highlight':
+      finalizeNetHighlight(cur, world);
+      break;
+
     default:
       // Element placement
       if (ELEM_TYPES[state.tool]) {
@@ -1040,8 +1230,16 @@ function refreshProps() {
                 'and may not be "0" (reserved for ground).';
     inp.addEventListener('change', () => {
       const raw = inp.value.trim();
+      // Whether we're naming, renaming, or unnaming, we apply the
+      // change to every wire in the same connected component. This
+      // keeps the schematic in a single canonical state — without it,
+      // unnaming one wire would just be undone by `propagateLabels`
+      // re-filling the name from a still-labelled sibling, and
+      // renaming one wire would leave a half-renamed component that
+      // surfaces a netlist warning.
+      const compIds = wireIdsInSameComponent(wire);
       if (!raw) {
-        delete wire.label;
+        for (const w of state.wires) if (compIds.has(w.id)) delete w.label;
         pushHistory();
         render();
         refreshProps();
@@ -1054,7 +1252,7 @@ function refreshProps() {
         inp.value = wire.label || '';
         return;
       }
-      wire.label = cleaned;
+      for (const w of state.wires) if (compIds.has(w.id)) w.label = cleaned;
       pushHistory();
       render();
       refreshProps();
@@ -1451,14 +1649,20 @@ function pushHistory() {
   // that point split into a vertex on its own polyline. Doing this in
   // pushHistory means a forgotten coalesce at a call-site is impossible.
   coalesceJunctions();
+  // After coalesce we know the connected components — propagate user
+  // labels to every unlabelled wire in a labelled component so the
+  // saved snapshot is in its canonical "named has priority" form.
+  propagateLabels();
   history.length = historyIdx + 1;
   history.push(snapshot());
   if (history.length > HISTORY_LIMIT) history.shift();
   historyIdx = history.length - 1;
-  // Any structural edit invalidates the most recent calc-node lookup
-  // (the net it pointed at may have been reorganised). Drop the
-  // highlight; the user can re-pick if they still care about it.
+  // Any structural edit invalidates the most recent calc-node and
+  // net-highlight lookups (the net they pointed at may have been
+  // reorganised). Drop the highlights; the user can re-pick if they
+  // still care.
   state.calcNodeHighlight = null;
+  state.netHighlightOverlay = null;
 }
 
 function restore(idx) {
@@ -1473,6 +1677,7 @@ function restore(idx) {
   state.boxSelect = null;
   state.moveDraft = null;
   state.calcNodeHighlight = null;
+  state.netHighlightOverlay = null;
   wrap.classList.remove('moving');
   historyIdx = idx;
   return true;
@@ -1615,6 +1820,7 @@ document.addEventListener('keydown', (e) => {
     'd': 'diode',
     'w': 'WIRE', 'g': 'gnd',
     's': 'select', 'x': 'delete', 'b': 'rotate',
+    'h': 'highlight',
   };
   if (k in map && !e.altKey) {
     setTool(map[k]);
@@ -1636,6 +1842,10 @@ document.addEventListener('keydown', (e) => {
     } else if (state.wireDraft) {
       state.wireDraft = null;
       refreshHint();
+      render();
+    } else if (state.netHighlightOverlay) {
+      state.netHighlightOverlay = null;
+      flashHint('Net highlight cleared');
       render();
     } else if (state.selectedIds.size) {
       state.selectedIds.clear();
@@ -1973,6 +2183,57 @@ function cancelMove() {
   }
   refreshProps();
   refreshHint();
+  render();
+}
+
+// ------------------------------------------------------------------
+// Net Highlight tool
+//
+// Persistent tool: while `state.tool === 'highlight'`, every canvas
+// click resolves the net under the cursor and washes every wire and
+// terminal in that net with the `--highlight` colour.
+//
+//   * Physical reach: the connected component of the picked grid
+//     point (every wire and part terminal sharing the same DSU root
+//     in the netlist generator).
+//   * Name-based reach: any *other* wire elsewhere in the schematic
+//     whose user label matches the picked net's name. After
+//     `propagateLabels` this only matters when the user has labelled
+//     two physically separate components with the same name (a
+//     deliberate rendezvous), but the lookup is cheap enough to keep
+//     unconditionally.
+//
+// Clicking empty space clears the overlay; pushHistory() also drops
+// it on any structural edit because the net it pointed at may have
+// been split or merged.
+// ------------------------------------------------------------------
+function finalizeNetHighlight(snapped, world) {
+  const hit = resolveNetAt(snapped, world);
+  if (!hit) {
+    if (state.netHighlightOverlay) {
+      state.netHighlightOverlay = null;
+      flashHint('Net highlight cleared');
+    } else {
+      flashHint('No net at that point — click directly on a wire or terminal.');
+    }
+    render();
+    return;
+  }
+  const { node, info } = hit;
+  const gridPoints = new Set(info.gridPointsOfNode(node));
+  // Cross-component name propagation — any wire elsewhere whose
+  // user label matches the picked net's name pulls *its* whole
+  // connected component into the highlight too.
+  for (const w of state.wires) {
+    const lab = sanitizeNetLabel(w.label);
+    if (!lab || lab !== node) continue;
+    if (!w.points.length) continue;
+    const wnode = info.nodeAt(w.points[0]);
+    if (wnode === '?') continue;
+    for (const k of info.gridPointsOfNode(wnode)) gridPoints.add(k);
+  }
+  state.netHighlightOverlay = { node, gridPoints };
+  flashHint(`Highlighting net "${node}" (${gridPoints.size} grid point${gridPoints.size === 1 ? '' : 's'})`);
   render();
 }
 
