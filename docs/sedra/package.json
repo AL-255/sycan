@@ -1,0 +1,13 @@
+{
+  "name": "sedra",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SEDRA — browser-based schematic editor for SYCAN. Build pipeline: tsc compiles src/*.ts to glyphs.js / editor.js, which index.html loads as classic <script defer> tags.",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "~5.6"
+  }
+}

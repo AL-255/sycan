@@ -1,0 +1,30 @@
+{
+  // SEDRA's two TypeScript sources compile to two browser <script defer>
+  // tags. We deliberately do not use ES modules: the original JS used
+  // top-level `const`/`let` declarations as cross-file globals (relying
+  // on the shared global lexical environment that classic-mode scripts
+  // get for free), and `module: "none"` preserves that exactly. Each
+  // .ts file with no `import`/`export` is treated as a non-module by
+  // TypeScript, so symbols declared at the top level are visible across
+  // both files at compile time too.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "none",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": "src",
+    "outDir": ".",
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "removeComments": false,
+    "newLine": "lf",
+    "sourceMap": false
+  },
+  "include": ["src/**/*.ts"],
+  // Explicit exclude prevents tsc from auto-adding `outDir` (`.`)
+  // to the excludes, which would zero-out the includes.
+  "exclude": ["node_modules", "**/*.d.ts"]
+}

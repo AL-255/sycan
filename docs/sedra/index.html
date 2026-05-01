@@ -141,9 +141,25 @@
     display: block;
   }
 
+  /* Drag handle for resizing the side panel. Sits between the canvas
+     and #side; its mousedown→mousemove→mouseup is wired in editor.ts.
+     Hidden in the column-stacked responsive layout below 800px. */
+  #side-resizer {
+    width: 6px; flex: none;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    cursor: ew-resize;
+    user-select: none;
+    touch-action: none;
+  }
+  #side-resizer:hover,
+  #side-resizer.dragging { background: var(--hover); }
+
   /* Side panel */
   #side {
-    width: 320px; flex: none; border-left: 1px solid var(--line);
+    width: 320px; flex: none;
+    min-width: 200px; max-width: 800px;
     background: var(--panel);
     display: flex; flex-direction: column;
     overflow: hidden;
@@ -244,11 +260,16 @@
     color: #d33; white-space: pre-wrap;
   }
 
-  /* Status / hint bar */
+  /* Status / hint bar — fixed height of two text lines so the layout
+     never reflows when a hint grows or shrinks. Long hints clip with
+     `overflow: hidden`; flashHint replaces them after 1.6s anyway. */
   #hint {
     padding: 4px 12px; font-size: 0.78rem; color: var(--muted);
     border-top: 1px solid var(--line); background: var(--panel);
-    min-height: 1.2em;
+    height: calc(2lh + 8px);
+    line-height: 1.45;
+    overflow: hidden;
+    box-sizing: border-box;
   }
   #hint kbd {
     font-family: "JetBrains Mono", Menlo, Consolas, monospace;
@@ -337,7 +358,11 @@
   /* Responsive */
   @media (max-width: 800px) {
     main { flex-direction: column; }
-    #side { width: auto; height: 280px; border-left: none; border-top: 1px solid var(--line); }
+    #side {
+      width: auto; max-width: none; min-width: 0;
+      height: 280px; border-left: none; border-top: 1px solid var(--line);
+    }
+    #side-resizer { display: none; }
   }
 </style>
 </head>
@@ -527,6 +552,10 @@
   <div id="canvas-wrap" class="tool-R">
     <svg id="canvas" xmlns="http://www.w3.org/2000/svg"></svg>
   </div>
+
+  <!-- Drag handle to resize the side panel. Wired in editor.ts. -->
+  <div id="side-resizer" role="separator" aria-orientation="vertical"
+       title="Drag to resize the side panel"></div>
 
   <aside id="side">
     <h3>Properties</h3>
