@@ -13,6 +13,17 @@ folder is overlaid into `_site/` so the REPL ends up at `/repl/`.
   - `res/` — glyph SVGs (mirrored from top-level `res/`) plus the
     SYCAN logo.
   - `sycan-*.whl` — the wheel the page installs via `micropip`.
+- `sedra/` — in-browser schematic capture editor, served at `/sedra/`.
+  Vanilla-JS app modelled after the Java circedit reference in
+  <https://github.com/andrescg2sj/Sycan>: snap-grid canvas, R/L/C/V/I
+  /OA/GND/wire tools, click-to-place + Manhattan multi-segment wires
+  with Steiner T-junction coalescing, box-select, copy/paste,
+  auto-naming, netlist export, JSON save/load.
+  - `index.html` — markup + styles (inline `<style>` only).
+  - `editor.js` — all interactive logic.
+
+  Iterate quickly with `./run_webpage.sh --sedra` (no Sphinx, no
+  wheel build — the page is plain static HTML+JS).
 - `analysis.md`, `level_shifter.py`, `tline_sparams.py` — standalone
   reference material kept alongside the site.
 

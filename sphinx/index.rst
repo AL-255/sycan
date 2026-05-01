@@ -13,6 +13,11 @@ small-signal impedance, and noise spectral densities.
 
    👉 `Launch the sycan REPL demo <repl/>`_
 
+   Want to draw circuits instead of typing them? Capture schematics on
+   a snap-grid canvas and export a netlist:
+
+   👉 `Launch the sycan circuit editor <sedra/>`_
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents

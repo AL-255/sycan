@@ -11,17 +11,23 @@
 #   ./run_webpage.sh              # build + serve on :8000
 #   ./run_webpage.sh 8080         # build + serve on :8080
 #   ./run_webpage.sh --no-build   # skip rebuild, just serve existing _site/
+#   ./run_webpage.sh --sedra      # serve docs/ only (editor at /sedra/, no
+#                                 # uv build, no Sphinx build) — much faster
+#                                 # iteration loop when only touching the
+#                                 # browser editor.
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 PORT=8000
 REBUILD=1
+SEDRA_ONLY=0
 for arg in "$@"; do
     case "$arg" in
         --no-build) REBUILD=0 ;;
+        --sedra) SEDRA_ONLY=1 ;;
         --help|-h)
-            sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -34,6 +40,17 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Fast path: skip every uv/sphinx step and just serve the static
+# `docs/` tree. The editor lives at `/sedra/`; the REPL also works
+# (only the freshly-built wheel is missing — irrelevant for editor work).
+if [ "$SEDRA_ONLY" -eq 1 ]; then
+    echo "==> serving docs/ on http://localhost:${PORT}/"
+    echo "    Editor: http://localhost:${PORT}/sedra/"
+    echo "    (--sedra: no uv build, no Sphinx build)"
+    echo "    (Ctrl-C to stop)"
+    exec python -m http.server --directory docs "$PORT"
+fi
 
 if ! command -v uv >/dev/null 2>&1; then
     echo "error: 'uv' not found on PATH; install from https://astral.sh/uv" >&2
