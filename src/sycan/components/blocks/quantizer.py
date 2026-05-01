@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSpec, StampContext
 
@@ -32,8 +32,8 @@ class Quantizer(Component):
     in_m: str
     out_p: str
     out_m: str
-    k_q: sp.Expr = sp.Integer(1)
-    qnoise: Optional[sp.Expr] = None
+    k_q: cas.Expr = cas.Integer(1)
+    qnoise: Optional[cas.Expr] = None
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("in_p", "in_m", "out_p", "out_m")
@@ -41,11 +41,11 @@ class Quantizer(Component):
     SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
-        self.k_q = sp.sympify(self.k_q)
+        self.k_q = cas.sympify(self.k_q)
         if self.qnoise is None:
-            self.qnoise = sp.Symbol(f"V_q_{self.name}")
+            self.qnoise = cas.Symbol(f"V_q_{self.name}")
         else:
-            self.qnoise = sp.sympify(self.qnoise)
+            self.qnoise = cas.sympify(self.qnoise)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def stamp(self, ctx: StampContext) -> None:

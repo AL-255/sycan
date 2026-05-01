@@ -45,7 +45,7 @@ Reference:
 
 - [1] M. Seok, G. Kim, D. Blaauw and D. Sylvester, "A Portable 2-Transistor Picowatt Temperature-Compensated Voltage Reference Operating at 0.5 V," in IEEE Journal of Solid-State Circuits, vol. 47, no. 10, pp. 2534-2545, Oct. 2012, doi: 10.1109/JSSC.2012.2206683.
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse
 
@@ -61,7 +61,7 @@ def test_2t_reference_asymmetric_equilibrium():
     (
         mu_n1, mu_n2, Cox1, Cox2, W1, W2, L1, L2,
         V_TH1, V_TH2, m1, m2, V_T, Vn1,
-    ) = sp.symbols(
+    ) = cas.symbols(
         "mu_n1 mu_n2 Cox1 Cox2 W1 W2 L1 L2 V_TH1 V_TH2 m1 m2 V_T Vn1",
         positive=True,
     )
@@ -72,7 +72,7 @@ def test_2t_reference_asymmetric_equilibrium():
     # Working in log space sidesteps sympy's exp simplification limits.
     arg1 = (-Vn1 - m1 * V_TH1) / (m1 * V_T)
     arg2 = (Vn1 - m2 * V_TH2) / (m2 * V_T)
-    log_K1_over_K2 = sp.log(
+    log_K1_over_K2 = cas.log(
         mu_n1 * Cox1 * W1 * L2 / (mu_n2 * Cox2 * W2 * L1)
     )
 
@@ -82,7 +82,7 @@ def test_2t_reference_asymmetric_equilibrium():
     )
 
     residual = (log_K1_over_K2 + arg1 - arg2).subs(Vn1, expected)
-    assert sp.simplify(residual) == 0
+    assert cas.simplify(residual) == 0
 
 
 def test_2t_reference_collapses_when_symmetric():
@@ -90,20 +90,20 @@ def test_2t_reference_collapses_when_symmetric():
     (
         mu_n1, mu_n2, Cox1, Cox2, W1, W2, L1, L2,
         V_TH1, V_TH2, m1, m2, V_T,
-    ) = sp.symbols(
+    ) = cas.symbols(
         "mu_n1 mu_n2 Cox1 Cox2 W1 W2 L1 L2 V_TH1 V_TH2 m1 m2 V_T",
         positive=True,
     )
     expected = (
         m1 * m2 / (m1 + m2) * (V_TH2 - V_TH1)
-        + m1 * m2 / (m1 + m2) * V_T * sp.log(
+        + m1 * m2 / (m1 + m2) * V_T * cas.log(
             mu_n1 * Cox1 * W1 * L2 / (mu_n2 * Cox2 * W2 * L1)
         )
     )
     symmetric = expected.subs(
         {mu_n2: mu_n1, Cox2: Cox1, W2: W1, L2: L1, V_TH2: V_TH1, m2: m1}
     )
-    assert sp.simplify(symmetric) == 0
+    assert cas.simplify(symmetric) == 0
 
 
 def test_2t_reference_parses_without_error():

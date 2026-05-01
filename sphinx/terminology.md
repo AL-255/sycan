@@ -30,9 +30,10 @@ Conventions:
 | `V_T`   | `V_T`     | Thermal voltage `k_B · T / q`                 | ≈25.85 mV at 300 K    |
 
 The default `_DEFAULT_VT = sp.Rational(2585, 100000)` baked into the BJT,
-diode and sub-threshold MOSFET models is exactly this 25.85 mV value.
-`k_B`, `T`, `q` are exposed as sympy `Symbol`s in `sycan.mna` so users
-can substitute numeric values when evaluating noise PSDs.
+diode and sub-threshold MOSFET models is exactly this 25.85 mV value
+(`sp` here is `sycan.cas`). `k_B`, `T`, `q` are exposed as CAS
+`Symbol`s in `sycan.mna` so users can substitute numeric values when
+evaluating noise PSDs.
 
 ---
 

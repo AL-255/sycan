@@ -39,20 +39,20 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.circuit import Circuit
 
 _SUFFIXES = {
-    "t": sp.Integer(10) ** 12,
-    "g": sp.Integer(10) ** 9,
-    "meg": sp.Integer(10) ** 6,
-    "k": sp.Integer(10) ** 3,
-    "m": sp.Rational(1, 10**3),
-    "u": sp.Rational(1, 10**6),
-    "n": sp.Rational(1, 10**9),
-    "p": sp.Rational(1, 10**12),
-    "f": sp.Rational(1, 10**15),
+    "t": cas.Integer(10) ** 12,
+    "g": cas.Integer(10) ** 9,
+    "meg": cas.Integer(10) ** 6,
+    "k": cas.Integer(10) ** 3,
+    "m": cas.Rational(1, 10**3),
+    "u": cas.Rational(1, 10**6),
+    "n": cas.Rational(1, 10**9),
+    "p": cas.Rational(1, 10**12),
+    "f": cas.Rational(1, 10**15),
 }
 
 _GND_RE = re.compile(r"^gnd\d*$", re.IGNORECASE)
@@ -69,18 +69,18 @@ _NUMBER_RE = re.compile(
 )
 
 
-def parse_value(token: str) -> sp.Expr:
+def parse_value(token: str) -> cas.Expr:
     """Convert a SPICE value token into a sympy expression.
 
     Numeric tokens accept engineering suffixes and arbitrary trailing
-    unit letters. Non-numeric tokens are returned as ``sp.Symbol``.
+    unit letters. Non-numeric tokens are returned as ``cas.Symbol``.
     """
     m = _NUMBER_RE.match(token)
     if m is None:
-        return sp.Symbol(token)
-    value = sp.Rational(m.group("mant"))
+        return cas.Symbol(token)
+    value = cas.Rational(m.group("mant"))
     if m.group("exp"):
-        value *= sp.Integer(10) ** int(m.group("exp"))
+        value *= cas.Integer(10) ** int(m.group("exp"))
     if m.group("suffix"):
         value *= _SUFFIXES[m.group("suffix").lower()]
     return value
@@ -108,7 +108,7 @@ def _preprocess(text: str) -> list[tuple[int, str]]:
 
 def _source_values(
     tokens: list[str], lineno: int, name: str
-) -> tuple[sp.Expr, sp.Expr | None]:
+) -> tuple[cas.Expr, cas.Expr | None]:
     """Parse the DC and AC values of a V/I source.
 
     Accepts::
@@ -119,8 +119,8 @@ def _source_values(
         DC <val> AC <val>           -> (dc, ac)
         AC <val> DC <val>           -> (dc, ac)
     """
-    dc_val: sp.Expr | None = None
-    ac_val: sp.Expr | None = None
+    dc_val: cas.Expr | None = None
+    ac_val: cas.Expr | None = None
     dc_explicit = False
     i = 0
     while i < len(tokens):
@@ -147,10 +147,10 @@ def _source_values(
     if dc_val is None and ac_val is None:
         raise ValueError(f"line {lineno}: source {name!r} missing value")
     if dc_val is None:
-        dc_val = sp.Integer(0)
+        dc_val = cas.Integer(0)
     # Explicit DC keyword without AC means this is a DC-only source (AC short).
     if dc_explicit and ac_val is None:
-        ac_val = sp.Integer(0)
+        ac_val = cas.Integer(0)
     return dc_val, ac_val
 
 
@@ -247,7 +247,7 @@ def parse(text: str) -> Circuit:
             IS_val = parse_value(parts[5])
             BF = parse_value(parts[6])
             BR = parse_value(parts[7])
-            extra: dict[str, sp.Expr] = {}
+            extra: dict[str, cas.Expr] = {}
             if len(parts) > 8:
                 extra["V_T"] = parse_value(parts[8])
             if len(parts) > 9:
@@ -274,7 +274,7 @@ def parse(text: str) -> Circuit:
                 L     = parse_value(parts[9])
                 V_TH0 = parse_value(parts[10])
                 mtype_lc = mtype.lower()
-                kwargs: dict[str, sp.Expr] = {}
+                kwargs: dict[str, cas.Expr] = {}
                 opt_names = (
                     "lam", "gamma", "phi", "m", "V_T",
                     "V_GS_op", "V_DS_op", "V_BS_op",
@@ -313,7 +313,7 @@ def parse(text: str) -> Circuit:
                     name, drain, gate, source, mu_n, Cox, W, L, V_TH, m_val, V_T
                 )
             elif mtype_lc in ("nmos_l1", "pmos_l1"):
-                kwargs: dict[str, sp.Expr] = {}
+                kwargs: dict[str, cas.Expr] = {}
                 if len(parts) > 10:
                     kwargs["lam"] = parse_value(parts[10])
                 if len(parts) > 11:
@@ -331,7 +331,7 @@ def parse(text: str) -> Circuit:
                 )
                 adder(name, drain, gate, source, mu_n, Cox, W, L, V_TH, **kwargs)
             elif mtype_lc in ("nmos_3t", "pmos_3t"):
-                kwargs: dict[str, sp.Expr] = {}
+                kwargs: dict[str, cas.Expr] = {}
                 # Parameter order matches add_nmos_3t / add_pmos_3t,
                 # which mirror MOSFET_L1 with ``m`` and ``V_T`` slotted
                 # in after the channel-length-modulation parameter.
@@ -369,7 +369,7 @@ def parse(text: str) -> Circuit:
                 plate, grid, cathode = parts[1], parts[2], parts[3]
                 K_val = parse_value(parts[5])
                 mu_val = parse_value(parts[6])
-                kwargs: dict[str, sp.Expr] = {}
+                kwargs: dict[str, cas.Expr] = {}
                 if len(parts) > 7:
                     kwargs["V_g_op"] = parse_value(parts[7])
                 if len(parts) > 8:

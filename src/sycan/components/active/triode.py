@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B
 
@@ -53,13 +53,13 @@ class Triode(Component):
     plate: str
     grid: str
     cathode: str
-    K: sp.Expr    # perveance
-    mu: sp.Expr   # amplification factor
-    V_g_op: Optional[sp.Expr] = None
-    V_p_op: Optional[sp.Expr] = None
-    C_gk: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    C_gp: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    C_pk: sp.Expr = field(default_factory=lambda: sp.Integer(0))
+    K: cas.Expr    # perveance
+    mu: cas.Expr   # amplification factor
+    V_g_op: Optional[cas.Expr] = None
+    V_p_op: Optional[cas.Expr] = None
+    C_gk: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    C_gp: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    C_pk: cas.Expr = field(default_factory=lambda: cas.Integer(0))
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("plate", "grid", "cathode")
@@ -68,11 +68,11 @@ class Triode(Component):
 
     def __post_init__(self) -> None:
         if self.V_g_op is None:
-            self.V_g_op = sp.Symbol(f"V_g_op_{self.name}")
+            self.V_g_op = cas.Symbol(f"V_g_op_{self.name}")
         if self.V_p_op is None:
-            self.V_p_op = sp.Symbol(f"V_p_op_{self.name}")
+            self.V_p_op = cas.Symbol(f"V_p_op_{self.name}")
         for attr in ("K", "mu", "V_g_op", "V_p_op", "C_gk", "C_gp", "C_pk"):
-            setattr(self, attr, sp.sympify(getattr(self, attr)))
+            setattr(self, attr, cas.sympify(getattr(self, attr)))
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def noise_sources(self) -> list[NoiseSource]:
@@ -92,18 +92,18 @@ class Triode(Component):
 
     # ------------------------------------------------------------------
 
-    def _I_p_expr(self, V_gk: sp.Expr, V_pk: sp.Expr) -> sp.Expr:
+    def _I_p_expr(self, V_gk: cas.Expr, V_pk: cas.Expr) -> cas.Expr:
         """Langmuir 3/2-power plate current, symbolic in (V_gk, V_pk)."""
         V_eff = self.mu * V_gk + V_pk
-        return self.K * V_eff ** sp.Rational(3, 2)
+        return self.K * V_eff ** cas.Rational(3, 2)
 
-    def _small_signal_params(self) -> tuple[sp.Expr, sp.Expr]:
+    def _small_signal_params(self) -> tuple[cas.Expr, cas.Expr]:
         """Return (g_m, g_p) evaluated at the stored operating point."""
-        _vgk, _vpk = sp.Dummy("vgk"), sp.Dummy("vpk")
+        _vgk, _vpk = cas.Dummy("vgk"), cas.Dummy("vpk")
         I_p = self._I_p_expr(_vgk, _vpk)
         sub = {_vgk: self.V_g_op, _vpk: self.V_p_op}
-        g_m = sp.diff(I_p, _vgk).subs(sub)
-        g_p = sp.diff(I_p, _vpk).subs(sub)
+        g_m = cas.diff(I_p, _vgk).subs(sub)
+        g_p = cas.diff(I_p, _vpk).subs(sub)
         return g_m, g_p
 
     # ------------------------------------------------------------------
@@ -162,9 +162,9 @@ class Triode(Component):
         g = ctx.n(self.grid)
         k = ctx.n(self.cathode)
 
-        V_p = ctx.x[p] if p >= 0 else sp.Integer(0)
-        V_g = ctx.x[g] if g >= 0 else sp.Integer(0)
-        V_k = ctx.x[k] if k >= 0 else sp.Integer(0)
+        V_p = ctx.x[p] if p >= 0 else cas.Integer(0)
+        V_g = ctx.x[g] if g >= 0 else cas.Integer(0)
+        V_k = ctx.x[k] if k >= 0 else cas.Integer(0)
 
         I_p = self._I_p_expr(V_g - V_k, V_p - V_k)
         if p >= 0:

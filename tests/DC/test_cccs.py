@@ -1,5 +1,5 @@
 """CCCS (SPICE F): current mirror driven by a 0 V ammeter source."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_dc
 
@@ -23,6 +23,6 @@ W3 0_2 0_3; right
 
 def test_cccs_mirror():
     sol = solve_dc(parse(NETLIST))
-    Vin, Rs, RL, beta = sp.symbols("Vin Rs RL beta")
-    assert sp.simplify(sol[sp.Symbol("I(Vm)")] - Vin / Rs) == 0
-    assert sp.simplify(sol[sp.Symbol("V(out)")] - beta * Vin * RL / Rs) == 0
+    Vin, Rs, RL, beta = cas.symbols("Vin Rs RL beta")
+    assert cas.simplify(sol[cas.Symbol("I(Vm)")] - Vin / Rs) == 0
+    assert cas.simplify(sol[cas.Symbol("V(out)")] - beta * Vin * RL / Rs) == 0

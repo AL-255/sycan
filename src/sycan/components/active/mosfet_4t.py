@@ -36,19 +36,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B, q
 
 
 # Reuse the same defaults as the standalone weak-inversion model so a
 # parameter swap doesn't subtly move the operating point.
-_DEFAULT_VT  = sp.Rational(2585, 100000)   # kT/q at ~300 K, in volts.
-_DEFAULT_M   = sp.Rational(3, 2)           # long-channel slope factor.
-_DEFAULT_PHI = sp.Rational(7, 10)          # 2 φ_F default ≈ 0.7 V.
+_DEFAULT_VT  = cas.Rational(2585, 100000)   # kT/q at ~300 K, in volts.
+_DEFAULT_M   = cas.Rational(3, 2)           # long-channel slope factor.
+_DEFAULT_PHI = cas.Rational(7, 10)          # 2 φ_F default ≈ 0.7 V.
 
 # Channel-thermal-noise excess factor in saturation.
-_NOISE_GAMMA = sp.Rational(2, 3)
+_NOISE_GAMMA = cas.Rational(2, 3)
 
 
 @dataclass
@@ -58,21 +58,21 @@ class _MOSFET_4T(Component):
     gate: str
     source: str
     bulk: str
-    mu_n: sp.Expr
-    Cox: sp.Expr
-    W: sp.Expr
-    L: sp.Expr
-    V_TH0: sp.Expr  # zero-bias threshold (positive magnitude)
-    lam: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    gamma: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    phi: sp.Expr = field(default_factory=lambda: _DEFAULT_PHI)
-    m: sp.Expr = field(default_factory=lambda: _DEFAULT_M)
-    V_T: sp.Expr = field(default_factory=lambda: _DEFAULT_VT)
-    C_gs: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    C_gd: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    V_GS_op: Optional[sp.Expr] = None
-    V_DS_op: Optional[sp.Expr] = None
-    V_BS_op: Optional[sp.Expr] = None
+    mu_n: cas.Expr
+    Cox: cas.Expr
+    W: cas.Expr
+    L: cas.Expr
+    V_TH0: cas.Expr  # zero-bias threshold (positive magnitude)
+    lam: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    gamma: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    phi: cas.Expr = field(default_factory=lambda: _DEFAULT_PHI)
+    m: cas.Expr = field(default_factory=lambda: _DEFAULT_M)
+    V_T: cas.Expr = field(default_factory=lambda: _DEFAULT_VT)
+    C_gs: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    C_gd: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    V_GS_op: Optional[cas.Expr] = None
+    V_DS_op: Optional[cas.Expr] = None
+    V_BS_op: Optional[cas.Expr] = None
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("drain", "gate", "source", "bulk")
@@ -86,43 +86,43 @@ class _MOSFET_4T(Component):
                 "_MOSFET_4T is abstract; instantiate NMOS_4T or PMOS_4T."
             )
         if self.V_GS_op is None:
-            self.V_GS_op = sp.Symbol(f"V_GS_op_{self.name}")
+            self.V_GS_op = cas.Symbol(f"V_GS_op_{self.name}")
         if self.V_DS_op is None:
-            self.V_DS_op = sp.Symbol(f"V_DS_op_{self.name}")
+            self.V_DS_op = cas.Symbol(f"V_DS_op_{self.name}")
         if self.V_BS_op is None:
-            self.V_BS_op = sp.Symbol(f"V_BS_op_{self.name}")
+            self.V_BS_op = cas.Symbol(f"V_BS_op_{self.name}")
         for attr in (
             "mu_n", "Cox", "W", "L", "V_TH0",
             "lam", "gamma", "phi", "m", "V_T",
             "C_gs", "C_gd",
             "V_GS_op", "V_DS_op", "V_BS_op",
         ):
-            setattr(self, attr, sp.sympify(getattr(self, attr)))
+            setattr(self, attr, cas.sympify(getattr(self, attr)))
         self.include_noise = self._normalize_noise(self.include_noise)
 
     # ------------------------------------------------------------------
     # Derived quantities — these now depend on V_SB through V_TH.
     # ------------------------------------------------------------------
     @property
-    def _pol(self) -> sp.Expr:
-        return sp.Integer(1) if self.polarity == "N" else sp.Integer(-1)
+    def _pol(self) -> cas.Expr:
+        return cas.Integer(1) if self.polarity == "N" else cas.Integer(-1)
 
     @property
-    def _beta(self) -> sp.Expr:
+    def _beta(self) -> cas.Expr:
         return self.mu_n * self.Cox * (self.W / self.L)
 
-    def _V_TH(self, V_SB_eff: sp.Expr) -> sp.Expr:
+    def _V_TH(self, V_SB_eff: cas.Expr) -> cas.Expr:
         """Threshold with long-channel body-effect correction."""
         return (
             self.V_TH0
-            + self.gamma * (sp.sqrt(self.phi + V_SB_eff) - sp.sqrt(self.phi))
+            + self.gamma * (cas.sqrt(self.phi + V_SB_eff) - cas.sqrt(self.phi))
         )
 
-    def _V_off(self, V_TH: sp.Expr) -> sp.Expr:
+    def _V_off(self, V_TH: cas.Expr) -> cas.Expr:
         """Strong/weak split point at the current V_TH."""
         return V_TH + 2 * self.m * self.V_T
 
-    def _I_off(self) -> sp.Expr:
+    def _I_off(self) -> cas.Expr:
         """Boundary current — independent of V_TH (only of β, m, V_T)."""
         return 2 * self._beta * (self.m * self.V_T) ** 2
 
@@ -134,7 +134,7 @@ class _MOSFET_4T(Component):
         if isinstance(v, (int, float)):
             return float(v)
         try:
-            return float(sp.sympify(v))
+            return float(cas.sympify(v))
         except (TypeError, ValueError) as exc:  # pragma: no cover — guard
             raise TypeError(
                 f"cannot convert {v!r} to a float; substitute every "
@@ -208,7 +208,7 @@ class _MOSFET_4T(Component):
     # ------------------------------------------------------------------
     # Symbolic DC current — Piecewise that the MNA / Newton solver use.
     # ------------------------------------------------------------------
-    def _I_D_expr(self, V_GS: sp.Expr, V_DS: sp.Expr, V_BS: sp.Expr) -> sp.Expr:
+    def _I_D_expr(self, V_GS: cas.Expr, V_DS: cas.Expr, V_BS: cas.Expr) -> cas.Expr:
         pol = self._pol
         V_GS_eff = pol * V_GS
         V_DS_eff = pol * V_DS
@@ -219,9 +219,9 @@ class _MOSFET_4T(Component):
         I_off = self._I_off()
         V_ov = V_GS_eff - V_TH
 
-        I_sat = sp.Rational(1, 2) * beta * V_ov ** 2 * (1 + self.lam * V_DS_eff)
+        I_sat = cas.Rational(1, 2) * beta * V_ov ** 2 * (1 + self.lam * V_DS_eff)
         I_tri = (
-            beta * (V_ov * V_DS_eff - sp.Rational(1, 2) * V_DS_eff ** 2)
+            beta * (V_ov * V_DS_eff - cas.Rational(1, 2) * V_DS_eff ** 2)
             * (1 + self.lam * V_DS_eff)
         )
         # Weak-inversion shape factor — saturates at 1 for V_DS_eff
@@ -231,34 +231,34 @@ class _MOSFET_4T(Component):
         # NMOS doesn't conduct in reverse anyway (we don't model the
         # body diode here). The Piecewise is sympy-friendly and keeps
         # the lambdified Jacobian bounded.
-        shape = sp.Piecewise(
-            (1 - sp.exp(-V_DS_eff / self.V_T), V_DS_eff > 0),
-            (sp.Integer(0), True),
+        shape = cas.Piecewise(
+            (1 - cas.exp(-V_DS_eff / self.V_T), V_DS_eff > 0),
+            (cas.Integer(0), True),
         )
         I_weak = (
             I_off
-            * sp.exp((V_GS_eff - V_off) / (self.m * self.V_T))
+            * cas.exp((V_GS_eff - V_off) / (self.m * self.V_T))
             * shape
             * (1 + self.lam * V_DS_eff)
         )
 
-        I_strong = sp.Piecewise(
+        I_strong = cas.Piecewise(
             (I_tri, V_DS_eff < V_ov),
             (I_sat, True),
         )
-        I_mag = sp.Piecewise(
+        I_mag = cas.Piecewise(
             (I_weak, V_GS_eff < V_off),
             (I_strong, True),
         )
         return pol * I_mag
 
-    def _small_signal_params(self) -> tuple[sp.Expr, sp.Expr, sp.Expr]:
-        _vgs, _vds, _vbs = sp.Dummy("vgs"), sp.Dummy("vds"), sp.Dummy("vbs")
+    def _small_signal_params(self) -> tuple[cas.Expr, cas.Expr, cas.Expr]:
+        _vgs, _vds, _vbs = cas.Dummy("vgs"), cas.Dummy("vds"), cas.Dummy("vbs")
         I_D = self._I_D_expr(_vgs, _vds, _vbs)
         sub = {_vgs: self.V_GS_op, _vds: self.V_DS_op, _vbs: self.V_BS_op}
-        g_m  = sp.diff(I_D, _vgs).subs(sub)
-        g_ds = sp.diff(I_D, _vds).subs(sub)
-        g_mb = sp.diff(I_D, _vbs).subs(sub)
+        g_m  = cas.diff(I_D, _vgs).subs(sub)
+        g_ds = cas.diff(I_D, _vds).subs(sub)
+        g_mb = cas.diff(I_D, _vbs).subs(sub)
         return g_m, g_ds, g_mb
 
     # ------------------------------------------------------------------
@@ -357,10 +357,10 @@ class _MOSFET_4T(Component):
         src = ctx.n(self.source)
         bulk = ctx.n(self.bulk)
 
-        V_d = ctx.x[d]    if d >= 0    else sp.Integer(0)
-        V_g = ctx.x[g]    if g >= 0    else sp.Integer(0)
-        V_s = ctx.x[src]  if src >= 0  else sp.Integer(0)
-        V_b = ctx.x[bulk] if bulk >= 0 else sp.Integer(0)
+        V_d = ctx.x[d]    if d >= 0    else cas.Integer(0)
+        V_g = ctx.x[g]    if g >= 0    else cas.Integer(0)
+        V_s = ctx.x[src]  if src >= 0  else cas.Integer(0)
+        V_b = ctx.x[bulk] if bulk >= 0 else cas.Integer(0)
 
         I_D = self._I_D_expr(V_g - V_s, V_d - V_s, V_b - V_s)
         if d >= 0:
@@ -425,7 +425,7 @@ class NMOS_3T(NMOS_4T):
         )
 
     @property
-    def V_TH(self) -> sp.Expr:
+    def V_TH(self) -> cas.Expr:
         """Alias for ``V_TH0`` — kept for backwards compatibility with
         the original (pre-4T) MOSFET_3T API."""
         return self.V_TH0
@@ -463,5 +463,5 @@ class PMOS_3T(PMOS_4T):
         )
 
     @property
-    def V_TH(self) -> sp.Expr:
+    def V_TH(self) -> cas.Expr:
         return self.V_TH0

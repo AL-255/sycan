@@ -4,7 +4,7 @@ For ``I1 0 n Is`` (injects +Is into ``n``) the tank impedance seen from
 ``n`` is ``Z = sL / (1 + s^2 L C)``, so ``V(n) = Is * Z``. At the tank
 frequency ``s = j/sqrt(LC)`` the denominator vanishes -> infinite Q.
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_ac
 
@@ -21,11 +21,11 @@ W2 0_1 0_2; right
 
 
 def test_lc_tank_impedance():
-    s, L, C, Is = sp.symbols("s L C Is")
+    s, L, C, Is = cas.symbols("s L C Is")
     sol = solve_ac(parse(NETLIST))
-    V_n = sol[sp.Symbol("V(n)")]
+    V_n = sol[cas.Symbol("V(n)")]
     expected = Is * s * L / (1 + s**2 * L * C)
-    assert sp.simplify(V_n - expected) == 0
+    assert cas.simplify(V_n - expected) == 0
 
 
 def test_lc_tank_pole_polynomial():
@@ -33,7 +33,7 @@ def test_lc_tank_pole_polynomial():
     # puts the resonance at s = I/sqrt(LC). We verify the polynomial
     # identity rather than substituting a value that depends on sqrt
     # simplification rules.
-    s, L, C, Is = sp.symbols("s L C Is")
+    s, L, C, Is = cas.symbols("s L C Is")
     sol = solve_ac(parse(NETLIST))
-    V_n = sol[sp.Symbol("V(n)")]
-    assert sp.cancel(V_n * (1 + s**2 * L * C) - Is * s * L) == 0
+    V_n = sol[cas.Symbol("V(n)")]
+    assert cas.cancel(V_n * (1 + s**2 * L * C) - Is * s * L) == 0

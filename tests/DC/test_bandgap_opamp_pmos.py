@@ -65,7 +65,7 @@ ask :func:`solve_dc` to crack it we:
 If the topology, polarities, or PMOS current matching were wrong, at
 least one residual would fail to vanish.
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import build_residuals, parse
 
@@ -103,21 +103,21 @@ def _expected_operating_point():
     the offset vanishes in the ``A -> oo`` limit and recovers the
     virtual short.
     """
-    V_DD = sp.Symbol("V_DD")
-    V_THP = sp.Symbol("V_THP")
-    mu = sp.Symbol("mu")
-    Cox = sp.Symbol("Cox")
-    W = sp.Symbol("W")
-    L = sp.Symbol("L")
-    IS = sp.Symbol("IS")
-    IS_N = sp.Symbol("IS_N")
-    V_T = sp.Symbol("V_T")
-    R3 = sp.Symbol("R3")
-    A = sp.Symbol("A")
-    I = sp.Symbol("I_bias")
+    V_DD = cas.Symbol("V_DD")
+    V_THP = cas.Symbol("V_THP")
+    mu = cas.Symbol("mu")
+    Cox = cas.Symbol("Cox")
+    W = cas.Symbol("W")
+    L = cas.Symbol("L")
+    IS = cas.Symbol("IS")
+    IS_N = cas.Symbol("IS_N")
+    V_T = cas.Symbol("V_T")
+    R3 = cas.Symbol("R3")
+    A = cas.Symbol("A")
+    I = cas.Symbol("I_bias")
 
-    V_BE1 = V_T * sp.log(I / IS + 1)
-    V_BE2 = V_T * sp.log(I / IS_N + 1)
+    V_BE1 = V_T * cas.log(I / IS + 1)
+    V_BE2 = V_T * cas.log(I / IS_N + 1)
     V_BE3 = V_BE1                                  # D3 matches D1
 
     R1_value = (V_BE1 - V_BE2) / I                 # bandgap-loop closure
@@ -126,20 +126,20 @@ def _expected_operating_point():
     #     I = (1/2) * mu * Cox * (W/L) * (V_DD - V(g) - V_THP)**2
     # Solving for V(g) (positive overdrive sqrt branch):
     beta = mu * Cox * W / L
-    V_g = V_DD - V_THP - sp.sqrt(2 * I / beta)
+    V_g = V_DD - V_THP - cas.sqrt(2 * I / beta)
 
     op = {
-        sp.Symbol("V(vdd)"): V_DD,
-        sp.Symbol("V(a)"): V_BE1,
-        sp.Symbol("V(b)"): V_BE1 + V_g / A,
-        sp.Symbol("V(c)"): V_BE2,
-        sp.Symbol("V(g)"): V_g,
-        sp.Symbol("V(ref)"): V_BE3 + I * R3,
-        sp.Symbol("V(out)"): V_BE3,
-        sp.Symbol("I(VDD)"): -3 * I,               # VDD sources 3*I (SPICE sign)
-        sp.Symbol("I(E1)"): 0,                     # PMOS gates draw no DC current
+        cas.Symbol("V(vdd)"): V_DD,
+        cas.Symbol("V(a)"): V_BE1,
+        cas.Symbol("V(b)"): V_BE1 + V_g / A,
+        cas.Symbol("V(c)"): V_BE2,
+        cas.Symbol("V(g)"): V_g,
+        cas.Symbol("V(ref)"): V_BE3 + I * R3,
+        cas.Symbol("V(out)"): V_BE3,
+        cas.Symbol("I(VDD)"): -3 * I,               # VDD sources 3*I (SPICE sign)
+        cas.Symbol("I(E1)"): 0,                     # PMOS gates draw no DC current
     }
-    extras = {sp.Symbol("R1"): R1_value}
+    extras = {cas.Symbol("R1"): R1_value}
     return op, extras, A, I
 
 
@@ -158,39 +158,39 @@ def test_bandgap_residuals_vanish():
     sub = {**op, **extras}
 
     for r in residuals:
-        r_at_op = sp.simplify(r.subs(sub))
-        r_lim = sp.limit(r_at_op, A, sp.oo)
-        assert sp.simplify(r_lim) == 0, f"residual did not vanish: {r}"
+        r_at_op = cas.simplify(r.subs(sub))
+        r_lim = cas.limit(r_at_op, A, cas.oo)
+        assert cas.simplify(r_lim) == 0, f"residual did not vanish: {r}"
 
 
 def test_bandgap_ptat_loop_in_saturation_limit():
     """In the deep-saturation limit ``IS << I`` the loop reduces to the
     textbook PTAT relation ``I * R1 = V_T * ln(N)``."""
-    IS, V_T, R1, N = sp.symbols("IS V_T R1 N", positive=True)
-    I = sp.Symbol("I_bias", positive=True)
+    IS, V_T, R1, N = cas.symbols("IS V_T R1 N", positive=True)
+    I = cas.Symbol("I_bias", positive=True)
     IS_N = N * IS
 
-    V_BE1 = V_T * sp.log(I / IS + 1)
-    V_BE2 = V_T * sp.log(I / IS_N + 1)
-    loop = sp.expand_log(V_BE1 - V_BE2, force=True)
+    V_BE1 = V_T * cas.log(I / IS + 1)
+    V_BE2 = V_T * cas.log(I / IS_N + 1)
+    loop = cas.expand_log(V_BE1 - V_BE2, force=True)
 
     # Drop the "+1" in each log (forward-active / saturation regime).
-    sat_loop = loop.rewrite(sp.log).subs(
-        {sp.log(I / IS + 1): sp.log(I / IS),
-         sp.log(I / IS_N + 1): sp.log(I / IS_N)}
+    sat_loop = loop.rewrite(cas.log).subs(
+        {cas.log(I / IS + 1): cas.log(I / IS),
+         cas.log(I / IS_N + 1): cas.log(I / IS_N)}
     )
-    assert sp.simplify(sat_loop - V_T * sp.log(N)) == 0
+    assert cas.simplify(sat_loop - V_T * cas.log(N)) == 0
 
 
 def test_bandgap_output_ptat_slope():
     """V_REF = V_BE3 + I * R3; with the loop fixing I = DeltaV_BE / R1,
     the PTAT contribution to V_REF carries the classical K = R3/R1
     multiplier on the (independent) DeltaV_BE drop."""
-    R1, R3 = sp.symbols("R1 R3", positive=True)
-    delta_VBE = sp.Symbol("DeltaVBE", positive=True)
-    V_BE3 = sp.Symbol("V_BE3", positive=True)        # treated as independent CTAT
+    R1, R3 = cas.symbols("R1 R3", positive=True)
+    delta_VBE = cas.Symbol("DeltaVBE", positive=True)
+    V_BE3 = cas.Symbol("V_BE3", positive=True)        # treated as independent CTAT
 
     I = delta_VBE / R1
     V_REF = V_BE3 + I * R3
-    assert sp.simplify(sp.diff(V_REF, delta_VBE) - R3 / R1) == 0
-    assert sp.simplify(V_REF.subs(delta_VBE, 0) - V_BE3) == 0
+    assert cas.simplify(cas.diff(V_REF, delta_VBE) - R3 / R1) == 0
+    assert cas.simplify(V_REF.subs(delta_VBE, 0) - V_BE3) == 0

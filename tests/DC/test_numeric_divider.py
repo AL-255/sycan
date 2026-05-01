@@ -1,5 +1,5 @@
 """Numeric sanity check exercising SPICE engineering suffixes."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_dc
 
@@ -15,5 +15,5 @@ W1 0 0_1; right
 def test_numeric_divider():
     sol = solve_dc(parse(NETLIST))
     # V(out) = 10 * 4k / 5k = 8 V, I(V1) = -10 / 5k = -2 mA.
-    assert sol[sp.Symbol("V(out)")] == sp.Integer(8)
-    assert sol[sp.Symbol("I(V1)")] == sp.Rational(-1, 500)
+    assert sol[cas.Symbol("V(out)")] == cas.Integer(8)
+    assert sol[cas.Symbol("I(V1)")] == cas.Rational(-1, 500)

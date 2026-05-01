@@ -1,6 +1,6 @@
 """Non-inverting op-amp with a finite-gain VCVS model. Verifies the
 ideal closed-loop gain 1 + Rf/Rg is recovered in the limit A -> oo."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_dc
 
@@ -19,13 +19,13 @@ W2 0_2 0_1; right
 
 def test_noninverting_limit():
     sol = solve_dc(parse(NETLIST))
-    Vin, A, Rf, Rg = sp.symbols("Vin A Rf Rg")
-    gain = sol[sp.Symbol("V(out)")] / Vin
-    assert sp.simplify(sp.limit(gain, A, sp.oo) - (1 + Rf / Rg)) == 0
+    Vin, A, Rf, Rg = cas.symbols("Vin A Rf Rg")
+    gain = sol[cas.Symbol("V(out)")] / Vin
+    assert cas.simplify(cas.limit(gain, A, cas.oo) - (1 + Rf / Rg)) == 0
 
 
 def test_noninverting_virtual_short():
     sol = solve_dc(parse(NETLIST))
-    Vin, A = sp.symbols("Vin A")
+    Vin, A = cas.symbols("Vin A")
     # As A -> oo the op-amp drives V(inv) toward V(in) (virtual short).
-    assert sp.simplify(sp.limit(sol[sp.Symbol("V(inv)")], A, sp.oo) - Vin) == 0
+    assert cas.simplify(cas.limit(sol[cas.Symbol("V(inv)")], A, cas.oo) - Vin) == 0

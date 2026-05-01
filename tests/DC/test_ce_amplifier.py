@@ -1,7 +1,7 @@
 """Common-emitter BJT small-signal amplifier modelled with the
 hybrid-pi network. Verifies the classical midband gain
 ``Av = -gm * (Ro || RL) * Rpi / (Rs + Rpi)``."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_dc
 
@@ -28,14 +28,14 @@ W4 0_3 0_4; right
 
 def test_ce_midband_gain():
     sol = solve_dc(parse(NETLIST))
-    Vs, Rs, Rpi, gm, Ro, RL = sp.symbols("Vs Rs Rpi gm Ro RL")
-    gain = sol[sp.Symbol("V(c)")] / Vs
+    Vs, Rs, Rpi, gm, Ro, RL = cas.symbols("Vs Rs Rpi gm Ro RL")
+    gain = sol[cas.Symbol("V(c)")] / Vs
     expected = -gm * (Ro * RL / (Ro + RL)) * Rpi / (Rs + Rpi)
-    assert sp.simplify(gain - expected) == 0
+    assert cas.simplify(gain - expected) == 0
 
 
 def test_ce_base_voltage():
     sol = solve_dc(parse(NETLIST))
-    Vs, Rs, Rpi = sp.symbols("Vs Rs Rpi")
+    Vs, Rs, Rpi = cas.symbols("Vs Rs Rpi")
     # Simple input divider between Rs and Rpi.
-    assert sp.simplify(sol[sp.Symbol("V(b)")] - Vs * Rpi / (Rs + Rpi)) == 0
+    assert cas.simplify(sol[cas.Symbol("V(b)")] - Vs * Rpi / (Rs + Rpi)) == 0

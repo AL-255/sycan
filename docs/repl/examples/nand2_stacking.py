@@ -27,26 +27,26 @@ configurations of the same NAND2, evaluated at the same V_SB:
 The schematic below renders the bulk→V_SS variant; MN_A's V_TH is
 annotated with its body-effect-shifted value, MN_B's stays at V_TH0.
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import autodraw
 from sycan.plot_util import fmt
 
 
 # --- Symbols -------------------------------------------------------------
-V_TH0, gamma, phi, V_SB, m_sub, V_T = sp.symbols(
+V_TH0, gamma, phi, V_SB, m_sub, V_T = cas.symbols(
     "V_TH0 gamma phi V_SB m V_T", positive=True,
 )
 
 
 # --- Body-effect threshold (the formula every textbook cites) -----------
-V_TH_eff = V_TH0 + gamma * (sp.sqrt(phi + V_SB) - sp.sqrt(phi))
-delta_V_TH = sp.simplify(V_TH_eff - V_TH0)
+V_TH_eff = V_TH0 + gamma * (cas.sqrt(phi + V_SB) - cas.sqrt(phi))
+delta_V_TH = cas.simplify(V_TH_eff - V_TH0)
 
-print(r"$$V_{TH}(V_{SB}) \;=\; " + sp.latex(V_TH_eff) + r"$$")
+print(r"$$V_{TH}(V_{SB}) \;=\; " + cas.latex(V_TH_eff) + r"$$")
 print()
 print(r"$$\Delta V_{TH} \;=\; V_{TH}(V_{SB}) - V_{TH0} \;=\; "
-      + sp.latex(delta_V_TH) + r"$$")
+      + cas.latex(delta_V_TH) + r"$$")
 print()
 
 
@@ -57,11 +57,11 @@ print()
 # the upper NMOS), the only difference is V_TH_A — body-effect-
 # raised in config A, frozen at V_TH0 in config B. Their ratio
 # therefore collapses to a single exponential:
-ratio = sp.exp(-delta_V_TH / (m_sub * V_T))
+ratio = cas.exp(-delta_V_TH / (m_sub * V_T))
 print(r"Leakage-suppression ratio (body effect alone):")
 print(r"$$\frac{I_{leak}^{(a)}}{I_{leak}^{(b)}}"
       r" \;=\; \exp\!\left(-\frac{\Delta V_{TH}}{m\,V_T}\right)"
-      r" \;=\; " + sp.latex(ratio) + r"$$")
+      r" \;=\; " + cas.latex(ratio) + r"$$")
 print()
 
 
@@ -69,22 +69,22 @@ print()
 # Taylor-expanding √(φ + V_SB) around V_SB = 0 gives ΔV_TH ≈ η · V_SB
 # with η = γ / (2 √φ). In the standby state V_SB sits in the V_T
 # range, so this linearisation is accurate to a few %.
-eta = gamma / (2 * sp.sqrt(phi))
-delta_V_TH_lin = sp.series(delta_V_TH, V_SB, 0, 2).removeO()
+eta = gamma / (2 * cas.sqrt(phi))
+delta_V_TH_lin = cas.series(delta_V_TH, V_SB, 0, 2).removeO()
 print(r"Small-V_SB expansion (V_SB \\ll \\phi):")
 print(r"$$\Delta V_{TH} \;\approx\; \eta\, V_{SB}, \quad "
-      r"\eta \;=\; " + sp.latex(eta) + r"$$")
-print(f"   (verified: $\\Delta V_{{TH}}\\approx{sp.latex(delta_V_TH_lin)}$)")
+      r"\eta \;=\; " + cas.latex(eta) + r"$$")
+print(f"   (verified: $\\Delta V_{{TH}}\\approx{cas.latex(delta_V_TH_lin)}$)")
 print()
 
 
 # --- Substitute typical 65-nm-ish numbers --------------------------------
 PARAMS = {
-    V_TH0:  sp.Rational(45, 100),    # 0.45 V
-    gamma:  sp.Rational(40, 100),    # 0.4 V^(1/2)
-    phi:    sp.Rational(70, 100),    # 0.7 V (= 2 φ_F)
-    m_sub:  sp.Rational(3, 2),       # 1.5
-    V_T:    sp.Rational(2585, 100000),  # 25.85 mV
+    V_TH0:  cas.Rational(45, 100),    # 0.45 V
+    gamma:  cas.Rational(40, 100),    # 0.4 V^(1/2)
+    phi:    cas.Rational(70, 100),    # 0.7 V (= 2 φ_F)
+    m_sub:  cas.Rational(3, 2),       # 1.5
+    V_T:    cas.Rational(2585, 100000),  # 25.85 mV
 }
 
 # Typical V_mid in a stacked-NMOS standby state is one V_T or so

@@ -9,28 +9,28 @@ single-pole roll-off
 
 whose total integrated power is the celebrated ``k_B·T / C``.
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, T_kelvin, autodraw, k_B, solve_noise
 from sycan.components.basic import Capacitor, Resistor, VoltageSource
 
-R, C, omega = sp.symbols("R C omega", positive=True)
+R, C, omega = cas.symbols("R C omega", positive=True)
 
 c = Circuit("RC noise demo")
 c.add(VoltageSource("V1", "in", "0", value=0, ac_value=0))
 c.add(Resistor("R1", "in", "out", R, include_noise="thermal"))
 c.add(Capacitor("C1", "out", "0", C))
 
-s = sp.Symbol("s")
+s = cas.Symbol("s")
 S_total, contribs = solve_noise(c, "out", s=s, simplify=True)
 
 # Express the PSD on the imaginary axis s = jω.
-S_omega = sp.simplify(S_total.subs(s, sp.I * omega))
-print(f"S_V_out(ω) = {sp.latex(S_omega)}")
+S_omega = cas.simplify(S_total.subs(s, cas.I * omega))
+print(f"S_V_out(ω) = {cas.latex(S_omega)}")
 
 # Sanity-check: integrating over Hz (dω = 2π df) gives kT/C.
-power = sp.integrate(S_omega, (omega, 0, sp.oo)) / (2 * sp.pi)
-print(f"Integrated noise power: {sp.simplify(power)}")
-assert sp.simplify(power - k_B * T_kelvin / C) == 0
+power = cas.integrate(S_omega, (omega, 0, cas.oo)) / (2 * cas.pi)
+print(f"Integrated noise power: {cas.simplify(power)}")
+assert cas.simplify(power - k_B * T_kelvin / C) == 0
 
 autodraw(c)

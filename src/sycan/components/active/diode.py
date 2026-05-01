@@ -17,11 +17,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, q
 
-_DEFAULT_VT = sp.Rational(2585, 100000)
+_DEFAULT_VT = cas.Rational(2585, 100000)
 
 
 @dataclass
@@ -38,10 +38,10 @@ class Diode(Component):
     name: str
     anode: str
     cathode: str
-    IS: sp.Expr
-    N: sp.Expr = field(default_factory=lambda: sp.Integer(1))
-    V_T: sp.Expr = field(default_factory=lambda: _DEFAULT_VT)
-    I_op: Optional[sp.Expr] = None
+    IS: cas.Expr
+    N: cas.Expr = field(default_factory=lambda: cas.Integer(1))
+    V_T: cas.Expr = field(default_factory=lambda: _DEFAULT_VT)
+    I_op: Optional[cas.Expr] = None
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("anode", "cathode")
@@ -49,13 +49,13 @@ class Diode(Component):
     SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"shot"})
 
     def __post_init__(self) -> None:
-        self.IS = sp.sympify(self.IS)
-        self.N = sp.sympify(self.N)
-        self.V_T = sp.sympify(self.V_T)
+        self.IS = cas.sympify(self.IS)
+        self.N = cas.sympify(self.N)
+        self.V_T = cas.sympify(self.V_T)
         if self.I_op is None:
-            self.I_op = sp.Symbol(f"I_op_{self.name}")
+            self.I_op = cas.Symbol(f"I_op_{self.name}")
         else:
-            self.I_op = sp.sympify(self.I_op)
+            self.I_op = cas.sympify(self.I_op)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def noise_sources(self) -> list[NoiseSource]:
@@ -83,11 +83,11 @@ class Diode(Component):
         a_idx = ctx.n(self.anode)
         k_idx = ctx.n(self.cathode)
 
-        V_a = ctx.x[a_idx] if a_idx >= 0 else sp.Integer(0)
-        V_k = ctx.x[k_idx] if k_idx >= 0 else sp.Integer(0)
+        V_a = ctx.x[a_idx] if a_idx >= 0 else cas.Integer(0)
+        V_k = ctx.x[k_idx] if k_idx >= 0 else cas.Integer(0)
         V_D = V_a - V_k
 
-        I_D = self.IS * (sp.exp(V_D / (self.N * self.V_T)) - 1)
+        I_D = self.IS * (cas.exp(V_D / (self.N * self.V_T)) - 1)
 
         # I_D flows anode → cathode through the diode; externally it
         # leaves the anode node and enters the cathode node.

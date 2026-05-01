@@ -14,14 +14,14 @@ straight from the device equations,
 
 with the long-channel body-effect threshold for 4T cells. The DC
 operating point is solved with the saturation-form drain currents —
-``I_D = (1/2) β (V_GS_eff − V_TH)² (1 + λ V_DS_eff)`` — so ``sp.solve``
+``I_D = (1/2) β (V_GS_eff − V_TH)² (1 + λ V_DS_eff)`` — so ``cas.solve``
 sees a polynomial system. Substituting the solved node voltages
 turns each predicate into an expression in the input variable (and
 any leftover symbolic parameters); the interval edges then come from
-``sp.solve`` of each predicate against the input, never from a
+``cas.solve`` of each predicate against the input, never from a
 numeric sweep.
 
-For circuits whose KCLs ``sp.solve`` can't close in one shot — the
+For circuits whose KCLs ``cas.solve`` can't close in one shot — the
 canonical case is a 5T-OTA with a diode-connected current mirror —
 pass a pre-computed ``op_point=`` mapping. Compute it however you
 like (sequential elimination, hand algebra, your own solver) and the
@@ -39,7 +39,7 @@ Typical use::
 For a differential pair, the input axis is one symbol :math:`V_{id}`
 that drives two physical sources::
 
-    V_id = sp.Symbol("V_id", real=True)
+    V_id = cas.Symbol("V_id", real=True)
     result = solve_headroom(
         c,
         sources={"Vinp": Rational(9,10) + V_id/2,
@@ -52,7 +52,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Optional, Union
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.circuit import Circuit
 from sycan.components.active.mosfet_l1 import _MOSFET_L1
@@ -62,7 +62,7 @@ from sycan.components.basic.voltage_source import VoltageSource
 from sycan.mna import build_mna, solve_dc
 
 
-SourceSpec = Union[str, Mapping[str, sp.Expr]]
+SourceSpec = Union[str, Mapping[str, cas.Expr]]
 
 
 @dataclass
@@ -97,11 +97,11 @@ class HeadroomResult:
         each interval edge.
     """
 
-    var: sp.Symbol
-    node_voltages: dict[sp.Symbol, sp.Expr]
-    predicates: dict[str, list[sp.Expr]]
-    boundaries: list[tuple[str, str, sp.Expr]]
-    interval: Optional[tuple[sp.Expr, sp.Expr]]
+    var: cas.Symbol
+    node_voltages: dict[cas.Symbol, cas.Expr]
+    predicates: dict[str, list[cas.Expr]]
+    boundaries: list[tuple[str, str, cas.Expr]]
+    interval: Optional[tuple[cas.Expr, cas.Expr]]
     binding: dict[str, Optional[str]]
 
     def __bool__(self) -> bool:
@@ -141,33 +141,33 @@ class HeadroomResult:
 # ---------------------------------------------------------------------------
 # Saturation-form drain current and the (c1, c2) predicates.
 # ---------------------------------------------------------------------------
-def _sat_current(m, V_GS: sp.Expr, V_DS: sp.Expr, V_BS: Optional[sp.Expr]) -> sp.Expr:
-    pol = sp.Integer(1) if m.polarity == "N" else sp.Integer(-1)
+def _sat_current(m, V_GS: cas.Expr, V_DS: cas.Expr, V_BS: Optional[cas.Expr]) -> cas.Expr:
+    pol = cas.Integer(1) if m.polarity == "N" else cas.Integer(-1)
     V_GS_eff = pol * V_GS
     V_DS_eff = pol * V_DS
     beta = m.mu_n * m.Cox * m.W / m.L
     if isinstance(m, _MOSFET_4T):
         V_SB_eff = -pol * V_BS
-        V_TH = m.V_TH0 + m.gamma * (sp.sqrt(m.phi + V_SB_eff) - sp.sqrt(m.phi))
+        V_TH = m.V_TH0 + m.gamma * (cas.sqrt(m.phi + V_SB_eff) - cas.sqrt(m.phi))
         lam = m.lam
     else:
         V_TH = m.V_TH
         lam = m.lam
-    return pol * sp.Rational(1, 2) * beta * (V_GS_eff - V_TH) ** 2 * (1 + lam * V_DS_eff)
+    return pol * cas.Rational(1, 2) * beta * (V_GS_eff - V_TH) ** 2 * (1 + lam * V_DS_eff)
 
 
 def _saturation_predicates(
     m,
-    V_GS: sp.Expr,
-    V_DS: sp.Expr,
-    V_BS: Optional[sp.Expr],
-) -> tuple[sp.Expr, sp.Expr]:
-    pol = sp.Integer(1) if m.polarity == "N" else sp.Integer(-1)
+    V_GS: cas.Expr,
+    V_DS: cas.Expr,
+    V_BS: Optional[cas.Expr],
+) -> tuple[cas.Expr, cas.Expr]:
+    pol = cas.Integer(1) if m.polarity == "N" else cas.Integer(-1)
     V_GS_eff = pol * V_GS
     V_DS_eff = pol * V_DS
     if isinstance(m, _MOSFET_4T):
         V_SB_eff = -pol * V_BS
-        V_TH = m.V_TH0 + m.gamma * (sp.sqrt(m.phi + V_SB_eff) - sp.sqrt(m.phi))
+        V_TH = m.V_TH0 + m.gamma * (cas.sqrt(m.phi + V_SB_eff) - cas.sqrt(m.phi))
     else:
         V_TH = m.V_TH
     c1 = V_GS_eff - V_TH                 # > 0  : strong inversion
@@ -177,16 +177,16 @@ def _saturation_predicates(
 
 # ---------------------------------------------------------------------------
 # Saturation-only DC residuals — replaces solve_dc's Piecewise stamps so
-# sp.solve can close the system in closed form.
+# cas.solve can close the system in closed form.
 # ---------------------------------------------------------------------------
-def _build_sat_residuals(circuit: Circuit) -> tuple[sp.Matrix, list[sp.Expr]]:
+def _build_sat_residuals(circuit: Circuit) -> tuple[cas.Matrix, list[cas.Expr]]:
     A, x, b = build_mna(circuit, mode="dc")
     residuals = list(A * x - b)
     node_rows = {nm: idx - 1 for nm, idx in circuit._nodes.items()}
 
-    def V(node: str) -> sp.Expr:
+    def V(node: str) -> cas.Expr:
         idx = node_rows.get(node, 0)
-        return x[idx] if idx >= 0 else sp.Integer(0)
+        return x[idx] if idx >= 0 else cas.Integer(0)
 
     for c in circuit.components:
         if not isinstance(c, (_MOSFET_L1, _MOSFET_4T)):
@@ -213,8 +213,8 @@ def _build_sat_residuals(circuit: Circuit) -> tuple[sp.Matrix, list[sp.Expr]]:
 def _resolve_sources(
     circuit: Circuit,
     sources: SourceSpec,
-    var: Optional[sp.Symbol],
-) -> tuple[sp.Symbol, list[tuple[Union[VoltageSource, CurrentSource], sp.Expr]]]:
+    var: Optional[cas.Symbol],
+) -> tuple[cas.Symbol, list[tuple[Union[VoltageSource, CurrentSource], cas.Expr]]]:
     name_to_src = {
         c.name: c
         for c in circuit.components
@@ -227,7 +227,7 @@ def _resolve_sources(
                 f"source {sources!r} not found in circuit "
                 f"(known: {sorted(name_to_src)!r})"
             )
-        v = var if var is not None else sp.Symbol(sources, real=True)
+        v = var if var is not None else cas.Symbol(sources, real=True)
         return v, [(name_to_src[sources], v)]
 
     if not isinstance(sources, Mapping) or not sources:
@@ -235,15 +235,15 @@ def _resolve_sources(
             "sources must be a source name (str) or a non-empty mapping "
             "{source_name: sympy expression in the input variable}"
         )
-    pairs: list[tuple[Union[VoltageSource, CurrentSource], sp.Expr]] = []
-    free_syms: set[sp.Symbol] = set()
+    pairs: list[tuple[Union[VoltageSource, CurrentSource], cas.Expr]] = []
+    free_syms: set[cas.Symbol] = set()
     for name, expr in sources.items():
         if name not in name_to_src:
             raise ValueError(
                 f"source {name!r} not found in circuit "
                 f"(known: {sorted(name_to_src)!r})"
             )
-        e = sp.sympify(expr)
+        e = cas.sympify(expr)
         pairs.append((name_to_src[name], e))
         free_syms |= e.free_symbols
 
@@ -276,17 +276,17 @@ def _resolve_sources(
 # ---------------------------------------------------------------------------
 # Combine per-device boundaries into the widest all-saturation interval.
 # ---------------------------------------------------------------------------
-def _direction_at(expr: sp.Expr, var: sp.Symbol, point: sp.Expr) -> int:
+def _direction_at(expr: cas.Expr, var: cas.Symbol, point: cas.Expr) -> int:
     """Sign of dexpr/dvar at ``point`` — +1 / -1 / 0."""
-    d = sp.simplify(sp.diff(expr, var).subs(var, point))
+    d = cas.simplify(cas.diff(expr, var).subs(var, point))
     try:
         d_num = float(d)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RuntimeError):
         # Symbolic params left over — assume monotone, ask sp for sign.
-        sign = sp.sign(d)
-        if sign == sp.Integer(1):
+        sign = cas.sign(d)
+        if sign == cas.Integer(1):
             return 1
-        if sign == sp.Integer(-1):
+        if sign == cas.Integer(-1):
             return -1
         return 0
     if d_num > 0:
@@ -297,9 +297,9 @@ def _direction_at(expr: sp.Expr, var: sp.Symbol, point: sp.Expr) -> int:
 
 
 def _classify_boundary(
-    expr: sp.Expr,
-    var: sp.Symbol,
-    point: sp.Expr,
+    expr: cas.Expr,
+    var: cas.Symbol,
+    point: cas.Expr,
 ) -> Optional[str]:
     """Is ``point`` a lower bound, upper bound, or neither?"""
     direction = _direction_at(expr, var, point)
@@ -314,23 +314,23 @@ def _classify_boundary(
     return None
 
 
-def _solve_real_roots(expr: sp.Expr, var: sp.Symbol) -> list[sp.Expr]:
+def _solve_real_roots(expr: cas.Expr, var: cas.Symbol) -> list[cas.Expr]:
     # Skip predicates with non-integer powers of ``var`` — sympy's
     # general radical solver typically can't close them and tends to
     # spin indefinitely. The 5T-OTA's M2 / M4 overdrive predicates
     # nest ``sqrt(V_OV5²/2 − x²)`` inside another quadratic; we leave
     # those for the user to solve by hand (or with concrete numerics).
-    for pw in expr.atoms(sp.Pow):
+    for pw in expr.atoms(cas.Pow):
         base, exp = pw.as_base_exp()
         if base.has(var) and not exp.is_Integer:
             return []
     try:
-        sols = sp.solve(sp.Eq(sp.together(expr), 0), var)
-    except (NotImplementedError, sp.PolynomialError):
+        sols = cas.solve(cas.Eq(cas.together(expr), 0), var)
+    except (NotImplementedError, cas.PolynomialError):
         return []
-    out: list[sp.Expr] = []
+    out: list[cas.Expr] = []
     for s in sols:
-        if not isinstance(s, sp.Expr):
+        if not isinstance(s, cas.Expr):
             continue
         # Reject complex / non-real roots when we can prove it.
         if s.is_real is False:
@@ -343,27 +343,27 @@ def _solve_real_roots(expr: sp.Expr, var: sp.Symbol) -> list[sp.Expr]:
         if not s.free_symbols:
             try:
                 val = complex(s)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, RuntimeError):
                 continue
             if abs(val.imag) > 1e-9:
                 continue
-            out.append(sp.Float(val.real))
+            out.append(cas.Float(val.real))
             continue
         out.append(s)
     return out
 
 
 def _interval_from_boundaries(
-    var: sp.Symbol,
-    predicates: dict[str, list[sp.Expr]],
+    var: cas.Symbol,
+    predicates: dict[str, list[cas.Expr]],
 ) -> tuple[
-    Optional[tuple[sp.Expr, sp.Expr]],
-    list[tuple[str, str, sp.Expr]],
+    Optional[tuple[cas.Expr, cas.Expr]],
+    list[tuple[str, str, cas.Expr]],
     dict[str, Optional[str]],
 ]:
-    boundaries: list[tuple[str, str, sp.Expr]] = []
-    lower_candidates: list[tuple[sp.Expr, str]] = []
-    upper_candidates: list[tuple[sp.Expr, str]] = []
+    boundaries: list[tuple[str, str, cas.Expr]] = []
+    lower_candidates: list[tuple[cas.Expr, str]] = []
+    upper_candidates: list[tuple[cas.Expr, str]] = []
 
     for dev, (c1, c2) in predicates.items():
         for label, cond in (("threshold", c1), ("overdrive", c2)):
@@ -396,7 +396,7 @@ def _interval_from_boundaries(
         for r, d in cands:
             try:
                 numeric.append((float(r), r, d))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, RuntimeError):
                 numeric = None  # type: ignore[assignment]
                 break
         if numeric is not None:
@@ -404,8 +404,8 @@ def _interval_from_boundaries(
             return picked[1], picked[2]
         # Symbolic — return the Max/Min expression with no clear binder.
         if op is max:
-            return sp.Max(*[r for r, _ in cands]), None
-        return sp.Min(*[r for r, _ in cands]), None
+            return cas.Max(*[r for r, _ in cands]), None
+        return cas.Min(*[r for r, _ in cands]), None
 
     low, low_dev = _pick_extreme(lower_candidates, max)
     high, high_dev = _pick_extreme(upper_candidates, min)
@@ -416,9 +416,9 @@ def _interval_from_boundaries(
         # One side is unbounded within the analysis — return whichever
         # bound exists, leaving the other open.
         if low is not None and high is None:
-            return (low, sp.oo), boundaries, binding
+            return (low, cas.oo), boundaries, binding
         if high is not None and low is None:
-            return (-sp.oo, high), boundaries, binding
+            return (-cas.oo, high), boundaries, binding
         return None, boundaries, binding
 
     # Numeric sanity check — if both sides are numbers and crossed, the
@@ -426,7 +426,7 @@ def _interval_from_boundaries(
     try:
         if float(low) >= float(high):
             return None, boundaries, binding
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RuntimeError):
         pass
     return (low, high), boundaries, binding
 
@@ -437,9 +437,9 @@ def _interval_from_boundaries(
 def solve_headroom(
     circuit: Circuit,
     sources: SourceSpec,
-    var: Optional[sp.Symbol] = None,
+    var: Optional[cas.Symbol] = None,
     *,
-    op_point: Optional[Mapping[sp.Symbol, sp.Expr]] = None,
+    op_point: Optional[Mapping[cas.Symbol, cas.Expr]] = None,
     simplify: bool = True,
 ) -> HeadroomResult:
     """Symbolic headroom: input range that keeps every MOSFET in saturation.
@@ -462,15 +462,15 @@ def solve_headroom(
         common to all expressions, or pass it explicitly to override.
     op_point
         Optional pre-computed operating-point map ``{V(node): expr}``.
-        When provided, the analysis skips ``sp.solve`` of the
+        When provided, the analysis skips ``cas.solve`` of the
         saturation-form DC system and uses these values directly to
         substitute into the predicates. Useful for circuits whose KCLs
-        ``sp.solve`` can't close in one shot (5T-OTA with a current
+        ``cas.solve`` can't close in one shot (5T-OTA with a current
         mirror): derive the operating point yourself with sequential
         elimination and feed it in. Only the node voltages your
         predicates actually reference need to be present.
     simplify
-        Run ``sp.simplify`` on the operating-point voltages and the
+        Run ``cas.simplify`` on the operating-point voltages and the
         saturation predicates before returning them.
 
     Returns
@@ -493,19 +493,19 @@ def solve_headroom(
     var, pairs = _resolve_sources(circuit, sources, var)
 
     if op_point is not None:
-        node_voltages = {sp.sympify(k): sp.sympify(v) for k, v in op_point.items()}
+        node_voltages = {cas.sympify(k): cas.sympify(v) for k, v in op_point.items()}
     else:
         originals = [(src, src.value) for src, _ in pairs]
         try:
             for src, expr in pairs:
-                src.value = sp.sympify(expr)
+                src.value = cas.sympify(expr)
             x, residuals = _build_sat_residuals(circuit)
             try:
-                sols = sp.solve(residuals, list(x), dict=True)
-            except (NotImplementedError, sp.PolynomialError) as exc:
+                sols = cas.solve(residuals, list(x), dict=True)
+            except (NotImplementedError, cas.PolynomialError) as exc:
                 raise RuntimeError(
                     "could not solve the saturation-form DC system in "
-                    "closed form (sp.solve gave up). For circuits with "
+                    "closed form (cas.solve gave up). For circuits with "
                     "strongly coupled nonlinear feedback (e.g. current "
                     "mirrors), derive the operating point separately by "
                     "sequential elimination and pass it via op_point=. "
@@ -525,24 +525,24 @@ def solve_headroom(
     # Build saturation predicates per device, substituting the solved
     # node voltages so they end up as functions of ``var`` (and any
     # leftover symbolic params).
-    predicates: dict[str, list[sp.Expr]] = {}
+    predicates: dict[str, list[cas.Expr]] = {}
     for m in mosfets:
-        V_g = node_voltages.get(sp.Symbol(f"V({m.gate})"), sp.Integer(0)) if m.gate != "0" else sp.Integer(0)
-        V_d = node_voltages.get(sp.Symbol(f"V({m.drain})"), sp.Integer(0)) if m.drain != "0" else sp.Integer(0)
-        V_s = node_voltages.get(sp.Symbol(f"V({m.source})"), sp.Integer(0)) if m.source != "0" else sp.Integer(0)
+        V_g = node_voltages.get(cas.Symbol(f"V({m.gate})"), cas.Integer(0)) if m.gate != "0" else cas.Integer(0)
+        V_d = node_voltages.get(cas.Symbol(f"V({m.drain})"), cas.Integer(0)) if m.drain != "0" else cas.Integer(0)
+        V_s = node_voltages.get(cas.Symbol(f"V({m.source})"), cas.Integer(0)) if m.source != "0" else cas.Integer(0)
         if isinstance(m, _MOSFET_4T):
-            V_b = node_voltages.get(sp.Symbol(f"V({m.bulk})"), sp.Integer(0)) if m.bulk != "0" else sp.Integer(0)
+            V_b = node_voltages.get(cas.Symbol(f"V({m.bulk})"), cas.Integer(0)) if m.bulk != "0" else cas.Integer(0)
             V_BS = V_b - V_s
         else:
             V_BS = None
         c1, c2 = _saturation_predicates(m, V_g - V_s, V_d - V_s, V_BS)
         if simplify:
-            c1 = sp.simplify(c1)
-            c2 = sp.simplify(c2)
+            c1 = cas.simplify(c1)
+            c2 = cas.simplify(c2)
         predicates[m.name] = [c1, c2]
 
     if simplify:
-        node_voltages = {k: sp.simplify(v) for k, v in node_voltages.items()}
+        node_voltages = {k: cas.simplify(v) for k, v in node_voltages.items()}
 
     interval, boundaries, binding = _interval_from_boundaries(var, predicates)
     return HeadroomResult(

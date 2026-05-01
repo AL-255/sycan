@@ -27,7 +27,7 @@ Closed-form expectations:
 * **Z_out**: R_L / (1 + (g_m + g_ds) R_L) (~ 1/g_m — the classic low
                                            source-follower output Z)
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_ac, solve_dc, solve_impedance
 
@@ -72,50 +72,50 @@ M1 vdd g s NMOS_L1 mu_n Cox W L V_TH lam V_GS_op V_DS_op
 
 def _g_m_g_ds(mu_n, Cox, W, L, V_TH, lam, V_GS_op, V_DS_op):
     g_m = mu_n * Cox * (W / L) * (V_GS_op - V_TH) * (1 + lam * V_DS_op)
-    g_ds = sp.Rational(1, 2) * mu_n * Cox * (W / L) * (V_GS_op - V_TH) ** 2 * lam
+    g_ds = cas.Rational(1, 2) * mu_n * Cox * (W / L) * (V_GS_op - V_TH) ** 2 * lam
     return g_m, g_ds
 
 
 # ---------------------------------------------------------------------------
 
 def test_cd_dc_drain_current():
-    V_G, V_S, V_D, mu_n, Cox, W, L, V_TH, lam = sp.symbols(
+    V_G, V_S, V_D, mu_n, Cox, W, L, V_TH, lam = cas.symbols(
         "V_G V_S V_D mu_n Cox W L V_TH lam"
     )
     sol = solve_dc(parse(_DC))
 
     V_GS = V_G - V_S
     V_DS = V_D - V_S
-    I_D = sp.Rational(1, 2) * mu_n * Cox * (W / L) * (V_GS - V_TH) ** 2 * (1 + lam * V_DS)
-    assert sp.simplify(sol[sp.Symbol("I(Vd)")] + I_D) == 0
+    I_D = cas.Rational(1, 2) * mu_n * Cox * (W / L) * (V_GS - V_TH) ** 2 * (1 + lam * V_DS)
+    assert cas.simplify(sol[cas.Symbol("I(Vd)")] + I_D) == 0
 
 
 def test_cd_ac_voltage_gain():
-    mu_n, Cox, W, L, V_TH, lam, R_L, VDD, V_GS_op, V_DS_op, v_in = sp.symbols(
+    mu_n, Cox, W, L, V_TH, lam, R_L, VDD, V_GS_op, V_DS_op, v_in = cas.symbols(
         "mu_n Cox W L V_TH lam R_L VDD V_GS_op V_DS_op v_in"
     )
     sol = solve_ac(parse(_AC_GAIN))
 
     g_m, g_ds = _g_m_g_ds(mu_n, Cox, W, L, V_TH, lam, V_GS_op, V_DS_op)
     expected = g_m * v_in * R_L / (1 + (g_m + g_ds) * R_L)
-    assert sp.simplify(sol[sp.Symbol("V(s)")] - expected) == 0
+    assert cas.simplify(sol[cas.Symbol("V(s)")] - expected) == 0
 
 
 def test_cd_input_impedance():
-    mu_n, Cox, W, L, V_TH, lam, R_L, VDD, V_GS_op, V_DS_op, C_gd = sp.symbols(
+    mu_n, Cox, W, L, V_TH, lam, R_L, VDD, V_GS_op, V_DS_op, C_gd = cas.symbols(
         "mu_n Cox W L V_TH lam R_L VDD V_GS_op V_DS_op C_gd"
     )
     Z_in = solve_impedance(parse(_ZIN), "P_in", termination="auto")
-    s = sp.Symbol("s")
+    s = cas.Symbol("s")
     expected = 1 / (s * C_gd)
-    assert sp.simplify(Z_in - expected) == 0
+    assert cas.simplify(Z_in - expected) == 0
 
 
 def test_cd_output_impedance():
-    mu_n, Cox, W, L, V_TH, lam, R_L, VDD, V_GS_op, V_DS_op = sp.symbols(
+    mu_n, Cox, W, L, V_TH, lam, R_L, VDD, V_GS_op, V_DS_op = cas.symbols(
         "mu_n Cox W L V_TH lam R_L VDD V_GS_op V_DS_op"
     )
     Z_out = solve_impedance(parse(_ZOUT), "P_out", termination="auto")
     g_m, g_ds = _g_m_g_ds(mu_n, Cox, W, L, V_TH, lam, V_GS_op, V_DS_op)
     expected = R_L / (1 + (g_m + g_ds) * R_L)
-    assert sp.simplify(sp.together(Z_out - expected)) == 0
+    assert cas.simplify(cas.together(Z_out - expected)) == 0

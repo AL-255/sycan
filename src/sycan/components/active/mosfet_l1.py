@@ -37,12 +37,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B
 
 # Long-channel channel-thermal-noise excess factor (γ ≈ 2/3 in saturation).
-_NOISE_GAMMA = sp.Rational(2, 3)
+_NOISE_GAMMA = cas.Rational(2, 3)
 
 
 @dataclass
@@ -51,16 +51,16 @@ class _MOSFET_L1(Component):
     drain: str
     gate: str
     source: str
-    mu_n: sp.Expr
-    Cox: sp.Expr
-    W: sp.Expr
-    L: sp.Expr
-    V_TH: sp.Expr  # positive magnitude for both polarities
-    lam: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    C_gs: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    C_gd: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    V_GS_op: Optional[sp.Expr] = None
-    V_DS_op: Optional[sp.Expr] = None
+    mu_n: cas.Expr
+    Cox: cas.Expr
+    W: cas.Expr
+    L: cas.Expr
+    V_TH: cas.Expr  # positive magnitude for both polarities
+    lam: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    C_gs: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    C_gd: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    V_GS_op: Optional[cas.Expr] = None
+    V_DS_op: Optional[cas.Expr] = None
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("drain", "gate", "source")
@@ -74,15 +74,15 @@ class _MOSFET_L1(Component):
                 "_MOSFET_L1 is abstract; instantiate NMOS_L1 or PMOS_L1."
             )
         if self.V_GS_op is None:
-            self.V_GS_op = sp.Symbol(f"V_GS_op_{self.name}")
+            self.V_GS_op = cas.Symbol(f"V_GS_op_{self.name}")
         if self.V_DS_op is None:
-            self.V_DS_op = sp.Symbol(f"V_DS_op_{self.name}")
+            self.V_DS_op = cas.Symbol(f"V_DS_op_{self.name}")
         for attr in (
             "mu_n", "Cox", "W", "L", "V_TH",
             "lam", "C_gs", "C_gd",
             "V_GS_op", "V_DS_op",
         ):
-            setattr(self, attr, sp.sympify(getattr(self, attr)))
+            setattr(self, attr, cas.sympify(getattr(self, attr)))
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def noise_sources(self) -> list[NoiseSource]:
@@ -101,16 +101,16 @@ class _MOSFET_L1(Component):
         return out
 
     @property
-    def _pol(self) -> sp.Expr:
-        return sp.Integer(1) if self.polarity == "N" else sp.Integer(-1)
+    def _pol(self) -> cas.Expr:
+        return cas.Integer(1) if self.polarity == "N" else cas.Integer(-1)
 
-    def _I_D_expr(self, V_GS: sp.Expr, V_DS: sp.Expr) -> sp.Expr:
+    def _I_D_expr(self, V_GS: cas.Expr, V_DS: cas.Expr) -> cas.Expr:
         pol = self._pol
         V_GS_eff = pol * V_GS
         V_DS_eff = pol * V_DS
         V_ov = V_GS_eff - self.V_TH
         I_D_mag = (
-            sp.Rational(1, 2)
+            cas.Rational(1, 2)
             * self.mu_n * self.Cox * (self.W / self.L)
             * V_ov ** 2
             * (1 + self.lam * V_DS_eff)
@@ -132,7 +132,7 @@ class _MOSFET_L1(Component):
         if isinstance(v, (int, float)):
             return float(v)
         try:
-            return float(sp.sympify(v))
+            return float(cas.sympify(v))
         except (TypeError, ValueError) as exc:  # pragma: no cover — guard
             raise TypeError(
                 f"cannot convert {v!r} to a float; substitute every "
@@ -194,12 +194,12 @@ class _MOSFET_L1(Component):
             I_mag = 0.5 * beta * V_ov ** 2 * (1.0 + lam * V_DS_eff)
         return pol * I_mag
 
-    def _small_signal_params(self) -> tuple[sp.Expr, sp.Expr]:
-        _vgs, _vds = sp.Dummy("vgs"), sp.Dummy("vds")
+    def _small_signal_params(self) -> tuple[cas.Expr, cas.Expr]:
+        _vgs, _vds = cas.Dummy("vgs"), cas.Dummy("vds")
         I_D = self._I_D_expr(_vgs, _vds)
         sub = {_vgs: self.V_GS_op, _vds: self.V_DS_op}
-        g_m = sp.diff(I_D, _vgs).subs(sub)
-        g_ds = sp.diff(I_D, _vds).subs(sub)
+        g_m = cas.diff(I_D, _vgs).subs(sub)
+        g_ds = cas.diff(I_D, _vds).subs(sub)
         return g_m, g_ds
 
     def stamp(self, ctx: StampContext) -> None:
@@ -252,9 +252,9 @@ class _MOSFET_L1(Component):
         g = ctx.n(self.gate)
         src = ctx.n(self.source)
 
-        V_d = ctx.x[d] if d >= 0 else sp.Integer(0)
-        V_g = ctx.x[g] if g >= 0 else sp.Integer(0)
-        V_s = ctx.x[src] if src >= 0 else sp.Integer(0)
+        V_d = ctx.x[d] if d >= 0 else cas.Integer(0)
+        V_g = ctx.x[g] if g >= 0 else cas.Integer(0)
+        V_s = ctx.x[src] if src >= 0 else cas.Integer(0)
 
         I_D = self._I_D_expr(V_g - V_s, V_d - V_s)
         if d >= 0:

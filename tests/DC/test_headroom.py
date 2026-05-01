@@ -7,7 +7,7 @@ sympy interval. So we test the *expressions* — not numeric edges.
 """
 from __future__ import annotations
 
-import sympy as sp
+from sycan import cas as cas
 import pytest
 
 from sycan import Circuit, parse, solve_headroom
@@ -24,7 +24,7 @@ from sycan.headroom import HeadroomResult
 # The upper-edge predicate solves into V_in <= V_TH + (sqrt(1+2 β R_L V_DD) - 1)/(β R_L).
 # ---------------------------------------------------------------------------
 def test_resistor_load_cs_amp_yields_closed_form_interval():
-    V_DD, V_THn, beta, R_L = sp.symbols("V_DD V_THn beta R_L", positive=True)
+    V_DD, V_THn, beta, R_L = cas.symbols("V_DD V_THn beta R_L", positive=True)
     c = Circuit()
     c.add_vsource("Vdd", "VDD", "0", V_DD)
     c.add_vsource("Vin", "in",  "0", 0)
@@ -36,26 +36,26 @@ def test_resistor_load_cs_amp_yields_closed_form_interval():
 
     r = solve_headroom(c, "Vin")
     assert isinstance(r, HeadroomResult)
-    assert r.var == sp.Symbol("Vin", real=True)
+    assert r.var == cas.Symbol("Vin", real=True)
 
     # Operating-point V(out) — quadratic in V_in.
-    V_out = r.node_voltages[sp.Symbol("V(out)")]
-    expected_Vout = V_DD - sp.Rational(1, 2) * R_L * beta * (sp.Symbol("Vin", real=True) - V_THn) ** 2
-    assert sp.simplify(V_out - expected_Vout) == 0
+    V_out = r.node_voltages[cas.Symbol("V(out)")]
+    expected_Vout = V_DD - cas.Rational(1, 2) * R_L * beta * (cas.Symbol("Vin", real=True) - V_THn) ** 2
+    assert cas.simplify(V_out - expected_Vout) == 0
 
     # Threshold predicate -> V_in - V_THn (must be > 0).
     c1, c2 = r.predicates["MN"]
-    assert sp.simplify(c1 - (sp.Symbol("Vin", real=True) - V_THn)) == 0
+    assert cas.simplify(c1 - (cas.Symbol("Vin", real=True) - V_THn)) == 0
 
     # Interval: lower edge = V_THn (threshold), upper edge has the
     # sqrt(1 + 2 β R_L V_DD) signature.
     assert r.interval is not None
     lo, hi = r.interval
-    upper_expected = V_THn + (sp.sqrt(2 * R_L * V_DD * beta + 1) - 1) / (R_L * beta)
-    assert sp.simplify(hi - upper_expected) == 0
+    upper_expected = V_THn + (cas.sqrt(2 * R_L * V_DD * beta + 1) - 1) / (R_L * beta)
+    assert cas.simplify(hi - upper_expected) == 0
     # The lower edge resolves to V_THn (the threshold), possibly wrapped
     # in a Max(...) — check that V_THn is one of the picks.
-    assert lo == V_THn or (isinstance(lo, sp.Max) and V_THn in lo.args)
+    assert lo == V_THn or (isinstance(lo, cas.Max) and V_THn in lo.args)
 
 
 def test_circuit_is_not_mutated_by_solve_headroom():
@@ -80,10 +80,10 @@ MN  out in 0   NMOS_L1 8e-4 1 1 1 0.45 0
 # inferred correctly.
 # ---------------------------------------------------------------------------
 def test_group_source_spec_with_inferred_var():
-    V_DD, V_THn, beta, R_L, V_cm = sp.symbols(
+    V_DD, V_THn, beta, R_L, V_cm = cas.symbols(
         "V_DD V_THn beta R_L V_cm", positive=True
     )
-    V_id = sp.Symbol("V_id", real=True)
+    V_id = cas.Symbol("V_id", real=True)
 
     c = Circuit()
     c.add_vsource("Vdd",  "VDD", "0", V_DD)
@@ -111,12 +111,12 @@ def test_group_source_spec_with_inferred_var():
     # V_cm - V_id/2 - V_THn.
     c1_m1 = r.predicates["M1"][0]
     c1_m2 = r.predicates["M2"][0]
-    assert sp.simplify(c1_m1 - (V_cm + V_id / 2 - V_THn)) == 0
-    assert sp.simplify(c1_m2 - (V_cm - V_id / 2 - V_THn)) == 0
+    assert cas.simplify(c1_m1 - (V_cm + V_id / 2 - V_THn)) == 0
+    assert cas.simplify(c1_m2 - (V_cm - V_id / 2 - V_THn)) == 0
 
 
 def test_group_source_spec_rejects_unknown_source():
-    V_id = sp.Symbol("V_id", real=True)
+    V_id = cas.Symbol("V_id", real=True)
     netlist = """one MOSFET
 Vdd VDD 0 1.8
 Vin in 0 0
@@ -155,14 +155,14 @@ MN out in 0 NMOS_L1 8e-4 1 1 1 0.45 0
 
 
 # ---------------------------------------------------------------------------
-# op_point injection — for circuits sp.solve cannot close in one shot.
+# op_point injection — for circuits cas.solve cannot close in one shot.
 # The OTA-style flow: derive V(node)(x) yourself by sequential elimination,
 # pass the dict in, and solve_headroom does the predicate / boundary phase
 # entirely symbolically.
 # ---------------------------------------------------------------------------
 def test_op_point_injection_skips_sp_solve():
-    V_DD, V_TH, beta, R_L = sp.symbols("V_DD V_TH beta R_L", positive=True)
-    V_in = sp.Symbol("V_in", real=True)
+    V_DD, V_TH, beta, R_L = cas.symbols("V_DD V_TH beta R_L", positive=True)
+    V_in = cas.Symbol("V_in", real=True)
 
     c = Circuit()
     c.add_vsource("Vdd", "VDD", "0", V_DD)
@@ -173,25 +173,25 @@ def test_op_point_injection_skips_sp_solve():
 
     # Hand-derived operating point (V_out = V_DD − R_L · I_D_sat).
     op = {
-        sp.Symbol("V(VDD)"): V_DD,
-        sp.Symbol("V(in)"):  V_in,
-        sp.Symbol("V(out)"): V_DD - sp.Rational(1, 2) * R_L * beta * (V_in - V_TH) ** 2,
+        cas.Symbol("V(VDD)"): V_DD,
+        cas.Symbol("V(in)"):  V_in,
+        cas.Symbol("V(out)"): V_DD - cas.Rational(1, 2) * R_L * beta * (V_in - V_TH) ** 2,
     }
     r = solve_headroom(c, "Vin", var=V_in, op_point=op)
 
     # Predicates substitute the injected V(out), so MN.overdrive becomes
     # V_DD − (1/2) β R_L (V_in − V_TH)² + V_TH − V_in.
     c2 = r.predicates["MN"][1]
-    expected = (V_DD - sp.Rational(1, 2) * R_L * beta * (V_in - V_TH) ** 2
+    expected = (V_DD - cas.Rational(1, 2) * R_L * beta * (V_in - V_TH) ** 2
                 + V_TH - V_in)
-    assert sp.simplify(c2 - expected) == 0
+    assert cas.simplify(c2 - expected) == 0
 
     # And the upper edge from solving c2 = 0 lands on the same closed
     # form as the no-op-point path.
-    upper_expected = V_TH + (sp.sqrt(2 * R_L * V_DD * beta + 1) - 1) / (R_L * beta)
+    upper_expected = V_TH + (cas.sqrt(2 * R_L * V_DD * beta + 1) - 1) / (R_L * beta)
     assert r.interval is not None
     _, hi = r.interval
-    assert sp.simplify(hi - upper_expected) == 0
+    assert cas.simplify(hi - upper_expected) == 0
 
 
 def test_constant_only_dict_raises():
@@ -205,4 +205,4 @@ MN out in 0 NMOS_L1 8e-4 1 1 1 0.45 0
 """
     c = parse(netlist)
     with pytest.raises(ValueError, match="all source expressions are constants"):
-        solve_headroom(c, {"Vin": sp.Rational(7, 10)})
+        solve_headroom(c, {"Vin": cas.Rational(7, 10)})

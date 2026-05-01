@@ -22,7 +22,7 @@ trick that *defines* this LNA topology is independent of the device
 model. (Replace VCCS with NMOS_L1 and the same condition falls out,
 just buried inside the long-channel g_m expression.)
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, autodraw, solve_ac
 from sycan.components.basic import (
@@ -30,12 +30,12 @@ from sycan.components.basic import (
 )
 
 # --- Symbols -----------------------------------------------------------
-RS_, R1_, R2_, IDC_ = sp.symbols("RS R1 R2 IDC", positive=True)
-VDD_v, VBIAS_v = sp.symbols("VDD VBIAS", positive=True)
-gm1, gm2 = sp.symbols("g_m1 g_m2", positive=True)
+RS_, R1_, R2_, IDC_ = cas.symbols("RS R1 R2 IDC", positive=True)
+VDD_v, VBIAS_v = cas.symbols("VDD VBIAS", positive=True)
+gm1, gm2 = cas.symbols("g_m1 g_m2", positive=True)
 
 
-def build(*, v_sig_ac: sp.Expr = 0, probe: str | None = None) -> Circuit:
+def build(*, v_sig_ac: cas.Expr = 0, probe: str | None = None) -> Circuit:
     """Construct the LNA. ``v_sig_ac`` drives V_SIG; ``probe`` injects a
     1 A AC current source mimicking one of the noise sources."""
     c = Circuit("noise-cancelling LNA")
@@ -70,15 +70,15 @@ def build(*, v_sig_ac: sp.Expr = 0, probe: str | None = None) -> Circuit:
     return c
 
 
-def H(probe: str) -> sp.Expr:
+def H(probe: str) -> cas.Expr:
     """Trans-impedance from a unit noise-current at ``probe`` to V_diff."""
     sol = solve_ac(build(probe=probe))
-    return sp.factor(sp.simplify(sol[sp.Symbol("V(vdiff)")]))
+    return cas.factor(cas.simplify(sol[cas.Symbol("V(vdiff)")]))
 
 
 # --- 1. Differential signal gain --------------------------------------
-H_sig = sp.factor(sp.simplify(
-    solve_ac(build(v_sig_ac=1))[sp.Symbol("V(vdiff)")]
+H_sig = cas.factor(cas.simplify(
+    solve_ac(build(v_sig_ac=1))[cas.Symbol("V(vdiff)")]
 ))
 print(f"V(vdiff) / V_sig  =  {H_sig}\n")
 
@@ -93,19 +93,19 @@ print(f"H_R1                           =  {H_R1}")
 print(f"H_R2                           =  {H_R2}\n")
 
 # --- 3. Cancellation condition for M1 ---------------------------------
-numer = sp.factor(sp.together(H_M1).as_numer_denom()[0])
+numer = cas.factor(cas.together(H_M1).as_numer_denom()[0])
 print(f"H_M1 numerator (must vanish):   {numer}")
-cond = sp.solve(numer, R2_)
+cond = cas.solve(numer, R2_)
 assert cond, "no cancellation solution found"
-R2_canc = sp.simplify(cond[0])
+R2_canc = cas.simplify(cond[0])
 print(f"Cancellation condition:         R2 = {R2_canc}")
 print(f"Equivalently:                   g_m2 · R2 · RS = R1\n")
 
 # --- 4. Sanity-check — at the cancellation R2, M1 vanishes; the rest persist.
-H_M1_at_cond = sp.simplify(H_M1.subs(R2_, R2_canc))
-H_sig_at_cond = sp.simplify(H_sig.subs(R2_, R2_canc))
+H_M1_at_cond = cas.simplify(H_M1.subs(R2_, R2_canc))
+H_sig_at_cond = cas.simplify(H_sig.subs(R2_, R2_canc))
 print(f"H_M1  @ R2 = R1/(g_m2·RS):  {H_M1_at_cond}")
-print(f"signal gain @ same R2:       {sp.factor(H_sig_at_cond)}")
+print(f"signal gain @ same R2:       {cas.factor(H_sig_at_cond)}")
 print("\nM1 thermal noise cancels in V_diff while the *signal* still")
 print("propagates through both M1 and M2 — that is the noise-canceller's trick.")
 

@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSpec, StampContext
 
@@ -50,16 +50,16 @@ class TLINE(Component):
     n_in_m: str
     n_out_p: str
     n_out_m: str
-    Z0: sp.Expr
-    td: sp.Expr
+    Z0: cas.Expr
+    td: cas.Expr
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("n_in_p", "n_in_m", "n_out_p", "n_out_m")
     SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
-        self.Z0 = sp.sympify(self.Z0)
-        self.td = sp.sympify(self.td)
+        self.Z0 = cas.sympify(self.Z0)
+        self.td = cas.sympify(self.td)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     # DC: short the inner conductor with an auxiliary branch current.
@@ -82,15 +82,15 @@ class TLINE(Component):
     def _stamp_ac(self, ctx: StampContext) -> None:
         s = ctx.s
         theta = s * self.td
-        Y_self = sp.cosh(theta) / (self.Z0 * sp.sinh(theta))   # coth(sτ)/Z0
-        Y_mut = -1 / (self.Z0 * sp.sinh(theta))                # -csch(sτ)/Z0
+        Y_self = cas.cosh(theta) / (self.Z0 * cas.sinh(theta))   # coth(sτ)/Z0
+        Y_mut = -1 / (self.Z0 * cas.sinh(theta))                # -csch(sτ)/Z0
 
         p1 = ctx.n(self.n_in_p)
         m1 = ctx.n(self.n_in_m)
         p2 = ctx.n(self.n_out_p)
         m2 = ctx.n(self.n_out_m)
 
-        def add(row: int, col: int, val: sp.Expr) -> None:
+        def add(row: int, col: int, val: cas.Expr) -> None:
             if row >= 0 and col >= 0:
                 ctx.A[row, col] += val
 

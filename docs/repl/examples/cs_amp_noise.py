@@ -14,15 +14,15 @@ so
 
 with γ = 2/3 (long-channel saturation).
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, T_kelvin, autodraw, k_B, solve_noise
 from sycan.components.active import NMOS_L1
 from sycan.components.basic import Resistor, VoltageSource
 
-mu_n, Cox, W, L = sp.symbols("mu_n Cox W L", positive=True)
-V_TH, V_GS_op, V_DS_op = sp.symbols("V_TH V_GS_op V_DS_op", positive=True)
-R_L, VDD = sp.symbols("R_L VDD", positive=True)
+mu_n, Cox, W, L = cas.symbols("mu_n Cox W L", positive=True)
+V_TH, V_GS_op, V_DS_op = cas.symbols("V_TH V_GS_op V_DS_op", positive=True)
+R_L, VDD = cas.symbols("R_L VDD", positive=True)
 
 c = Circuit("cs amp noise")
 c.add(VoltageSource("Vdd", "VDD", "0", value=VDD, ac_value=0))
@@ -39,15 +39,15 @@ c.add(
 
 S_total, contribs = solve_noise(c, "drain", simplify=True)
 g_m = mu_n * Cox * (W / L) * (V_GS_op - V_TH)
-gamma = sp.Rational(2, 3)
+gamma = cas.Rational(2, 3)
 expected = 4 * k_B * T_kelvin * R_L * (1 + gamma * g_m * R_L)
 
 print("Per-source PSD contributions:")
 for name, expr in contribs.items():
-    print(f"  {name:>18}  =  {sp.simplify(expr)}")
+    print(f"  {name:>18}  =  {cas.simplify(expr)}")
 print()
-print(f"Total S_V_out      =  {sp.simplify(S_total)}")
-print(f"Closed-form check  =  {sp.simplify(expected)}")
-assert sp.simplify(S_total - expected) == 0
+print(f"Total S_V_out      =  {cas.simplify(S_total)}")
+print(f"Closed-form check  =  {cas.simplify(expected)}")
+assert cas.simplify(S_total - expected) == 0
 
 autodraw(c)

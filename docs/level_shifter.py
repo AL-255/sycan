@@ -38,7 +38,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, build_residuals
 
@@ -75,7 +75,7 @@ circuit.add_vsource("VINN", "IN_N", "0", V_IN_val)
 
 # Keep V_TH per-device symbolic so each Monte-Carlo trial can re-sample
 # the four thresholds without rebuilding the residual system.
-vth_syms = {n: sp.Symbol(f"V_TH_{n}") for n in ("MP0", "MP1", "MN0", "MN1")}
+vth_syms = {n: cas.Symbol(f"V_TH_{n}") for n in ("MP0", "MP1", "MN0", "MN1")}
 
 _pmos_kw = dict(mu_n=mu_p_val, Cox=Cox_val, W=W_p_val, L=L_val, lam=lam_val)
 _nmos_kw = dict(mu_n=mu_n_val, Cox=Cox_val, W=W_n_val, L=L_val, lam=lam_val)
@@ -104,10 +104,10 @@ print(f"Unknowns ({len(unknowns)}): {[str(u) for u in unknowns]}")
 vth_params = [vth_syms["MP0"], vth_syms["MP1"], vth_syms["MN0"], vth_syms["MN1"]]
 all_args = unknowns + vth_params
 
-f_np = sp.lambdify(all_args, residuals, modules="numpy")
-J_np = sp.lambdify(
+f_np = cas.lambdify(all_args, residuals, modules="numpy")
+J_np = cas.lambdify(
     all_args,
-    sp.Matrix(residuals).jacobian(unknowns),
+    cas.Matrix(residuals).jacobian(unknowns),
     modules="numpy",
 )
 
@@ -145,8 +145,8 @@ def newton(x0: np.ndarray, vth: np.ndarray,
 rng = np.random.default_rng(42)
 N_TRIALS = 10000
 
-out_p_idx = unknowns.index(sp.Symbol("V(OUT_P)"))
-out_n_idx = unknowns.index(sp.Symbol("V(OUT_N)"))
+out_p_idx = unknowns.index(cas.Symbol("V(OUT_P)"))
+out_n_idx = unknowns.index(cas.Symbol("V(OUT_N)"))
 
 outs_p: list[float] = []
 outs_n: list[float] = []

@@ -19,12 +19,12 @@ Mapping each block onto a sycan primitive:
 * VCO  (V_ctrl → φ:  K_VCO / s)        →  ``Integrator``  (k = K_VCO)
 * divider 1/N is folded into the summer weights
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, autodraw, solve_ac
 
-s = sp.Symbol("s")
-phi_ref, K_d, K_VCO, tau_z, tau_p, N = sp.symbols(
+s = cas.Symbol("s")
+phi_ref, K_d, K_VCO, tau_z, tau_p, N = cas.symbols(
     "phi_ref K_d K_VCO tau_z tau_p N", positive=True,
 )
 
@@ -39,12 +39,12 @@ c.add_transfer_function("F", "pd", "0", "ctrl", "0", H=F)   # PI Loop Filter
 c.add_integrator("VCO", "ctrl", "0", "out", "0", k=K_VCO)   # VCO
 
 sol = solve_ac(c)
-H = sp.cancel(sp.simplify(sol[sp.Symbol("V(out)")] / phi_ref))
+H = cas.cancel(cas.simplify(sol[cas.Symbol("V(out)")] / phi_ref))
 
-print(f"$$H(s) = \\frac{{\\phi_{{out}}(s)}}{{\\phi_{{ref}}(s)}} = {sp.latex(H)}$$")
+print(f"$$H(s) = \\frac{{\\phi_{{out}}(s)}}{{\\phi_{{ref}}(s)}} = {cas.latex(H)}$$")
 print()
 print("DC gain:")
-print(f"    H(0) = {sp.simplify(H.subs(s, 0))}")
+print(f"    H(0) = {cas.simplify(H.subs(s, 0))}")
 print()
 print("(Type-II loop locks with zero static phase error → H(0) = N.)")
 

@@ -22,7 +22,10 @@ With `uv <https://docs.astral.sh/uv/>`_:
 
    uv add sycan
 
-The only hard runtime dependency is ``sympy``. The schematic glyphs that
+The only hard runtime dependency is ``sympy`` — sycan reaches the CAS
+through its own :mod:`sycan.cas` wrapper, so the underlying library can
+be swapped via :func:`sycan.cas.select_backend` (sympy is the default
+and currently the only implemented backend). The schematic glyphs that
 :func:`~sycan.autodraw` uses are bundled inside the wheel, so no
 post-install configuration is needed.
 
@@ -40,16 +43,17 @@ Build a circuit
 There are two equivalent ways to describe a netlist:
 
 **1. The Python API.** Start with a :class:`~sycan.Circuit`, then add
-components by name. Symbolic values come from :mod:`sympy`, so any
-parameter can be a free symbol or a closed-form expression:
+components by name. Symbolic values come from :mod:`sycan.cas` (the
+CAS proxy, sympy by default), so any parameter can be a free symbol or
+a closed-form expression:
 
 .. code-block:: python
 
-   import sympy as sp
+   from sycan import cas as cas
    from sycan import Circuit
    from sycan.components.basic import Resistor, VoltageSource
 
-   Vin, R1_, R2_ = sp.symbols("Vin R1 R2", positive=True)
+   Vin, R1_, R2_ = cas.symbols("Vin R1 R2", positive=True)
 
    c = Circuit("voltage divider")
    c.add(VoltageSource("V1", "in", "0", Vin))
@@ -87,18 +91,19 @@ closed-form expression. For the divider above:
 
 .. code-block:: python
 
-   import sympy as sp
+   from sycan import cas as cas
    from sycan import solve_dc
 
    sol = solve_dc(c)
-   V_out = sol[sp.Symbol("V(out)")]
-   print(sp.simplify(V_out))   # R2*Vin / (R1 + R2)
+   V_out = sol[cas.Symbol("V(out)")]
+   print(cas.simplify(V_out))   # R2*Vin / (R1 + R2)
 
 Linear circuits go through symbolic LU. When any component reports
-``has_nonlinear`` (MOSFETs, BJTs, diodes), the solver instead calls
-:func:`sympy.solve` on the full residual system — so transcendental
-operating points (sub-threshold MOSFETs, diode equations, …) come out as
-closed-form expressions when SymPy can solve them.
+``has_nonlinear`` (MOSFETs, BJTs, diodes), the solver instead calls the
+CAS solver (``cas.solve``, where ``sp`` is :mod:`sycan.cas`) on the full
+residual system — so transcendental operating points (sub-threshold
+MOSFETs, diode equations, …) come out as closed-form expressions when
+the backend can solve them.
 
 AC transfer functions — :func:`~sycan.solve_ac`
 -----------------------------------------------
@@ -110,7 +115,7 @@ small-signal transfer function:
 
 .. code-block:: python
 
-   import sympy as sp
+   from sycan import cas as cas
    from sycan import parse, solve_ac
 
    c = parse("""RC low-pass
@@ -121,8 +126,8 @@ small-signal transfer function:
    """)
 
    sol = solve_ac(c)
-   H = sol[sp.Symbol("V(out)")] / sp.Symbol("Vin")
-   print(sp.simplify(H))   # 1 / (C*R*s + 1)
+   H = sol[cas.Symbol("V(out)")] / cas.Symbol("Vin")
+   print(cas.simplify(H))   # 1 / (C*R*s + 1)
 
 Pass your own ``s`` symbol if you want to share it with downstream
 analysis (e.g. polynomial filter prototypes from
@@ -138,11 +143,11 @@ loading automatically:
 
 .. code-block:: python
 
-   import sympy as sp
+   from sycan import cas as cas
    from sycan import Circuit, solve_impedance
 
-   mu_n, Cox, W, L, V_TH, lam, R_L = sp.symbols("mu_n Cox W L V_TH lam R_L")
-   VDD, V_GS_op, V_DS_op, C_gs = sp.symbols("VDD V_GS_op V_DS_op C_gs")
+   mu_n, Cox, W, L, V_TH, lam, R_L = cas.symbols("mu_n Cox W L V_TH lam R_L")
+   VDD, V_GS_op, V_DS_op, C_gs = cas.symbols("VDD V_GS_op V_DS_op C_gs")
 
    c = Circuit()
    c.add_port("P_in",  "gate",  "0", "input")
@@ -153,8 +158,8 @@ loading automatically:
                  mu_n=mu_n, Cox=Cox, W=W, L=L, V_TH=V_TH, lam=lam,
                  C_gs=C_gs, V_GS_op=V_GS_op, V_DS_op=V_DS_op)
 
-   Z_in  = sp.simplify(solve_impedance(c, "P_in",  termination="auto"))
-   Z_out = sp.simplify(solve_impedance(c, "P_out", termination="auto"))
+   Z_in  = cas.simplify(solve_impedance(c, "P_in",  termination="auto"))
+   Z_out = cas.simplify(solve_impedance(c, "P_out", termination="auto"))
    print(Z_in)    # 1 / (s*C_gs)
    print(Z_out)   # R_L || r_o, in closed form
 
@@ -168,11 +173,11 @@ of an RC low-pass is one line:
 
 .. code-block:: python
 
-   import sympy as sp
+   from sycan import cas as cas
    from sycan import Circuit, T_kelvin, k_B, solve_noise
    from sycan.components.basic import Capacitor, Resistor, VoltageSource
 
-   R, C, omega = sp.symbols("R C omega", positive=True)
+   R, C, omega = cas.symbols("R C omega", positive=True)
 
    c = Circuit("kT/C")
    c.add(VoltageSource("V1", "in", "0", value=0, ac_value=0))
@@ -180,9 +185,9 @@ of an RC low-pass is one line:
    c.add(Capacitor("C1", "out", "0", C))
 
    S_total, per_source = solve_noise(c, "out", simplify=True)
-   S_omega = sp.simplify(S_total.subs(sp.Symbol("s"), sp.I * omega))
-   power = sp.integrate(S_omega, (omega, 0, sp.oo)) / (2 * sp.pi)
-   print(sp.simplify(power))   # k_B*T/C
+   S_omega = cas.simplify(S_total.subs(cas.Symbol("s"), cas.I * omega))
+   power = cas.integrate(S_omega, (omega, 0, cas.oo)) / (2 * cas.pi)
+   print(cas.simplify(power))   # k_B*T/C
 
 The returned ``per_source`` dict maps each noise-source name to its
 individual PSD — handy when you want to pinpoint which device dominates

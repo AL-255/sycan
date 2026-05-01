@@ -1,14 +1,14 @@
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, autodraw, solve_headroom
 
 # Regulated (gain-boosted) cascode current source.
 
-V_TH, V_OV, beta, V_bias, A_gain, V_DD = sp.symbols(
+V_TH, V_OV, beta, V_bias, A_gain, V_DD = cas.symbols(
     "V_TH V_OV beta V_bias A V_DD", positive=True
 )
-V_out = sp.Symbol("V_out", real=True)
-I_in = sp.Rational(1, 2) * beta * V_OV ** 2
+V_out = cas.Symbol("V_out", real=True)
+I_in = cas.Rational(1, 2) * beta * V_OV ** 2
 
 V_n3 = V_TH + V_OV
 V_d2 = V_bias
@@ -33,8 +33,8 @@ r = solve_headroom(c, "Vout", var=V_out)
 # --- Symbolic output -----------------------------------------------------
 lo, hi = r.interval
 print("Output headroom — every NMOS stays in saturation when:")
-print(rf"$$V(\text{{out}}) \in \left[\;{sp.latex(sp.simplify(lo))}\;,"
-      rf"\;{sp.latex(sp.simplify(hi))}\;\right]$$")
+print(rf"$$V(\text{{out}}) \in \left[\;{cas.latex(cas.simplify(lo))}\;,"
+      rf"\;{cas.latex(cas.simplify(hi))}\;\right]$$")
 print(r"With $V_{bias} = V_{OV}$ (Q2 just at its saturation knee), the "
       r"output node settles to the wide-swing minimum "
       r"$V(\text{out})_{\min} = 2 V_{OV}$.")

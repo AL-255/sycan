@@ -2,8 +2,9 @@
 
 This is a short reference for every analysis methods _SYCAN_ supports. All
 solvers operate on a `Circuit` populated with `Component` instances and
-return sympy expressions, so results stay symbolic until you
-`subs(...)` or `.evalf()` them.
+return CAS expressions (sympy by default — see `sycan.cas` for backend
+selection), so results stay symbolic until you `subs(...)` or `.evalf()`
+them.
 
 The MNA system the solvers assemble has the form `A · x = b`, where `x`
 is the vector of unknown node voltages followed by auxiliary branch
@@ -18,11 +19,11 @@ Steady-state node voltages and source branch currents.
   source enforces `V(n+) = V(n-)` via an auxiliary current).
 - **Linear circuits** are solved by symbolic LU on `A · x = b`.
 - **Nonlinear circuits** — any component with `has_nonlinear = True`,
-  e.g. a diode, BJT, MOSFET, or triode — fall back to `sympy.solve` on
-  the residual vector `A · x − b + Σ stamp_nonlinear`. A
-  `RuntimeError` is raised if sympy fails to close the system; pin
-  more nodes with explicit voltage sources or substitute numeric
-  parameters when that happens.
+  e.g. a diode, BJT, MOSFET, or triode — fall back to the CAS solver
+  (`sp.solve`, where `sp` is `sycan.cas`) on the residual vector
+  `A · x − b + Σ stamp_nonlinear`. A `RuntimeError` is raised if the
+  CAS fails to close the system; pin more nodes with explicit voltage
+  sources or substitute numeric parameters when that happens.
 
 Returns `dict[Symbol, Expr]` mapping `V(node_name)` and
 `I(component_name)` symbols to their solved expressions. With
@@ -101,7 +102,7 @@ Returns `(total_psd, per_source_psd)`. The dict is keyed by
 `<component>.<kind>` (e.g. `"R1.thermal"`, `"Q1.shot.collector"`) so
 contributions can be inspected individually.
 
-Built-in noise models, with `k_B`, `T`, `q` exposed as sympy symbols
+Built-in noise models, with `k_B`, `T`, `q` exposed as CAS symbols
 in `sycan.mna`:
 
 | Component | Kinds | One-sided PSD |
@@ -149,9 +150,10 @@ workflow:
 
 - **`sycan.network_params`** — closed-form 2-port conversions between
   Z, Y, S, ABCD and T matrices (Pozar conventions, default
-  `Z0 = 50 Ω`; pass a symbol or a diagonal `sp.Matrix` for symbolic /
-  per-port reference impedances). Useful for reading off S-parameters
-  from a Z extracted via `solve_impedance` / `solve_ac`.
+  `Z0 = 50 Ω`; pass a symbol or a diagonal `sp.Matrix` from
+  `sycan.cas` for symbolic / per-port reference impedances). Useful
+  for reading off S-parameters from a Z extracted via
+  `solve_impedance` / `solve_ac`.
 - **`sycan.polynomials`** — analog filter prototype transfer functions
   (`butterworth`, `chebyshev1`, `bessel`). Each returns
   `(numerator, denominator)` in a Laplace variable, normalised to

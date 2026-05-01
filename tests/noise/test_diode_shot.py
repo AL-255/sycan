@@ -1,5 +1,5 @@
 """Shot noise of a diode under reverse-biased load resistor."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, q, solve_noise
 from sycan.components.active import Diode
@@ -13,22 +13,22 @@ def test_diode_shot_noise_into_load():
     the only path it sees is ``R_L`` to gnd, so ``V(cathode) = i_n·R_L``
     and ``S_V_k = R_L²·2·q·I_op``.
     """
-    R_L, I_op = sp.symbols("R_L I_op", positive=True)
+    R_L, I_op = cas.symbols("R_L I_op", positive=True)
     c = Circuit()
     c.add(VoltageSource("V1", "vdd", "0", value=0, ac_value=0))
     c.add(Resistor("RL", "vdd", "k", R_L))
-    c.add(Diode("D1", "0", "k", sp.Symbol("IS", positive=True),
+    c.add(Diode("D1", "0", "k", cas.Symbol("IS", positive=True),
                 I_op=I_op, include_noise="shot"))
 
     total, contribs = solve_noise(c, "k", simplify=True)
     expected = 2 * q * I_op * R_L ** 2
 
-    assert sp.simplify(total - expected) == 0
+    assert cas.simplify(total - expected) == 0
     assert set(contribs) == {"D1.shot"}
 
 
 def test_diode_default_I_op_is_symbolic():
     """No ``I_op`` argument → per-instance symbol ``I_op_<name>``."""
-    d = Diode("D7", "a", "k", sp.Symbol("IS", positive=True),
+    d = Diode("D7", "a", "k", cas.Symbol("IS", positive=True),
               include_noise="shot")
-    assert d.I_op == sp.Symbol("I_op_D7")
+    assert d.I_op == cas.Symbol("I_op_D7")

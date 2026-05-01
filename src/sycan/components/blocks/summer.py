@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterator
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSpec, StampContext
 
@@ -37,14 +37,14 @@ class Summer(Component):
     SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
-        normalised: list[tuple[str, str, sp.Expr]] = []
+        normalised: list[tuple[str, str, cas.Expr]] = []
         for entry in self.inputs:
             if len(entry) == 2:
                 node, w = entry
-                normalised.append((node, "0", sp.sympify(w)))
+                normalised.append((node, "0", cas.sympify(w)))
             elif len(entry) == 3:
                 p, m, w = entry
-                normalised.append((p, m, sp.sympify(w)))
+                normalised.append((p, m, cas.sympify(w)))
             else:
                 raise ValueError(
                     f"{self.name}: each summer input must be a 2- or 3-tuple, "

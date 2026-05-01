@@ -26,7 +26,7 @@ Closed-form expectations:
                             to the grounded cathode when C_gp = 0).
 * **Z_out**: R_L / (1 + g_p R_L) = R_L || r_p.
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_ac, solve_dc, solve_impedance
 
@@ -70,7 +70,7 @@ X1 plate grid 0 TRIODE K mu V_g_op V_p_op
 
 def _g_m_g_p(K, mu, V_g_op, V_p_op):
     V_eff = mu * V_g_op + V_p_op
-    g_p = sp.Rational(3, 2) * K * V_eff ** sp.Rational(1, 2)
+    g_p = cas.Rational(3, 2) * K * V_eff ** cas.Rational(1, 2)
     g_m = mu * g_p
     return g_m, g_p
 
@@ -78,21 +78,21 @@ def _g_m_g_p(K, mu, V_g_op, V_p_op):
 # ---------------------------------------------------------------------------
 
 def test_triode_dc_plate_current():
-    K, mu, V_g, V_p = sp.symbols("K mu V_g V_p")
+    K, mu, V_g, V_p = cas.symbols("K mu V_g V_p")
     sol = solve_dc(parse(_DC))
-    I_p = K * (mu * V_g + V_p) ** sp.Rational(3, 2)
-    assert sp.simplify(sol[sp.Symbol("I(Vp)")] + I_p) == 0
+    I_p = K * (mu * V_g + V_p) ** cas.Rational(3, 2)
+    assert cas.simplify(sol[cas.Symbol("I(Vp)")] + I_p) == 0
 
 
 def test_triode_ac_voltage_gain():
-    K, mu, R_L, V_B, V_g_op, V_p_op, v_in = sp.symbols(
+    K, mu, R_L, V_B, V_g_op, V_p_op, v_in = cas.symbols(
         "K mu R_L V_B V_g_op V_p_op v_in"
     )
     sol = solve_ac(parse(_AC_GAIN))
 
     g_m, g_p = _g_m_g_p(K, mu, V_g_op, V_p_op)
     expected = -g_m * v_in * R_L / (1 + g_p * R_L)
-    assert sp.simplify(sol[sp.Symbol("V(plate)")] - expected) == 0
+    assert cas.simplify(sol[cas.Symbol("V(plate)")] - expected) == 0
 
 
 def test_triode_input_impedance():
@@ -100,22 +100,22 @@ def test_triode_input_impedance():
     grid to AC-ground directly. C_gp is set to 0 here to keep the test
     closed-form (Miller feed-through through C_gp would couple the
     plate node and complicate the answer)."""
-    K, mu, R_L, V_B, V_g_op, V_p_op, C_gk = sp.symbols(
+    K, mu, R_L, V_B, V_g_op, V_p_op, C_gk = cas.symbols(
         "K mu R_L V_B V_g_op V_p_op C_gk"
     )
     c = parse(_ZIN)
     Z_in = solve_impedance(c, "P_in", termination="auto")
-    s = sp.Symbol("s")
+    s = cas.Symbol("s")
     expected = 1 / (s * C_gk)
-    assert sp.simplify(Z_in - expected) == 0
+    assert cas.simplify(Z_in - expected) == 0
 
 
 def test_triode_output_impedance():
-    K, mu, R_L, V_B, V_g_op, V_p_op = sp.symbols(
+    K, mu, R_L, V_B, V_g_op, V_p_op = cas.symbols(
         "K mu R_L V_B V_g_op V_p_op"
     )
     c = parse(_ZOUT)
     Z_out = solve_impedance(c, "P_out", termination="auto")
     _, g_p = _g_m_g_p(K, mu, V_g_op, V_p_op)
     expected = R_L / (1 + g_p * R_L)
-    assert sp.simplify(sp.together(Z_out - expected)) == 0
+    assert cas.simplify(cas.together(Z_out - expected)) == 0

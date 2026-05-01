@@ -4,7 +4,7 @@ Two analysis modes are supported:
 
 * ``"dc"`` — steady-state operating point. Inductors short, capacitors open.
   Components with a ``stamp_nonlinear`` hook (e.g. MOSFETs in sub-threshold)
-  contribute transcendental terms and the solver falls back to ``sp.solve``.
+  contribute transcendental terms and the solver falls back to ``cas.solve``.
 * ``"ac"`` — small-signal frequency-domain analysis using a Laplace
   variable ``s``. Capacitors stamp admittance ``sC``; inductors stamp
   ``1/(sL)``. Source AC values override DC values.
@@ -15,12 +15,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Iterator, Optional, Union
 
-import sympy as sp
+from sycan import cas as cas
 
 if TYPE_CHECKING:
     from sycan.circuit import Circuit
 
-Value = Union[sp.Expr, int, float, str]
+Value = Union[cas.Expr, int, float, str]
 
 # Specification accepted by ``Component(include_noise=...)``.
 NoiseSpec = Union[None, str, list[str], tuple[str, ...], frozenset[str]]
@@ -32,9 +32,9 @@ _NOISE_KINDS: frozenset[str] = frozenset({"thermal", "shot", "flicker"})
 # Physical-constant symbols used inside symbolic noise spectral densities.
 # Exposed at module level so user code can substitute / numerically
 # evaluate them (e.g. ``S.subs({k_B: 1.380649e-23, T: 300})``).
-k_B: sp.Symbol = sp.Symbol("k_B", positive=True)
-T: sp.Symbol = sp.Symbol("T", positive=True)
-q: sp.Symbol = sp.Symbol("q", positive=True)
+k_B: cas.Symbol = cas.Symbol("k_B", positive=True)
+T: cas.Symbol = cas.Symbol("T", positive=True)
+q: cas.Symbol = cas.Symbol("q", positive=True)
 
 
 @dataclass
@@ -53,20 +53,20 @@ class NoiseSource:
     kind: str
     n_plus: str
     n_minus: str
-    psd: sp.Expr
+    psd: cas.Expr
 
 
 @dataclass
 class StampContext:
     """Mutable state handed to each component's ``stamp`` method."""
 
-    A: sp.Matrix
-    b: sp.Matrix
+    A: cas.Matrix
+    b: cas.Matrix
     node_rows: dict[str, int]
     aux_rows: dict[str, int]
     mode: str = "dc"  # "dc" or "ac"
-    s: Optional[sp.Expr] = None  # Laplace variable, set in AC mode
-    x: Optional[sp.Matrix] = None  # unknown symbols vector (set for nonlinear pass)
+    s: Optional[cas.Expr] = None  # Laplace variable, set in AC mode
+    x: Optional[cas.Matrix] = None  # unknown symbols vector (set for nonlinear pass)
     residuals: Optional[list] = None  # nonlinear residuals (set for nonlinear pass)
 
     def n(self, node: str) -> int:
@@ -197,19 +197,19 @@ class Component(ABC):
 def build_mna(
     circuit: "Circuit",
     mode: str = "dc",
-    s: Optional[sp.Expr] = None,
-) -> tuple[sp.Matrix, sp.Matrix, sp.Matrix]:
+    s: Optional[cas.Expr] = None,
+) -> tuple[cas.Matrix, cas.Matrix, cas.Matrix]:
     """Assemble the linear symbolic MNA system ``A * x = b`` for ``mode``."""
     if mode == "ac" and s is None:
-        s = sp.Symbol("s")
+        s = cas.Symbol("s")
 
     nodes = circuit.nodes
     n = len(nodes)
     aux_owners = [c for c in circuit.components if c.aux_count(mode) > 0]
     m = len(aux_owners)
 
-    A = sp.zeros(n + m, n + m)
-    b = sp.zeros(n + m, 1)
+    A = cas.zeros(n + m, n + m)
+    b = cas.zeros(n + m, 1)
     node_rows = {name: idx - 1 for name, idx in circuit._nodes.items()}
     aux_rows = {c.name: n + k for k, c in enumerate(aux_owners)}
 
@@ -219,9 +219,9 @@ def build_mna(
     for c in circuit.components:
         c.stamp(ctx)
 
-    x = sp.Matrix(
-        [sp.Symbol(f"V({nm})") for nm in nodes]
-        + [sp.Symbol(f"I({c.name})") for c in aux_owners]
+    x = cas.Matrix(
+        [cas.Symbol(f"V({nm})") for nm in nodes]
+        + [cas.Symbol(f"I({c.name})") for c in aux_owners]
     )
     return A, x, b
 
@@ -229,8 +229,8 @@ def build_mna(
 def build_residuals(
     circuit: "Circuit",
     mode: str = "dc",
-    s: Optional[sp.Expr] = None,
-) -> tuple[sp.Matrix, list[sp.Expr]]:
+    s: Optional[cas.Expr] = None,
+) -> tuple[cas.Matrix, list[cas.Expr]]:
     """Assemble the full residual vector ``A*x - b + nonlinear(x)``.
 
     Useful as a starting point for custom nonlinear solvers (numerical
@@ -256,7 +256,7 @@ def build_residuals(
     return x, residuals
 
 
-def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Expr]:
+def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[cas.Symbol, cas.Expr]:
     """Solve the DC operating point symbolically.
 
     If any component reports ``has_nonlinear``, the solver builds
@@ -287,7 +287,7 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Ex
         for c in nonlinear:
             c.stamp_nonlinear(ctx)
 
-        # ``sp.solve`` works well for polynomial nonlinear systems
+        # ``cas.solve`` works well for polynomial nonlinear systems
         # (e.g. plain Shichman-Hodges Level-1 in saturation) and even
         # for transcendental ones once the voltage sources have
         # pinned the unknowns down to single equations
@@ -304,12 +304,14 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Ex
         for r in residuals:
             free_params |= r.free_symbols
         free_params -= set(x)
-        has_piecewise = any(r.has(sp.Piecewise) for r in residuals)
+        # Use atoms(class) rather than .has(class) — the latter is
+        # sympy-only; ``atoms`` works on every CAS backend.
+        has_piecewise = any(bool(r.atoms(cas.Piecewise)) for r in residuals)
         try:
             if has_piecewise and not free_params:
                 solutions = []
             else:
-                solutions = sp.solve(residuals, list(x), dict=True)
+                solutions = cas.solve(residuals, list(x), dict=True)
         except NotImplementedError:
             solutions = []
         if solutions:
@@ -317,7 +319,7 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Ex
             result = {sym: sol_dict.get(sym, sym) for sym in x}
         else:
             # Damped Newton over a numpy-lambdified residual. Plain
-            # ``sp.nsolve`` (mpmath's undamped Newton) hangs on
+            # ``cas.nsolve`` (mpmath's undamped Newton) hangs on
             # MOSFET-style segmented models: when an iterate briefly
             # leaves the physical V_DS ≥ 0 envelope the L1 triode
             # quadratic blows up and Newton can't recover. Damping
@@ -327,16 +329,16 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Ex
             # stays conditioned at flat-slope operating points such
             # as L1 saturation with ``lam = 0``.
             import numpy as np
-            G_MIN = sp.Float("1e-12")
+            G_MIN = cas.Float("1e-12")
             reg_residuals = list(residuals)
             for _name, row_idx in node_rows.items():
                 reg_residuals[row_idx] += G_MIN * x[row_idx]
             x_list = list(x)
-            F_fn = sp.lambdify(
-                [x_list], sp.Matrix(reg_residuals), modules="numpy",
+            F_fn = cas.lambdify(
+                [x_list], cas.Matrix(reg_residuals), modules="numpy",
             )
-            J_fn = sp.lambdify(
-                [x_list], sp.Matrix(reg_residuals).jacobian(x_list),
+            J_fn = cas.lambdify(
+                [x_list], cas.Matrix(reg_residuals).jacobian(cas.Matrix(x_list)),
                 modules="numpy",
             )
             xv = np.zeros(len(x_list), dtype=float)
@@ -386,10 +388,10 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[sp.Symbol, sp.Ex
                     "Try pinning more node voltages or substituting "
                     "numeric values."
                 )
-            result = {sym: sp.Float(float(xv[i])) for i, sym in enumerate(x_list)}
+            result = {sym: cas.Float(float(xv[i])) for i, sym in enumerate(x_list)}
 
     if simplify:
-        result = {sym: sp.simplify(expr) for sym, expr in result.items()}
+        result = {sym: cas.simplify(expr) for sym, expr in result.items()}
     return result
 
 
@@ -397,9 +399,9 @@ def solve_impedance(
     circuit: "Circuit",
     port_name: str,
     termination: str = "auto",
-    s: Optional[sp.Expr] = None,
+    s: Optional[cas.Expr] = None,
     simplify: bool = False,
-) -> sp.Expr:
+) -> cas.Expr:
     """Small-signal impedance looking into a named ``Port``.
 
     A unit AC voltage is applied across the target port and the
@@ -461,42 +463,42 @@ def solve_impedance(
 
     sol = solve_ac(test_circuit, s=s, simplify=False)
 
-    I_test = sol[sp.Symbol("I(_Vtest)")]
+    I_test = sol[cas.Symbol("I(_Vtest)")]
     # V_test = +1 (AC); I(V_test) is the SPICE branch current from + to -
     # through the source, which equals the negative of the current the
     # source supplies into the circuit. Hence Z = 1 / (-I_test) = -1/I_test.
     Z = -1 / I_test
     if simplify:
-        Z = sp.simplify(Z)
+        Z = cas.simplify(Z)
     return Z
 
 
 def solve_ac(
     circuit: "Circuit",
-    s: Optional[sp.Expr] = None,
+    s: Optional[cas.Expr] = None,
     simplify: bool = False,
-) -> dict[sp.Symbol, sp.Expr]:
+) -> dict[cas.Symbol, cas.Expr]:
     """Solve the small-signal AC response in the Laplace domain.
 
     Nonlinear components (e.g. MOSFETs) contribute no small-signal model
     yet and are treated as zero-current elements.
     """
     if s is None:
-        s = sp.Symbol("s")
+        s = cas.Symbol("s")
     A, x, b = build_mna(circuit, mode="ac", s=s)
     sol = A.LUsolve(b)
     result = {sym: expr for sym, expr in zip(x, sol)}
     if simplify:
-        result = {sym: sp.simplify(expr) for sym, expr in result.items()}
+        result = {sym: cas.simplify(expr) for sym, expr in result.items()}
     return result
 
 
 def solve_noise(
     circuit: "Circuit",
     output_node: str,
-    s: Optional[sp.Expr] = None,
+    s: Optional[cas.Expr] = None,
     simplify: bool = False,
-) -> tuple[sp.Expr, dict[str, sp.Expr]]:
+) -> tuple[cas.Expr, dict[str, cas.Expr]]:
     """Output-voltage noise PSD at ``output_node`` in the Laplace domain.
 
     Walks every component, asks for its :meth:`Component.noise_sources`,
@@ -507,7 +509,7 @@ def solve_noise(
     where ``H_k(s) = V(output_node) / I_k(s)`` is the trans-impedance
     from the unit-current k-th noise source to the output, and
     ``S_k(s)`` is the source's spectral density. To turn the symbolic
-    result into a frequency-domain PSD, substitute ``s = sp.I * omega``.
+    result into a frequency-domain PSD, substitute ``s = cas.I * omega``.
 
     Independent V/I sources elsewhere in the circuit are *not* zeroed
     explicitly — their small-signal contribution does not enter the
@@ -518,7 +520,7 @@ def solve_noise(
     maps each :attr:`NoiseSource.name` to its individual contribution.
     """
     if s is None:
-        s = sp.Symbol("s")
+        s = cas.Symbol("s")
     A, _x, _b = build_mna(circuit, mode="ac", s=s)
     nodes = circuit.nodes
     if output_node not in nodes:
@@ -527,8 +529,8 @@ def solve_noise(
         )
     out_idx = nodes.index(output_node)
 
-    contributions: dict[str, sp.Expr] = {}
-    total: sp.Expr = sp.S.Zero
+    contributions: dict[str, cas.Expr] = {}
+    total: cas.Expr = cas.S.Zero
     for c in circuit.components:
         for src in c.noise_sources():
             for endpoint in (src.n_plus, src.n_minus):
@@ -537,7 +539,7 @@ def solve_noise(
                         f"noise source {src.name!r}: node {endpoint!r} not "
                         "registered in circuit"
                     )
-            b = sp.zeros(A.shape[0], 1)
+            b = cas.zeros(A.shape[0], 1)
             ip = circuit._nodes[src.n_plus] - 1
             im = circuit._nodes[src.n_minus] - 1
             if ip >= 0:
@@ -552,6 +554,6 @@ def solve_noise(
             total = total + contrib
 
     if simplify:
-        total = sp.simplify(total)
-        contributions = {k: sp.simplify(v) for k, v in contributions.items()}
+        total = cas.simplify(total)
+        contributions = {k: cas.simplify(v) for k, v in contributions.items()}
     return total, contributions

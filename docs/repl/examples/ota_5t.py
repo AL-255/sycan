@@ -1,4 +1,4 @@
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, autodraw, solve_headroom
 
@@ -24,10 +24,10 @@ INPUT_MODE = "differential"   # "differential" | "single_ended"
 # thresholds V_OV1 = V_OV2 = 0 — not by anything happening at ``out``.
 
 # --- Symbolic device parameters ------------------------------------------
-V_DD, V_TH, mu_n, mu_p, Cox, V_bn, V_MID = sp.symbols(
+V_DD, V_TH, mu_n, mu_p, Cox, V_bn, V_MID = cas.symbols(
     "V_DD V_TH mu_n mu_p Cox V_bn V_MID", positive=True)
-W_n, L_n, W_p, L_p, W_c, L_c = sp.symbols("W_n L_n W_p L_p W_c L_c", positive=True)
-x = sp.Symbol("x", real=True)
+W_n, L_n, W_p, L_p, W_c, L_c = cas.symbols("W_n L_n W_p L_p W_c L_c", positive=True)
+x = cas.Symbol("x", real=True)
 
 # Aspect-ratio betas:
 #     β_n = μ_n Cox (W_n/L_n)   — input pair (M1, M2)
@@ -44,7 +44,7 @@ if INPUT_MODE == "differential":
     # Tail KCL with V_OV1 = s + x, V_OV2 = s − x:
     #     2 s² + 2 x² = (β_c / β_n) V_OV5²    →    s = √((β_c/2β_n) V_OV5² − x²)
     # Save as ``s_def`` / ``s_sq_def`` for back-substitution further down.
-    s = sp.Symbol("s", positive=True)
+    s = cas.Symbol("s", positive=True)
     s_sq_def = beta_c / (2 * beta_n) * (V_bn - V_TH) ** 2 - x ** 2
 elif INPUT_MODE == "single_ended":
     V_inp = V_MID + x
@@ -53,7 +53,7 @@ elif INPUT_MODE == "single_ended":
     #     2 s² + 2 s x + x² = (β_c / β_n) V_OV5²
     # Solving the quadratic in s (positive root):
     #     s = (−x + √(2 (β_c/β_n) V_OV5² − x²)) / 2
-    s = sp.Symbol("s", positive=True)
+    s = cas.Symbol("s", positive=True)
     s_sq_def = None  # tail-KCL is a quadratic in s; see the back-substitution below.
 else:
     raise ValueError(f"INPUT_MODE must be 'differential' or 'single_ended'")
@@ -63,11 +63,11 @@ V_OV1  = V_inp - V_tail - V_TH        # generic — works in both modes
 V_OV2  = V_inn - V_tail - V_TH
 
 # n3 KCL (mirror diode connection on M3):  β_n V_OV1² = β_p (V_DD − V_n3 − V_TH)²
-V_n3 = V_DD - V_TH - sp.sqrt(beta_n / beta_p) * V_OV1
+V_n3 = V_DD - V_TH - cas.sqrt(beta_n / beta_p) * V_OV1
 
 # With λ = 0 the output KCL is degenerate; V(out) is a free symbol set
 # by the external load.
-V_out = sp.Symbol("V_out", real=True)
+V_out = cas.Symbol("V_out", real=True)
 
 # --- Build the netlist ---------------------------------------------------
 c = Circuit()
@@ -83,13 +83,13 @@ c.add_nmos_l1("M5", "tail", "Vbn", "0",   mu_n=mu_n, Cox=Cox, W=W_c, L=L_c, V_TH
 
 # --- Hand-derived operating point fed into solve_headroom ----------------
 op = {
-    sp.Symbol("V(VDD)"):  V_DD,
-    sp.Symbol("V(Vbn)"):  V_bn,
-    sp.Symbol("V(inp)"):  V_inp,
-    sp.Symbol("V(inn)"):  V_inn,
-    sp.Symbol("V(tail)"): V_tail,
-    sp.Symbol("V(n3)"):   V_n3,
-    sp.Symbol("V(out)"):  V_out,
+    cas.Symbol("V(VDD)"):  V_DD,
+    cas.Symbol("V(Vbn)"):  V_bn,
+    cas.Symbol("V(inp)"):  V_inp,
+    cas.Symbol("V(inn)"):  V_inn,
+    cas.Symbol("V(tail)"): V_tail,
+    cas.Symbol("V(n3)"):   V_n3,
+    cas.Symbol("V(out)"):  V_out,
 }
 
 r = solve_headroom(
@@ -102,7 +102,7 @@ r = solve_headroom(
 
 # --- Symbolic output ------------------------------------------------------
 print(f"Input mode: **{INPUT_MODE}**  "
-      f"(Vinp = {sp.latex(V_inp)}, Vinn = {sp.latex(V_inn)})")
+      f"(Vinp = {cas.latex(V_inp)}, Vinn = {cas.latex(V_inn)})")
 print()
 print(r"Operating point — sequential elimination on the L1 saturation"
       r" form with $\lambda = 0$, using the auxiliary symbol "
@@ -119,8 +119,8 @@ print()
 
 print("Per-MOSFET saturation predicates (each must be ≥ 0):")
 for name, (c1, c2) in r.predicates.items():
-    print(rf"$${name}\;\;\text{{threshold}}: {sp.latex(sp.simplify(c1))} \;>\; 0$$")
-    print(rf"$${name}\;\;\text{{overdrive}}: {sp.latex(sp.simplify(c2))} \;\geq\; 0$$")
+    print(rf"$${name}\;\;\text{{threshold}}: {cas.latex(cas.simplify(c1))} \;>\; 0$$")
+    print(rf"$${name}\;\;\text{{overdrive}}: {cas.latex(cas.simplify(c2))} \;\geq\; 0$$")
 print()
 
 # --- Close the input-side interval ---------------------------------------
@@ -132,16 +132,16 @@ print()
 #   single-ended: M2.threshold = s > 0 dominates; with s = (−x + √…)/2 > 0
 #                                                 →  |x|_max = V_OV5     · √(β_c/β_n)
 if INPUT_MODE == "differential":
-    x_max = (V_bn - V_TH) / 2 * sp.sqrt(W_c * L_n / (W_n * L_c))
+    x_max = (V_bn - V_TH) / 2 * cas.sqrt(W_c * L_n / (W_n * L_c))
     formula_latex = (
         r"\dfrac{V_{bn}-V_{TH}}{2}\,\sqrt{\dfrac{W_c\,L_n}{W_n\,L_c}}"
         r"\;=\;\dfrac{V_{OV5}}{2}\,\sqrt{\dfrac{\beta_c}{\beta_n}}"
     )
     # Sanity-check: x_max² is a root of V_OV1 · V_OV2 = 0 with s² folded in.
     combined = (V_OV1 * V_OV2).subs(s ** 2, s_sq_def)
-    assert sp.simplify(combined.subs(x, x_max)) == 0
+    assert cas.simplify(combined.subs(x, x_max)) == 0
 else:
-    x_max = (V_bn - V_TH) * sp.sqrt(W_c * L_n / (W_n * L_c))
+    x_max = (V_bn - V_TH) * cas.sqrt(W_c * L_n / (W_n * L_c))
     formula_latex = (
         r"(V_{bn}-V_{TH})\,\sqrt{\dfrac{W_c\,L_n}{W_n\,L_c}}"
         r"\;=\;V_{OV5}\,\sqrt{\dfrac{\beta_c}{\beta_n}}"
@@ -150,11 +150,11 @@ else:
     # 2 s² + 2 s x + x² = (β_c/β_n) V_OV5² and zeros V_OV2 = s.
     constraint = 2 * 0 ** 2 + 2 * 0 * x_max + x_max ** 2 \
         - beta_c / beta_n * (V_bn - V_TH) ** 2
-    assert sp.simplify(constraint) == 0
+    assert cas.simplify(constraint) == 0
 
 print(f"Input range that keeps every transistor in saturation"
       f"  ({INPUT_MODE} drive):")
-print(rf"$$x \in \left[\;-{sp.latex(x_max)}\;,\;{sp.latex(x_max)}\;\right]$$")
+print(rf"$$x \in \left[\;-{cas.latex(x_max)}\;,\;{cas.latex(x_max)}\;\right]$$")
 print(rf"$$|x|_{{\max}} \;=\; {formula_latex}$$")
 print("  binding: M1.threshold (low) and M2.threshold (high)")
 

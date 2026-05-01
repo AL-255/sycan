@@ -1,6 +1,6 @@
 """Wheatstone bridge: verify the unbalanced difference and the null at
 the classical balance condition R1*R4 == R2*R3."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_dc
 
@@ -18,21 +18,21 @@ W2 0_2 0; right
 
 def test_wheatstone_unbalanced():
     sol = solve_dc(parse(NETLIST))
-    Vs, R1, R2, R3, R4 = sp.symbols("Vs R1 R2 R3 R4")
-    diff = sol[sp.Symbol("V(b)")] - sol[sp.Symbol("V(c)")]
+    Vs, R1, R2, R3, R4 = cas.symbols("Vs R1 R2 R3 R4")
+    diff = sol[cas.Symbol("V(b)")] - sol[cas.Symbol("V(c)")]
     expected = Vs * (R2 * R3 - R1 * R4) / ((R1 + R2) * (R3 + R4))
-    assert sp.simplify(diff - expected) == 0
+    assert cas.simplify(diff - expected) == 0
 
 
 def test_wheatstone_balanced():
     sol = solve_dc(parse(NETLIST))
     # 1*6 == 2*3, so the bridge is balanced and V(b) == V(c).
     subs = {
-        sp.Symbol("R1"): 1,
-        sp.Symbol("R2"): 2,
-        sp.Symbol("R3"): 3,
-        sp.Symbol("R4"): 6,
+        cas.Symbol("R1"): 1,
+        cas.Symbol("R2"): 2,
+        cas.Symbol("R3"): 3,
+        cas.Symbol("R4"): 6,
     }
-    vb = sol[sp.Symbol("V(b)")].subs(subs)
-    vc = sol[sp.Symbol("V(c)")].subs(subs)
-    assert sp.simplify(vb - vc) == 0
+    vb = sol[cas.Symbol("V(b)")].subs(subs)
+    vc = sol[cas.Symbol("V(c)")].subs(subs)
+    assert cas.simplify(vb - vc) == 0

@@ -1,4 +1,4 @@
-import sympy as sp
+from sycan import cas as cas
 from sycan import parse, solve_dc
 from sycan import autodraw
 
@@ -12,10 +12,10 @@ R4 c 0 R4
 """
 
 sol = solve_dc(parse(netlist))
-V_b = sol[sp.Symbol("V(b)")]
-V_c = sol[sp.Symbol("V(c)")]
-diff = sp.simplify(V_b - V_c)
-print(f"$$V(b) - V(c) = {sp.latex(diff)}$$")
+V_b = sol[cas.Symbol("V(b)")]
+V_c = sol[cas.Symbol("V(c)")]
+diff = cas.simplify(V_b - V_c)
+print(f"$$V(b) - V(c) = {cas.latex(diff)}$$")
 print()
 print("Balance condition: R1*R4 == R2*R3")
 

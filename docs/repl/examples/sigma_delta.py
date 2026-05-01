@@ -12,12 +12,12 @@ Solving the loop symbolically with ``solve_ac`` extracts the
 signal-transfer-function (STF) and noise-transfer-function (NTF) by
 reading the coefficients of V_in and V_q in the closed-form output.
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import Circuit, autodraw, solve_ac
 
 c = Circuit("2nd-order CT sigma-delta")
-Vin = sp.Symbol("Vin")
+Vin = cas.Symbol("Vin")
 c.add_vsource("V1", "in", "0", value=0, ac_value=Vin)
 
 # Stage 1: error summer (input minus feedback) followed by integrator.
@@ -31,20 +31,20 @@ c.add_integrator("I2", "e2", "0", "x2", "0", k=1)
 # 1-bit quantizer modelled as unity gain plus additive symbol V_q_Q1.
 c.add_quantizer("Q1", "x2", "0", "out", "0", k_q=1)
 
-s = sp.Symbol("s")
+s = cas.Symbol("s")
 sol = solve_ac(c)
 
-V_out = sp.expand(sp.together(sol[sp.Symbol("V(out)")]))
-V_q = sp.Symbol("V_q_Q1")
+V_out = cas.expand(cas.together(sol[cas.Symbol("V(out)")]))
+V_q = cas.Symbol("V_q_Q1")
 
-STF = sp.simplify(V_out.coeff(Vin))
-NTF = sp.simplify(V_out.coeff(V_q))
+STF = cas.simplify(V_out.coeff(Vin))
+NTF = cas.simplify(V_out.coeff(V_q))
 
-print(f"$$\\mathrm{{STF}}(s) = {sp.latex(STF)}$$")
-print(f"$$\\mathrm{{NTF}}(s) = {sp.latex(NTF)}$$")
+print(f"$$\\mathrm{{STF}}(s) = {cas.latex(STF)}$$")
+print(f"$$\\mathrm{{NTF}}(s) = {cas.latex(NTF)}$$")
 print()
-print(f"NTF zeros at s = 0:  NTF(0) = {sp.simplify(NTF.subs(s, 0))}")
-print(f"                    NTF'(0) = {sp.simplify(sp.diff(NTF, s).subs(s, 0))}")
+print(f"NTF zeros at s = 0:  NTF(0) = {cas.simplify(NTF.subs(s, 0))}")
+print(f"                    NTF'(0) = {cas.simplify(cas.diff(NTF, s).subs(s, 0))}")
 print()
 print("(Double zero at DC: 40 dB/decade of in-band noise rejection.)")
 

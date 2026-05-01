@@ -1,5 +1,5 @@
 """VCVS (SPICE E): ideal voltage amplifier with finite gain A."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_dc
 
@@ -16,10 +16,10 @@ W2 0_1 0_2; right
 
 def test_vcvs_amplifier():
     sol = solve_dc(parse(NETLIST))
-    Vin, A, RL = sp.symbols("Vin A RL")
-    assert sp.simplify(sol[sp.Symbol("V(out)")] - A * Vin) == 0
+    Vin, A, RL = cas.symbols("Vin A RL")
+    assert cas.simplify(sol[cas.Symbol("V(out)")] - A * Vin) == 0
     # Input draws zero current (ideal voltage-controlled port).
-    assert sp.simplify(sol[sp.Symbol("I(V1)")]) == 0
+    assert cas.simplify(sol[cas.Symbol("I(V1)")]) == 0
     # I(E1) is from + to - internally; sourcing A*Vin/RL into the load
     # makes it negative.
-    assert sp.simplify(sol[sp.Symbol("I(E1)")] + A * Vin / RL) == 0
+    assert cas.simplify(sol[cas.Symbol("I(E1)")] + A * Vin / RL) == 0

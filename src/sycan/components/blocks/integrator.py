@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSpec, StampContext
 
@@ -26,9 +26,9 @@ class Integrator(Component):
     in_m: str
     out_p: str
     out_m: str
-    k: sp.Expr = sp.Integer(1)
-    leak: sp.Expr = sp.Integer(0)
-    var: sp.Symbol = field(default_factory=lambda: sp.Symbol("s"))
+    k: cas.Expr = cas.Integer(1)
+    leak: cas.Expr = cas.Integer(0)
+    var: cas.Symbol = field(default_factory=lambda: cas.Symbol("s"))
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("in_p", "in_m", "out_p", "out_m")
@@ -36,9 +36,9 @@ class Integrator(Component):
     SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
-        self.k = sp.sympify(self.k)
-        self.leak = sp.sympify(self.leak)
-        self.var = sp.sympify(self.var)
+        self.k = cas.sympify(self.k)
+        self.leak = cas.sympify(self.leak)
+        self.var = cas.sympify(self.var)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def aux_count(self, mode: str) -> int:

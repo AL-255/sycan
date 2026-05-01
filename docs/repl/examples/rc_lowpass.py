@@ -1,4 +1,4 @@
-import sympy as sp
+from sycan import cas as cas
 from sycan import parse, solve_ac
 from sycan import autodraw
 netlist = """RC low-pass
@@ -9,8 +9,8 @@ C1 out 0 C
 """
 
 sol = solve_ac(parse(netlist))
-Vin = sp.Symbol("Vin")
-H = sol[sp.Symbol("V(out)")] / Vin
-print(f"$$H(s) = {sp.latex(sp.simplify(H))}$$")
+Vin = cas.Symbol("Vin")
+H = sol[cas.Symbol("V(out)")] / Vin
+print(f"$$H(s) = {cas.latex(cas.simplify(H))}$$")
 
 autodraw(netlist)

@@ -46,7 +46,7 @@ source impedance, namely
 
 which is exactly the condition the test below verifies symbolically.
 """
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_impedance
 
@@ -76,7 +76,7 @@ RL out 0 R_L
 
 def _r_p(K, mu, V_g_op, V_p_op):
     """Small-signal plate resistance at (V_g_op, V_p_op)."""
-    g_p = sp.Rational(3, 2) * K * (mu * V_g_op + V_p_op) ** sp.Rational(1, 2)
+    g_p = cas.Rational(3, 2) * K * (mu * V_g_op + V_p_op) ** cas.Rational(1, 2)
     return 1 / g_p
 
 
@@ -85,26 +85,26 @@ def _r_p(K, mu, V_g_op, V_p_op):
 def test_srpp_zout_closed_form():
     """The symbolic SRPP output impedance matches the textbook
     ``r_p (R_s + r_p) / (R_s (mu+1) + 2 r_p)`` closed form."""
-    K, mu, V_g_op, V_p_op, R_s, V_B = sp.symbols(
+    K, mu, V_g_op, V_p_op, R_s, V_B = cas.symbols(
         "K mu V_g_op V_p_op R_s V_B"
     )
     Z_out = solve_impedance(parse(_SRPP), "P_out", termination="auto")
 
     r_p = _r_p(K, mu, V_g_op, V_p_op)
     expected = r_p * (R_s + r_p) / (R_s * (mu + 1) + 2 * r_p)
-    assert sp.simplify(sp.together(Z_out - expected)) == 0
+    assert cas.simplify(cas.together(Z_out - expected)) == 0
 
 
 def test_srpp_optimal_load_for_distortion_cancellation():
     """In the large-R_s limit, Z_out -> r_p / (mu + 1); that matched
     source impedance is the optimal load R_L for 2nd-harmonic
     cancellation in an SRPP."""
-    K, mu, V_g_op, V_p_op, R_s, V_B = sp.symbols(
+    K, mu, V_g_op, V_p_op, R_s, V_B = cas.symbols(
         "K mu V_g_op V_p_op R_s V_B"
     )
     Z_out = solve_impedance(parse(_SRPP), "P_out", termination="auto")
 
-    Z_out_limit = sp.limit(Z_out, R_s, sp.oo)
+    Z_out_limit = cas.limit(Z_out, R_s, cas.oo)
     r_p = _r_p(K, mu, V_g_op, V_p_op)
     R_L_opt = r_p / (mu + 1)
-    assert sp.simplify(Z_out_limit - R_L_opt) == 0
+    assert cas.simplify(Z_out_limit - R_L_opt) == 0

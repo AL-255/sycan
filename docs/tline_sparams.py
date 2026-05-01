@@ -20,7 +20,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import abcd_to_s
 
@@ -29,18 +29,18 @@ from sycan import abcd_to_s
 # 1. Symbolic ABCD -> S
 # ---------------------------------------------------------------------------
 
-s, td, Zc, Z0 = sp.symbols("s td Zc Z0", positive=True)
+s, td, Zc, Z0 = cas.symbols("s td Zc Z0", positive=True)
 theta = s * td
 
-ABCD = sp.Matrix([
-    [sp.cosh(theta),        Zc * sp.sinh(theta)],
-    [sp.sinh(theta) / Zc,   sp.cosh(theta)],
+ABCD = cas.Matrix([
+    [cas.cosh(theta),        Zc * cas.sinh(theta)],
+    [cas.sinh(theta) / Zc,   cas.cosh(theta)],
 ])
 
 S_sym = abcd_to_s(ABCD, Z0)
-S_sym = sp.simplify(S_sym)
+S_sym = cas.simplify(S_sym)
 print("Symbolic S-matrix of a lossless line (s, td, Zc, Z0):")
-sp.pprint(S_sym)
+cas.pprint(S_sym)
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ Z0_val = 50.0
 
 # Lambdify against (s, Zc, Z0). theta = omega*td, so for a unit td we
 # can sweep s = j*theta directly.
-S_eval = sp.lambdify((s, td, Zc, Z0), S_sym, modules="numpy")
+S_eval = cas.lambdify((s, td, Zc, Z0), S_sym, modules="numpy")
 
 theta_axis = np.linspace(1e-6, 2 * np.pi, 401)
 td_val = 1.0          # arbitrary; only s*td matters
@@ -95,6 +95,6 @@ print(f"\nSaved {out}")
 # 4. Sanity: matched line is reflectionless and lossless
 # ---------------------------------------------------------------------------
 
-S_matched = sp.simplify(S_sym.subs(Zc, Z0))
+S_matched = cas.simplify(S_sym.subs(Zc, Z0))
 print("\nMatched line (Zc = Z0):")
-sp.pprint(S_matched)
+cas.pprint(S_matched)

@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B
 
@@ -21,19 +21,19 @@ class Resistor(Component):
     name: str
     n_plus: str
     n_minus: str
-    value: sp.Expr
+    value: cas.Expr
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("n_plus", "n_minus")
     SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"thermal"})
 
     def __post_init__(self) -> None:
-        self.value = sp.sympify(self.value)
+        self.value = cas.sympify(self.value)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def stamp(self, ctx: StampContext) -> None:
         i, j = ctx.n(self.n_plus), ctx.n(self.n_minus)
-        g = sp.Integer(1) / self.value
+        g = cas.Integer(1) / self.value
         if i >= 0:
             ctx.A[i, i] += g
         if j >= 0:

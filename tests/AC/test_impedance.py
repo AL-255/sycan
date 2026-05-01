@@ -3,7 +3,7 @@ measure ``di`` to back out ``Z = dv/di``. Other ports are terminated per
 the ``termination`` rule (open for Z-parameters, short for Y-parameters,
 or role-based for ``"auto"``).
 """
-import sympy as sp
+from sycan import cas as cas
 import pytest
 
 from sycan import parse, solve_impedance
@@ -17,9 +17,9 @@ R1 in mid R
 C1 mid 0 C
 .end
 """
-    R, C, s = sp.symbols("R C s")
+    R, C, s = cas.symbols("R C s")
     Z = solve_impedance(parse(netlist), "P1")
-    assert sp.simplify(sp.together(Z - (R + 1 / (s * C)))) == 0
+    assert cas.simplify(cas.together(Z - (R + 1 / (s * C)))) == 0
 
 
 def test_port_sees_two_parallel_resistors():
@@ -30,10 +30,10 @@ R1 in 0 R1
 R2 in 0 R2
 .end
 """
-    R1, R2 = sp.symbols("R1 R2")
+    R1, R2 = cas.symbols("R1 R2")
     Z = solve_impedance(parse(netlist), "P1")
     expected = R1 * R2 / (R1 + R2)
-    assert sp.simplify(Z - expected) == 0
+    assert cas.simplify(Z - expected) == 0
 
 
 def test_auto_termination_leaves_output_open():
@@ -47,9 +47,9 @@ R1 in out R1
 R2 in 0   R2
 .end
 """
-    R1, R2 = sp.symbols("R1 R2")
+    R1, R2 = cas.symbols("R1 R2")
     Z_in = solve_impedance(parse(netlist), "P_in", termination="auto")
-    assert sp.simplify(Z_in - R2) == 0
+    assert cas.simplify(Z_in - R2) == 0
 
 
 def test_y_parameter_termination_shorts_output():
@@ -63,12 +63,12 @@ R2 in 0   R2
 R3 out 0  R3
 .end
 """
-    R1, R2, R3 = sp.symbols("R1 R2 R3")
+    R1, R2, R3 = cas.symbols("R1 R2 R3")
     Z_in = solve_impedance(parse(netlist), "P_in", termination="y")
     # Short at P_out kills R3 (replaced by wire), and R1 sees ground
     # through the short => Z_in = R2 || R1.
     expected = R1 * R2 / (R1 + R2)
-    assert sp.simplify(Z_in - expected) == 0
+    assert cas.simplify(Z_in - expected) == 0
 
 
 def test_z_parameter_termination_opens_output():
@@ -82,7 +82,7 @@ R2 in 0   R2
 R3 out 0  R3
 .end
 """
-    R1, R2, R3 = sp.symbols("R1 R2 R3")
+    R1, R2, R3 = cas.symbols("R1 R2 R3")
     Z_in = solve_impedance(parse(netlist), "P_in", termination="z")
     expected = R2 * (R1 + R3) / (R1 + R2 + R3)
-    assert sp.simplify(Z_in - expected) == 0
+    assert cas.simplify(Z_in - expected) == 0

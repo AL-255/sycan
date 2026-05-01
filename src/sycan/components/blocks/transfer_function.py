@@ -22,15 +22,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSpec, StampContext
 
 
-def _is_finite(expr: sp.Expr) -> bool:
-    if expr in (sp.zoo, sp.oo, -sp.oo, sp.nan):
-        return False
-    return not expr.has(sp.zoo, sp.oo, sp.nan)
+def _is_finite(expr: cas.Expr) -> bool:
+    bad = (cas.zoo, cas.oo, -cas.oo, cas.nan)
+    # Walk every sub-expression — works on any CAS backend that exposes
+    # ``.args``. Symengine's ``.atoms()`` only enumerates Symbols, and
+    # ``.has(cls)`` is sympy-only, so neither shortcut is portable here.
+    stack = [expr]
+    while stack:
+        node = stack.pop()
+        if node in bad:
+            return False
+        stack.extend(getattr(node, "args", ()))
+    return True
 
 
 @dataclass
@@ -40,9 +48,9 @@ class TransferFunction(Component):
     in_m: str
     out_p: str
     out_m: str
-    H: sp.Expr
-    var: sp.Symbol = field(default_factory=lambda: sp.Symbol("s"))
-    dc_gain: Optional[sp.Expr] = None
+    H: cas.Expr
+    var: cas.Symbol = field(default_factory=lambda: cas.Symbol("s"))
+    dc_gain: Optional[cas.Expr] = None
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("in_p", "in_m", "out_p", "out_m")
@@ -50,13 +58,13 @@ class TransferFunction(Component):
     SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
-        self.H = sp.sympify(self.H)
-        self.var = sp.sympify(self.var)
+        self.H = cas.sympify(self.H)
+        self.var = cas.sympify(self.var)
         if self.dc_gain is not None:
-            self.dc_gain = sp.sympify(self.dc_gain)
+            self.dc_gain = cas.sympify(self.dc_gain)
         self.include_noise = self._normalize_noise(self.include_noise)
 
-    def _dc_gain_or_none(self) -> Optional[sp.Expr]:
+    def _dc_gain_or_none(self) -> Optional[cas.Expr]:
         if self.dc_gain is not None:
             return self.dc_gain
         g = self.H.subs(self.var, 0)

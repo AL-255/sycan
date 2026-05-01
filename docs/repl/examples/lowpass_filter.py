@@ -6,7 +6,7 @@ prototypes shipped in ``sycan.polynomials``, prints the LaTeX, and
 returns an inline SVG Bode plot via ``sycan.bode_svg``.
 """
 import numpy as np
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import bessel, bode_svg, butterworth, chebyshev1
 
@@ -21,7 +21,7 @@ try:
 except Exception:
     pass
 
-s = sp.Symbol("s")
+s = cas.Symbol("s")
 
 if family == "butterworth":
     num, denom = butterworth(order, s)
@@ -36,13 +36,13 @@ else:
     raise ValueError(f"unknown family: {family!r}")
 
 H = num / denom
-print(f"$$H(s) = {sp.latex(H)}$$")
+print(f"$$H(s) = {cas.latex(H)}$$")
 print()
 print(title)
 
 # Numerical Bode response.
 omegas = np.logspace(-2, 2, 401)
-H_fn = sp.lambdify(s, H, modules="numpy")
+H_fn = cas.lambdify(s, H, modules="numpy")
 H_vals = np.asarray(H_fn(1j * omegas), dtype=complex)
 mag_db = 20.0 * np.log10(np.maximum(np.abs(H_vals), 1e-12))
 phase_deg = np.degrees(np.unwrap(np.angle(H_vals)))

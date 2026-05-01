@@ -1,5 +1,5 @@
 """VCCS (SPICE G): transconductance gm into a load resistor."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_dc
 
@@ -18,6 +18,6 @@ W2 0_1 0_2; right
 
 def test_vccs_amplifier():
     sol = solve_dc(parse(NETLIST))
-    Vin, gm, RL = sp.symbols("Vin gm RL")
-    assert sp.simplify(sol[sp.Symbol("V(out)")] - gm * RL * Vin) == 0
-    assert sp.simplify(sol[sp.Symbol("I(V1)")]) == 0
+    Vin, gm, RL = cas.symbols("Vin gm RL")
+    assert cas.simplify(sol[cas.Symbol("V(out)")] - gm * RL * Vin) == 0
+    assert cas.simplify(sol[cas.Symbol("I(V1)")]) == 0

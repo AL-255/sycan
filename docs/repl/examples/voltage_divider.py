@@ -1,4 +1,4 @@
-import sympy as sp
+from sycan import cas as cas
 from sycan import parse, solve_dc
 from sycan import autodraw
 netlist = """voltage divider
@@ -9,6 +9,6 @@ R2 out 0 Rb
 """
 
 for sym, expr in solve_dc(parse(netlist)).items():
-    print(f"$${sp.latex(sym)} = {sp.latex(expr)}$$")
+    print(f"$${cas.latex(sym)} = {cas.latex(expr)}$$")
 
 autodraw(netlist)

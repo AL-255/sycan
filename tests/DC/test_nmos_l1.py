@@ -9,7 +9,7 @@ for both, the expected drain current is
 
 where ``pol = +1`` for NMOS and ``-1`` for PMOS.
 """
-import sympy as sp
+from sycan import cas as cas
 import pytest
 
 from sycan import parse, solve_dc
@@ -23,26 +23,26 @@ Vds d 0 V_DS
 M1 d g 0 {model} mu_n Cox W L V_TH lam
 .end
 """
-    V_GS, V_DS, mu_n, Cox, W, L, V_TH, lam = sp.symbols(
+    V_GS, V_DS, mu_n, Cox, W, L, V_TH, lam = cas.symbols(
         "V_GS V_DS mu_n Cox W L V_TH lam"
     )
     sol = solve_dc(parse(netlist))
 
-    pol_s = sp.Integer(pol)
+    pol_s = cas.Integer(pol)
     V_GS_eff = pol_s * V_GS
     V_DS_eff = pol_s * V_DS
     I_D_mag = (
-        sp.Rational(1, 2)
+        cas.Rational(1, 2)
         * mu_n * Cox * (W / L)
         * (V_GS_eff - V_TH) ** 2
         * (1 + lam * V_DS_eff)
     )
     I_D_expected = pol_s * I_D_mag  # SPICE sign (into drain)
 
-    assert sp.simplify(sol[sp.Symbol("V(g)")] - V_GS) == 0
-    assert sp.simplify(sol[sp.Symbol("V(d)")] - V_DS) == 0
-    assert sp.simplify(sol[sp.Symbol("I(Vgs)")]) == 0
-    assert sp.simplify(sol[sp.Symbol("I(Vds)")] + I_D_expected) == 0
+    assert cas.simplify(sol[cas.Symbol("V(g)")] - V_GS) == 0
+    assert cas.simplify(sol[cas.Symbol("V(d)")] - V_DS) == 0
+    assert cas.simplify(sol[cas.Symbol("I(Vgs)")]) == 0
+    assert cas.simplify(sol[cas.Symbol("I(Vds)")] + I_D_expected) == 0
 
 
 @pytest.mark.parametrize("model,pol", [("NMOS_L1", 1), ("PMOS_L1", -1)])

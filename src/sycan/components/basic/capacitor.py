@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSpec, StampContext
 
@@ -25,14 +25,14 @@ class Capacitor(Component):
     name: str
     n_plus: str
     n_minus: str
-    value: sp.Expr
+    value: cas.Expr
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("n_plus", "n_minus")
     SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset()
 
     def __post_init__(self) -> None:
-        self.value = sp.sympify(self.value)
+        self.value = cas.sympify(self.value)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def stamp(self, ctx: StampContext) -> None:

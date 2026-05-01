@@ -1,0 +1,178 @@
+{
+  "sympy": {
+    "cold_import_ms": 118.375,
+    "bench":
+      {
+        "backend": "sympy",
+        "python": "3.13.9",
+        "n_iters": 7,
+        "scenarios": [
+          {
+            "name": "parse_value (6 tokens)",
+            "cold_s": 0.00019927299581468105,
+            "warm_median_s": 1.1220516171306372e-05,
+            "warm_min_s": 1.0329997166991234e-05,
+            "warm_max_s": 1.863500801846385e-05
+          },
+          {
+            "name": "parse small netlist",
+            "cold_s": 4.375202115625143e-05,
+            "warm_median_s": 1.052499283105135e-05,
+            "warm_min_s": 8.725968655198812e-06,
+            "warm_max_s": 1.90959544852376e-05
+          },
+          {
+            "name": "solve_dc linear (vdivider)",
+            "cold_s": 0.05994244001340121,
+            "warm_median_s": 0.005072936008218676,
+            "warm_min_s": 0.004892524040769786,
+            "warm_max_s": 0.005262886988930404
+          },
+          {
+            "name": "build_mna DC (2T-vref)",
+            "cold_s": 0.00015264505054801702,
+            "warm_median_s": 8.289498509839177e-05,
+            "warm_min_s": 8.126202737912536e-05,
+            "warm_max_s": 9.4005954451859e-05
+          },
+          {
+            "name": "solve_ac H(s) RC lowpass",
+            "cold_s": 0.0027859419933520257,
+            "warm_median_s": 0.00032757248845882714,
+            "warm_min_s": 0.00031433801632374525,
+            "warm_max_s": 0.00040498794987797737
+          },
+          {
+            "name": "solve_dc nonlinear (CS amp)",
+            "cold_s": 0.016786076012067497,
+            "warm_median_s": 0.007193478522822261,
+            "warm_min_s": 0.006896202976349741,
+            "warm_max_s": 0.007441251946147531
+          },
+          {
+            "name": "solve_impedance Z_in / Z_out",
+            "cold_s": 0.006764997029677033,
+            "warm_median_s": 0.0011313764844089746,
+            "warm_min_s": 0.0010744709870778024,
+            "warm_max_s": 0.0014084649737924337
+          },
+          {
+            "name": "solve_noise RC thermal",
+            "cold_s": 0.0015408630133606493,
+            "warm_median_s": 0.0003737890219781548,
+            "warm_min_s": 0.00036089500645175576,
+            "warm_max_s": 0.00041887402767315507
+          },
+          {
+            "name": "solve_headroom (op_point)",
+            "cold_s": 0.04942421999294311,
+            "warm_median_s": 0.02485160599462688,
+            "warm_min_s": 0.024517350015230477,
+            "warm_max_s": 0.025453753012698144
+          },
+          {
+            "name": "butterworth(5) prototype",
+            "cold_s": 0.008723481034394354,
+            "warm_median_s": 0.0006851464859209955,
+            "warm_min_s": 0.0006710460293106735,
+            "warm_max_s": 0.0008406729903072119
+          },
+          {
+            "name": "lambdify+evaluate 32x32 grid",
+            "cold_s": 0.041863985999953,
+            "warm_median_s": 0.0005040080286562443,
+            "warm_min_s": 0.00045755598694086075,
+            "warm_max_s": 0.0006966529763303697
+          }
+        ]
+      }
+  },
+  "symengine": {
+    "cold_import_ms": 202.275,
+    "bench":
+      {
+        "backend": "symengine",
+        "python": "3.13.9",
+        "n_iters": 7,
+        "scenarios": [
+          {
+            "name": "parse_value (6 tokens)",
+            "cold_s": 6.462098099291325e-05,
+            "warm_median_s": 1.5153520507737994e-05,
+            "warm_min_s": 1.4316989108920097e-05,
+            "warm_max_s": 2.0276987925171852e-05
+          },
+          {
+            "name": "parse small netlist",
+            "cold_s": 3.728998126462102e-05,
+            "warm_median_s": 8.951465133577585e-06,
+            "warm_min_s": 8.416012860834599e-06,
+            "warm_max_s": 1.5138008166104555e-05
+          },
+          {
+            "name": "solve_dc linear (vdivider)",
+            "cold_s": 0.059629384020809084,
+            "warm_median_s": 0.005402433016570285,
+            "warm_min_s": 0.005224074004217982,
+            "warm_max_s": 0.006972886039875448
+          },
+          {
+            "name": "build_mna DC (2T-vref)",
+            "cold_s": 9.6180010586977e-05,
+            "warm_median_s": 5.530298221856356e-05,
+            "warm_min_s": 5.252897972241044e-05,
+            "warm_max_s": 0.00014649395598098636
+          },
+          {
+            "name": "solve_ac H(s) RC lowpass",
+            "cold_s": 8.570001227781177e-05,
+            "warm_median_s": 4.4297485146671534e-05,
+            "warm_min_s": 4.0966959204524755e-05,
+            "warm_max_s": 5.708599928766489e-05
+          },
+          {
+            "name": "solve_dc nonlinear (CS amp)",
+            "cold_s": 0.016860284958966076,
+            "warm_median_s": 0.007493254990549758,
+            "warm_min_s": 0.007254121999721974,
+            "warm_max_s": 0.007738338026683778
+          },
+          {
+            "name": "solve_impedance Z_in / Z_out",
+            "cold_s": 0.00025471695698797703,
+            "warm_median_s": 0.0001605055294930935,
+            "warm_min_s": 0.0001357640139758587,
+            "warm_max_s": 0.00025179097428917885
+          },
+          {
+            "name": "solve_noise RC thermal",
+            "cold_s": 0.00010107900016009808,
+            "warm_median_s": 4.95979911647737e-05,
+            "warm_min_s": 4.670699127018452e-05,
+            "warm_max_s": 6.334797944873571e-05
+          },
+          {
+            "name": "solve_headroom (op_point)",
+            "cold_s": 0.040738870040513575,
+            "warm_median_s": 0.01698426145594567,
+            "warm_min_s": 0.01649940002243966,
+            "warm_max_s": 0.017606140987481922
+          },
+          {
+            "name": "butterworth(5) prototype",
+            "cold_s": 0.0031097079627215862,
+            "warm_median_s": 0.0005579689750447869,
+            "warm_min_s": 0.0005429059965535998,
+            "warm_max_s": 0.0006863240269012749
+          },
+          {
+            "name": "lambdify+evaluate 32x32 grid",
+            "cold_s": 0.04157442401628941,
+            "warm_median_s": 0.0005356570181902498,
+            "warm_min_s": 0.0005130289937369525,
+            "warm_max_s": 0.0007157489890232682
+          }
+        ]
+      }
+  }
+}

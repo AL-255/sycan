@@ -22,14 +22,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, q
 
 # Thermal voltage kT/q at ~300 K, in volts.
-_DEFAULT_VT = sp.Rational(2585, 100000)
+_DEFAULT_VT = cas.Rational(2585, 100000)
 # Typical sub-threshold slope factor for a long-channel MOSFET.
-_DEFAULT_M = sp.Rational(3, 2)
+_DEFAULT_M = cas.Rational(3, 2)
 
 
 @dataclass
@@ -38,14 +38,14 @@ class _MOSFET_subthreshold(Component):
     drain: str
     gate: str
     source: str
-    mu_n: sp.Expr
-    Cox: sp.Expr
-    W: sp.Expr
-    L: sp.Expr
-    V_TH: sp.Expr  # positive magnitude for both polarities
-    m: sp.Expr = field(default_factory=lambda: _DEFAULT_M)
-    V_T: sp.Expr = field(default_factory=lambda: _DEFAULT_VT)
-    I_op: Optional[sp.Expr] = None
+    mu_n: cas.Expr
+    Cox: cas.Expr
+    W: cas.Expr
+    L: cas.Expr
+    V_TH: cas.Expr  # positive magnitude for both polarities
+    m: cas.Expr = field(default_factory=lambda: _DEFAULT_M)
+    V_T: cas.Expr = field(default_factory=lambda: _DEFAULT_VT)
+    I_op: Optional[cas.Expr] = None
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("drain", "gate", "source")
@@ -59,17 +59,17 @@ class _MOSFET_subthreshold(Component):
                 "_MOSFET_subthreshold is abstract; instantiate "
                 "NMOS_subthreshold or PMOS_subthreshold."
             )
-        self.mu_n = sp.sympify(self.mu_n)
-        self.Cox = sp.sympify(self.Cox)
-        self.W = sp.sympify(self.W)
-        self.L = sp.sympify(self.L)
-        self.V_TH = sp.sympify(self.V_TH)
-        self.m = sp.sympify(self.m)
-        self.V_T = sp.sympify(self.V_T)
+        self.mu_n = cas.sympify(self.mu_n)
+        self.Cox = cas.sympify(self.Cox)
+        self.W = cas.sympify(self.W)
+        self.L = cas.sympify(self.L)
+        self.V_TH = cas.sympify(self.V_TH)
+        self.m = cas.sympify(self.m)
+        self.V_T = cas.sympify(self.V_T)
         if self.I_op is None:
-            self.I_op = sp.Symbol(f"I_op_{self.name}")
+            self.I_op = cas.Symbol(f"I_op_{self.name}")
         else:
-            self.I_op = sp.sympify(self.I_op)
+            self.I_op = cas.sympify(self.I_op)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def noise_sources(self) -> list[NoiseSource]:
@@ -87,8 +87,8 @@ class _MOSFET_subthreshold(Component):
         return out
 
     @property
-    def _pol(self) -> sp.Expr:
-        return sp.Integer(1) if self.polarity == "N" else sp.Integer(-1)
+    def _pol(self) -> cas.Expr:
+        return cas.Integer(1) if self.polarity == "N" else cas.Integer(-1)
 
     def stamp(self, ctx: StampContext) -> None:
         return None
@@ -102,9 +102,9 @@ class _MOSFET_subthreshold(Component):
         g_idx = ctx.n(self.gate)
         s_idx = ctx.n(self.source)
 
-        V_d = ctx.x[d_idx] if d_idx >= 0 else sp.Integer(0)
-        V_g = ctx.x[g_idx] if g_idx >= 0 else sp.Integer(0)
-        V_s = ctx.x[s_idx] if s_idx >= 0 else sp.Integer(0)
+        V_d = ctx.x[d_idx] if d_idx >= 0 else cas.Integer(0)
+        V_g = ctx.x[g_idx] if g_idx >= 0 else cas.Integer(0)
+        V_s = ctx.x[s_idx] if s_idx >= 0 else cas.Integer(0)
 
         pol = self._pol
         V_GS_eff = pol * (V_g - V_s)
@@ -113,8 +113,8 @@ class _MOSFET_subthreshold(Component):
         prefactor = self.mu_n * self.Cox * (self.W / self.L) * self.V_T ** 2
         I_D_mag = (
             prefactor
-            * sp.exp((V_GS_eff - self.m * self.V_TH) / (self.m * self.V_T))
-            * (1 - sp.exp(-V_DS_eff / self.V_T))
+            * cas.exp((V_GS_eff - self.m * self.V_TH) / (self.m * self.V_T))
+            * (1 - cas.exp(-V_DS_eff / self.V_T))
         )
         I_D = pol * I_D_mag
 

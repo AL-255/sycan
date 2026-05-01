@@ -1,4 +1,4 @@
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import autodraw, parse, solve_dc
 from sycan.plot_util import fmt
@@ -32,7 +32,7 @@ MP  out in VDD PMOS_3T {BETA_P} 1 1 1 {V_TH_P} {LAMBDA} {M_SUB} {V_T}
 
 c = parse(NETLIST)
 sol = solve_dc(c, simplify=False)
-V_out = float(sol[sp.Symbol("V(out)")])
+V_out = float(sol[cas.Symbol("V(out)")])
 
 # Pull the parsed MOSFETs back out so we can ask each device about its
 # region / drain current at the operating point we just solved for.

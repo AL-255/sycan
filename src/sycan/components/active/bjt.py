@@ -52,11 +52,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
-import sympy as sp
+from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, q
 
-_DEFAULT_VT = sp.Rational(2585, 100000)
+_DEFAULT_VT = cas.Rational(2585, 100000)
 
 
 @dataclass
@@ -76,22 +76,22 @@ class BJT(Component):
     base: str
     emitter: str
     polarity: str  # "NPN" or "PNP"
-    IS: sp.Expr
-    BF: sp.Expr
-    BR: sp.Expr
-    NF: sp.Expr = field(default_factory=lambda: sp.Integer(1))
-    NR: sp.Expr = field(default_factory=lambda: sp.Integer(1))
-    VAF: sp.Expr = field(default_factory=lambda: sp.oo)
-    VAR: sp.Expr = field(default_factory=lambda: sp.oo)
-    IKF: sp.Expr = field(default_factory=lambda: sp.oo)
-    IKR: sp.Expr = field(default_factory=lambda: sp.oo)
-    ISE: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    NE: sp.Expr = field(default_factory=lambda: sp.Rational(3, 2))
-    ISC: sp.Expr = field(default_factory=lambda: sp.Integer(0))
-    NC: sp.Expr = field(default_factory=lambda: sp.Integer(2))
-    V_T: sp.Expr = field(default_factory=lambda: _DEFAULT_VT)
-    I_C_op: Optional[sp.Expr] = None
-    I_B_op: Optional[sp.Expr] = None
+    IS: cas.Expr
+    BF: cas.Expr
+    BR: cas.Expr
+    NF: cas.Expr = field(default_factory=lambda: cas.Integer(1))
+    NR: cas.Expr = field(default_factory=lambda: cas.Integer(1))
+    VAF: cas.Expr = field(default_factory=lambda: cas.oo)
+    VAR: cas.Expr = field(default_factory=lambda: cas.oo)
+    IKF: cas.Expr = field(default_factory=lambda: cas.oo)
+    IKR: cas.Expr = field(default_factory=lambda: cas.oo)
+    ISE: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    NE: cas.Expr = field(default_factory=lambda: cas.Rational(3, 2))
+    ISC: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    NC: cas.Expr = field(default_factory=lambda: cas.Integer(2))
+    V_T: cas.Expr = field(default_factory=lambda: _DEFAULT_VT)
+    I_C_op: Optional[cas.Expr] = None
+    I_B_op: Optional[cas.Expr] = None
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("collector", "base", "emitter")
@@ -110,15 +110,15 @@ class BJT(Component):
             "VAF", "VAR", "IKF", "IKR",
             "ISE", "NE", "ISC", "NC", "V_T",
         ):
-            setattr(self, attr, sp.sympify(getattr(self, attr)))
+            setattr(self, attr, cas.sympify(getattr(self, attr)))
         if self.I_C_op is None:
-            self.I_C_op = sp.Symbol(f"I_C_op_{self.name}")
+            self.I_C_op = cas.Symbol(f"I_C_op_{self.name}")
         else:
-            self.I_C_op = sp.sympify(self.I_C_op)
+            self.I_C_op = cas.sympify(self.I_C_op)
         if self.I_B_op is None:
-            self.I_B_op = sp.Symbol(f"I_B_op_{self.name}")
+            self.I_B_op = cas.Symbol(f"I_B_op_{self.name}")
         else:
-            self.I_B_op = sp.sympify(self.I_B_op)
+            self.I_B_op = cas.sympify(self.I_B_op)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def noise_sources(self) -> list[NoiseSource]:
@@ -156,26 +156,26 @@ class BJT(Component):
         b_idx = ctx.n(self.base)
         e_idx = ctx.n(self.emitter)
 
-        V_C = ctx.x[c_idx] if c_idx >= 0 else sp.Integer(0)
-        V_B = ctx.x[b_idx] if b_idx >= 0 else sp.Integer(0)
-        V_E = ctx.x[e_idx] if e_idx >= 0 else sp.Integer(0)
+        V_C = ctx.x[c_idx] if c_idx >= 0 else cas.Integer(0)
+        V_B = ctx.x[b_idx] if b_idx >= 0 else cas.Integer(0)
+        V_E = ctx.x[e_idx] if e_idx >= 0 else cas.Integer(0)
 
-        pol = sp.Integer(1) if self.polarity == "NPN" else sp.Integer(-1)
+        pol = cas.Integer(1) if self.polarity == "NPN" else cas.Integer(-1)
         V_BE = pol * (V_B - V_E)
         V_BC = pol * (V_B - V_C)
 
         # Ideal transport currents.
-        I_BF = self.IS * (sp.exp(V_BE / (self.NF * self.V_T)) - 1)
-        I_BR = self.IS * (sp.exp(V_BC / (self.NR * self.V_T)) - 1)
+        I_BF = self.IS * (cas.exp(V_BE / (self.NF * self.V_T)) - 1)
+        I_BR = self.IS * (cas.exp(V_BC / (self.NR * self.V_T)) - 1)
 
         # Base-charge factor (Early + high-level injection).
         q_1 = 1 / (1 - V_BC / self.VAF - V_BE / self.VAR)
         q_2 = I_BF / self.IKF + I_BR / self.IKR
-        q_B = (q_1 / 2) * (1 + sp.sqrt(1 + 4 * q_2))
+        q_B = (q_1 / 2) * (1 + cas.sqrt(1 + 4 * q_2))
 
         # Non-ideal leakage diodes (skip cleanly when ISE/ISC are zero).
-        I_BE_leak = self.ISE * (sp.exp(V_BE / (self.NE * self.V_T)) - 1)
-        I_BC_leak = self.ISC * (sp.exp(V_BC / (self.NC * self.V_T)) - 1)
+        I_BE_leak = self.ISE * (cas.exp(V_BE / (self.NE * self.V_T)) - 1)
+        I_BC_leak = self.ISC * (cas.exp(V_BC / (self.NC * self.V_T)) - 1)
 
         # Internal branch currents.
         I_BE_total = I_BF / self.BF + I_BE_leak

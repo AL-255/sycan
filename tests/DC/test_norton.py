@@ -1,5 +1,5 @@
 """Norton: independent current source with a parallel resistor."""
-import sympy as sp
+from sycan import cas as cas
 
 from sycan import parse, solve_dc
 
@@ -16,5 +16,5 @@ W1 0 0_1; right
 
 def test_norton_voltage():
     sol = solve_dc(parse(NETLIST))
-    Is, R = sp.symbols("Is R")
-    assert sp.simplify(sol[sp.Symbol("V(n)")] - Is * R) == 0
+    Is, R = cas.symbols("Is R")
+    assert cas.simplify(sol[cas.Symbol("V(n)")] - Is * R) == 0
