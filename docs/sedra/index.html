@@ -130,6 +130,7 @@
   #canvas-wrap.panning { cursor: grabbing; }
   #canvas-wrap.moving  { cursor: move; }
   #canvas-wrap.picking-anchor { cursor: crosshair; }
+  #canvas-wrap.picking-node   { cursor: help; }
   #canvas {
     width: 100%; height: 100%;
     display: block;
@@ -192,6 +193,52 @@
   }
   .netlist-actions button:hover { background: var(--hover); }
 
+  /* Node-expression pane */
+  #calc-pane {
+    flex: none;
+    max-height: 220px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .calc-controls {
+    display: flex; gap: 6px; align-items: center;
+    margin-bottom: 6px; flex: none;
+  }
+  .calc-controls button {
+    background: var(--btn-bg); color: var(--btn-fg);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 4px 10px; cursor: pointer; font-size: 12px;
+    flex: none;
+  }
+  .calc-controls button:hover { background: var(--hover); }
+  .calc-controls button.armed {
+    background: var(--select); color: white; border-color: var(--select);
+  }
+  .calc-status {
+    color: var(--muted); font-size: 0.78rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1;
+  }
+  .calc-output {
+    flex: 1; min-height: 0; overflow: auto;
+    padding: 6px 8px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .calc-output .calc-node-name {
+    color: var(--select); font-weight: 600;
+  }
+  .calc-output .calc-expr {
+    margin-top: 4px; white-space: pre-wrap; word-break: break-word;
+  }
+  .calc-output .calc-mathjax {
+    margin-top: 6px; font-family: serif; font-size: 13px;
+  }
+  .calc-output .calc-err {
+    color: #d33; white-space: pre-wrap;
+  }
+
   /* Status / hint bar */
   #hint {
     padding: 4px 12px; font-size: 0.78rem; color: var(--muted);
@@ -240,6 +287,20 @@
   }
   .terminal { fill: var(--terminal); stroke: none; }
   .node-dot { fill: var(--stroke); stroke: none; }
+  .net-label-text {
+    fill: var(--stroke); font-size: 11px; font-weight: 600;
+    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    pointer-events: none; user-select: none;
+  }
+  .net-label-bg {
+    fill: var(--bg); stroke: var(--stroke); stroke-width: 1;
+    rx: 3; ry: 3; pointer-events: none;
+  }
+  .calc-node-highlight {
+    fill: none; stroke: var(--select); stroke-width: 3;
+    stroke-dasharray: 6 4; opacity: 0.7;
+    pointer-events: none;
+  }
   .preview {
     fill: none; stroke: var(--preview); stroke-width: 1.6;
     stroke-dasharray: 4 3; opacity: 0.85;
@@ -443,6 +504,22 @@
       <div class="empty-msg">Click an element to inspect.</div>
     </div>
 
+    <h3>Node expression</h3>
+    <div id="calc-pane" class="pane">
+      <div class="calc-controls">
+        <button id="btn-calc-node" title="Symbolically solve a node voltage with sycan">Calc Node</button>
+        <select id="calc-mode" class="picker" title="Analysis mode" style="min-width: 70px; flex: none;">
+          <option value="auto" selected>Auto</option>
+          <option value="dc">DC</option>
+          <option value="ac">AC</option>
+        </select>
+        <span id="calc-status" class="calc-status"></span>
+      </div>
+      <div id="calc-output" class="calc-output">
+        <div class="empty-msg">Click <em>Calc Node</em>, then click a wire or terminal to compute its symbolic voltage.</div>
+      </div>
+    </div>
+
     <h3>Netlist</h3>
     <div id="netlist-pane">
       <textarea id="netlist" readonly spellcheck="false" wrap="off"></textarea>
@@ -458,6 +535,20 @@
 <div id="hint"></div>
 
 <input type="file" id="file-input" accept=".json,application/json" style="display:none">
+
+<!-- MathJax (loaded async; the editor checks for window.MathJax before
+     using it and falls back to plain text if it never resolves). -->
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['$', '$']], displayMath: [['$$', '$$']] },
+  svg: { fontCache: 'global' },
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+
+<!-- Pyodide (loaded async; the Calc Node button kicks off
+     `loadPyodide()` lazily on first use — see editor.js). -->
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js" async></script>
 
 <!-- Two-file split: glyphs.js owns the component library + glyph
      drawing; editor.js owns state/UI/persistence. `defer` keeps

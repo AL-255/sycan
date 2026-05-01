@@ -385,6 +385,32 @@ async function loadGlyphs() {
   glyphsReady = true;
 }
 
+// Pick an anchor point + axis along which to render a wire's net label
+// (or any annotation that wants to "ride" the wire). We choose the
+// midpoint of the wire's longest axis-aligned segment, with the label
+// kept upright (so vertical segments still get horizontal text — placed
+// to the right of the segment rather than rotated).
+//
+// Returns: { x, y, axis } where axis ∈ {'h','v'} reflects the segment
+// direction, or null if the wire has no segments.
+function wireLabelAnchor(wire) {
+  if (!wire || !wire.points || wire.points.length < 2) return null;
+  let bestLen = -1, bestSeg = null;
+  for (let i = 1; i < wire.points.length; i++) {
+    const a = wire.points[i - 1], b = wire.points[i];
+    const len = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+    if (len > bestLen) { bestLen = len; bestSeg = [a, b]; }
+  }
+  if (!bestSeg) return null;
+  const [a, b] = bestSeg;
+  return {
+    x: (a[0] + b[0]) / 2,
+    y: (a[1] + b[1]) / 2,
+    axis: a[1] === b[1] ? 'h' : 'v',
+  };
+}
+
+
 function rotateLocal([lx, ly], rot, cx, cy) {
   let x, y;
   switch (((rot % 360) + 360) % 360) {

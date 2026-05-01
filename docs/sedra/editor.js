@@ -61,6 +61,18 @@ const state = {
   //     freshlyPasted: boolean,         // true → cancel removes the items
   //   }
   moveDraft: null,
+  // Calc Node mode: armed by clicking the "Calc Node" button.
+  // While armed, the next canvas click picks the net to evaluate
+  // (clicking either a wire or close enough to a part terminal).
+  // After evaluation, we stash the resolved node name + the set of
+  // grid points that belong to it so the renderer can outline the net
+  // in the calc-node-highlight style. Cleared when the user picks a
+  // different element, types a new label, or hits the button again.
+  //   { armed: boolean, mode: 'auto'|'dc'|'ac' }
+  calcNode: { armed: false, mode: 'auto' },
+  // Most recent calc-node result for the highlight overlay.
+  //   { node: string, gridPoints: Set<"x,y"> }
+  calcNodeHighlight: null,
 };
 
 // Clipboard. Holds both parts and wires; positions are offsets from
@@ -147,6 +159,12 @@ function render() {
                  'data-id': w.id, 'data-kind': 'wire' }, svg);
   }
 
+  // Layer 1.5: net-label tags. We draw each labelled wire's name as a
+  // small bordered tag riding the longest segment. Background rect
+  // sized via getBBox after the text node lands, so font-metric
+  // differences across browsers don't leave whitespace inside the box.
+  drawNetLabels();
+
   // Layer 2: parts
   const partsLayer = el('g', { id: 'parts-layer' }, svg);
   const hitLayer = el('g', { id: 'hit-layer' }, svg);
@@ -157,6 +175,9 @@ function render() {
     });
     partsLayer.appendChild(g);
   }
+
+  // Layer 2.5: highlight the most recently picked calc-node net.
+  drawCalcNodeHighlight();
 
   // Layer 3: node dots at junctions where >=3 endpoints meet
   drawJunctions();
@@ -258,6 +279,77 @@ function drawGrid() {
     'stroke-width': 1,
     'stroke-linecap': 'butt',
   }, svg);
+}
+
+// Render net-label tags for every wire that has a `label`. The tag
+// rides the midpoint of the wire's longest axis-aligned segment; we
+// pad the background rect with `getBBox` after appending the <text>
+// so the box hugs the actual rendered glyph metrics.
+function drawNetLabels() {
+  for (const w of state.wires) {
+    if (!w.label) continue;
+    const a = wireLabelAnchor(w);
+    if (!a) continue;
+    // Offset the tag a bit off the segment so it doesn't sit on the
+    // wire stroke. Horizontal segments → above; vertical → to the
+    // right (text stays horizontal either way).
+    const dx = a.axis === 'v' ? 8 : 0;
+    const dy = a.axis === 'h' ? -8 : 0;
+    const tx = a.x + dx;
+    const ty = a.y + dy;
+    const text = el('text', {
+      x: tx, y: ty,
+      class: 'net-label-text',
+      'text-anchor': a.axis === 'v' ? 'start' : 'middle',
+      'dominant-baseline': a.axis === 'h' ? 'auto' : 'middle',
+    }, svg);
+    text.textContent = w.label;
+    // Lay out the background rect by reading the rendered text bbox.
+    let bb;
+    try { bb = text.getBBox(); } catch (_) { bb = null; }
+    if (bb) {
+      const pad = 3;
+      const rect = el('rect', {
+        x: bb.x - pad, y: bb.y - pad,
+        width: bb.width + 2 * pad,
+        height: bb.height + 2 * pad,
+        class: 'net-label-bg',
+      });
+      // Insert behind the text so the text remains legible.
+      svg.insertBefore(rect, text);
+    }
+  }
+}
+
+// Strong dashed outline around the most recently picked calc-node net
+// (parts at terminals + every wire path). Helps the user keep track
+// of which node the on-pane expression refers to as they move on.
+function drawCalcNodeHighlight() {
+  if (!state.calcNodeHighlight) return;
+  const set = state.calcNodeHighlight.gridPoints;
+  if (!set || !set.size) return;
+  const isPt = (x, y) => set.has(`${x},${y}`);
+  for (const w of state.wires) {
+    // Highlight a wire if every vertex of any sub-path lies in the set.
+    // Cheap approximation: highlight the whole wire if any vertex is in
+    // the set — wires almost always sit fully on a single net thanks
+    // to coalesceJunctions, so cross-net wires would have to be drawn
+    // deliberately.
+    if (w.points.some(([x, y]) => isPt(x, y))) {
+      el('path', { d: wirePath(w.points), class: 'calc-node-highlight' }, svg);
+    }
+  }
+  // Ring each part terminal that sits on the net.
+  for (const p of state.parts) {
+    for (const t of partTerminals(p)) {
+      if (isPt(t.pos[0], t.pos[1])) {
+        el('circle', {
+          cx: t.pos[0], cy: t.pos[1], r: 7,
+          class: 'calc-node-highlight',
+        }, svg);
+      }
+    }
+  }
 }
 
 function drawJunctions() {
@@ -421,6 +513,7 @@ function setTool(tool) {
   // restores positions; anchor-pick simply forgets the request.)
   if (state.moveDraft) cancelMove();
   if (state.copyAnchorPending) cancelCopyAnchor();
+  if (state.calcNode.armed) cancelCalcNodePick();
   state.tool = tool;
   state.wireDraft = null;
   state.boxSelect = null;
@@ -448,6 +541,9 @@ function refreshHint() {
   if (state.copyAnchorPending) {
     const verb = state.copyAnchorPending.cut ? 'cut' : 'copy';
     h = `Click to pick anchor point for ${verb}. <kbd>Esc</kbd> to cancel.`;
+  } else if (state.calcNode.armed) {
+    h = 'Calc Node: click on a wire or part terminal to compute its ' +
+        'symbolic voltage. <kbd>Esc</kbd> to cancel.';
   } else if (state.moveDraft) {
     if (state.moveDraft.freshlyPasted) {
       h = 'Place paste: move the cursor, <kbd>click</kbd> to drop, <kbd>Esc</kbd> to cancel.';
@@ -495,9 +591,10 @@ wrap.addEventListener('mousedown', (e) => {
   // click after a real drag, so the flag would otherwise linger.)
   suppressNextClick = false;
 
-  // Anchor-pick mode swallows the mousedown so the next click lands
-  // on `finalizeCopyAnchor` rather than starting a box-select / move.
-  if (state.copyAnchorPending && e.button === 0) {
+  // Anchor-pick / calc-node-pick swallow the mousedown so the next
+  // click lands on the dedicated finalisers rather than starting a
+  // box-select / move.
+  if ((state.copyAnchorPending || state.calcNode.armed) && e.button === 0) {
     e.preventDefault();
     return;
   }
@@ -678,6 +775,13 @@ wrap.addEventListener('click', (e) => {
   // the clipboard with offsets relative to this point.
   if (state.copyAnchorPending) {
     finalizeCopyAnchor(snapPt(eventToWorld(e)));
+    return;
+  }
+
+  // Calc-node pick swallows the click, resolves the net under the
+  // cursor, and runs the symbolic solver.
+  if (state.calcNode.armed) {
+    finalizeCalcNodePick(snapPt(eventToWorld(e)), eventToWorld(e));
     return;
   }
 
@@ -922,6 +1026,45 @@ function refreshProps() {
     const lab2 = document.createElement('label');
     lab2.innerHTML = `<span>Id</span><span>${wire.id}</span>`;
     propPane.appendChild(lab2);
+
+    // Editable net label. The same label propagates to every wire in
+    // the same connected component via the netlist generator, but it's
+    // *stored* per-wire so the user has a single owner to delete it.
+    const labRow = document.createElement('label');
+    const sp = document.createElement('span'); sp.textContent = 'Net label';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = wire.label || '';
+    inp.placeholder = 'in / out / vbias';
+    inp.title = 'Letters, digits and underscore. Must contain a letter ' +
+                'and may not be "0" (reserved for ground).';
+    inp.addEventListener('change', () => {
+      const raw = inp.value.trim();
+      if (!raw) {
+        delete wire.label;
+        pushHistory();
+        render();
+        refreshProps();
+        return;
+      }
+      const cleaned = sanitizeNetLabel(raw);
+      if (!cleaned) {
+        alert(`"${raw}" is not a valid net label. Use letters, digits ` +
+              `and "_"; must contain a letter and may not be "0".`);
+        inp.value = wire.label || '';
+        return;
+      }
+      wire.label = cleaned;
+      pushHistory();
+      render();
+      refreshProps();
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') inp.blur();
+    });
+    labRow.appendChild(sp); labRow.appendChild(inp);
+    propPane.appendChild(labRow);
+
     const info = document.createElement('div');
     info.style.cssText = 'color: var(--muted); font-size: 0.78rem; margin-top: 6px;';
     info.textContent = `${segs} segment${segs === 1 ? '' : 's'}, ` +
@@ -1008,10 +1151,42 @@ function refreshProps() {
 //      the rest get assigned 1, 2, ... by first-encounter order.
 // ------------------------------------------------------------------
 function updateNetlist() {
-  netlistEl.value = generateNetlist();
+  netlistEl.value = buildNetlist().text;
 }
 
-function generateNetlist() {
+// Net label rules:
+//   * Allowed characters: A-Z a-z 0-9 _ . Must contain at least one
+//     letter (so it can't collide with the auto-numbered 1, 2, 3, ...
+//     SPICE node names) and must not equal "0" (reserved for ground).
+//   * Returned in lower-case (SPICE is case-insensitive about nodes;
+//     using a single case keeps `nc_plus` and `NC_PLUS` from colliding
+//     across two wires).
+//   * Returns null for invalid labels — caller should warn or fall
+//     back to the auto-numbered name.
+function sanitizeNetLabel(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s) return null;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) return null;
+  if (s.toLowerCase() === 'gnd' || s === '0') return null;
+  return s;
+}
+
+// Build the netlist *and* expose the union-find that produced it so
+// other features (Calc Node, label visualisation) can ask "which node
+// name lives at this grid point?" without re-running the analysis.
+//
+// Returns:
+//   {
+//     text:       string SPICE-style netlist
+//     nodeAt:     ([x,y]) => node name (or '?' if no part touches that
+//                 point and no wire passes through it)
+//     gridPointsOfNode: (name) => Set("x,y") — every grid point that
+//                 belongs to the named net (used by the calc-node
+//                 highlight overlay).
+//     groundedRootKey: (key) => boolean — quick "is this point ground?"
+//   }
+function buildNetlist() {
   // Collect all canonical points: terminals + wire vertices.
   const dsu = new Map();  // key "x,y" -> root key
   const find = (k) => {
@@ -1044,26 +1219,78 @@ function generateNetlist() {
     }
   }
 
-  // Assign node names. Ground roots become "0".
+  // Ground roots → node "0".
   const groundRoots = new Set();
   for (const { p } of partTerms) {
     if (p.type === 'gnd') {
       groundRoots.add(find(`${p.x},${p.y}`));
     }
   }
+
+  // User-provided labels override auto-numbers. We collect every
+  // labelled wire's root → label assignments. If two wires that share
+  // a root carry conflicting labels, we keep the lexicographically
+  // first so the choice is at least deterministic, and remember the
+  // conflict so we can surface a warning in the netlist header.
+  const rootLabel = new Map();
+  const labelConflicts = [];
+  const labelToRoot = new Map();
+  for (const w of state.wires) {
+    const lab = sanitizeNetLabel(w.label);
+    if (!lab) continue;
+    if (!w.points.length) continue;
+    const root = find(`${w.points[0][0]},${w.points[0][1]}`);
+    if (groundRoots.has(root)) {
+      // A label on a wire that's also tied to ground is meaningless
+      // (the node name is fixed at "0"). Skip silently.
+      continue;
+    }
+    const existing = rootLabel.get(root);
+    if (existing && existing !== lab) {
+      labelConflicts.push({ root, kept: existing < lab ? existing : lab,
+                            dropped: existing < lab ? lab : existing });
+      rootLabel.set(root, existing < lab ? existing : lab);
+    } else if (!existing) {
+      // Reject the label if another net already owns it — this would
+      // break SPICE node-uniqueness.
+      const other = labelToRoot.get(lab);
+      if (other && other !== root) {
+        labelConflicts.push({ root, kept: null, dropped: lab,
+                              reason: 'duplicate' });
+        continue;
+      }
+      rootLabel.set(root, lab);
+      labelToRoot.set(lab, root);
+    }
+  }
+
   const nodeMap = new Map();
   let nextNode = 1;
-  const nodeOf = (k) => {
+  const nodeOfKey = (k) => {
     const r = find(k);
     if (groundRoots.has(r)) return '0';
+    if (rootLabel.has(r)) return rootLabel.get(r);
     if (!nodeMap.has(r)) nodeMap.set(r, String(nextNode++));
     return nodeMap.get(r);
+  };
+  const nodeAt = (pt) => {
+    const k = `${pt[0]},${pt[1]}`;
+    if (!dsu.has(k)) return '?';
+    return nodeOfKey(k);
   };
 
   // Build netlist lines.
   const lines = [];
   lines.push('* sycan circuit netlist');
   lines.push(`* generated ${new Date().toISOString()}`);
+  for (const c of labelConflicts) {
+    if (c.reason === 'duplicate') {
+      lines.push(`* warning: label "${c.dropped}" already in use; ignored`);
+    } else {
+      lines.push(`* warning: conflicting net labels on the same node: ` +
+                 `kept "${c.kept}", dropped "${c.dropped}"`);
+    }
+  }
   lines.push('');
 
   // Output order matches SPICE convention by prefix: V, I, R, L, C,
@@ -1086,7 +1313,7 @@ function generateNetlist() {
     const ports = partTerminals(p);
     const portNode = (name) => {
       const t = ports.find(t => t.name === name);
-      return t ? nodeOf(`${t.pos[0]},${t.pos[1]}`) : '?';
+      return t ? nodeOfKey(`${t.pos[0]},${t.pos[1]}`) : '?';
     };
     const line = meta.netlist(p, portNode);
     if (line == null) continue;
@@ -1097,7 +1324,22 @@ function generateNetlist() {
     lines.push('* (empty — place parts to populate)');
   }
   lines.push('.end');
-  return lines.join('\n');
+
+  // Reverse-index the union-find by node-name for the calc-node
+  // highlight: walk every key in the DSU once and bucket into name →
+  // Set("x,y").
+  const gridPointsByNode = new Map();
+  for (const k of dsu.keys()) {
+    const name = nodeOfKey(k);
+    if (!gridPointsByNode.has(name)) gridPointsByNode.set(name, new Set());
+    gridPointsByNode.get(name).add(k);
+  }
+
+  return {
+    text: lines.join('\n'),
+    nodeAt,
+    gridPointsOfNode: (name) => gridPointsByNode.get(name) || new Set(),
+  };
 }
 
 // ------------------------------------------------------------------
@@ -1213,6 +1455,10 @@ function pushHistory() {
   history.push(snapshot());
   if (history.length > HISTORY_LIMIT) history.shift();
   historyIdx = history.length - 1;
+  // Any structural edit invalidates the most recent calc-node lookup
+  // (the net it pointed at may have been reorganised). Drop the
+  // highlight; the user can re-pick if they still care about it.
+  state.calcNodeHighlight = null;
 }
 
 function restore(idx) {
@@ -1226,6 +1472,7 @@ function restore(idx) {
   state.wireDraft = null;
   state.boxSelect = null;
   state.moveDraft = null;
+  state.calcNodeHighlight = null;
   wrap.classList.remove('moving');
   historyIdx = idx;
   return true;
@@ -1380,7 +1627,9 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === 'Escape') {
-    if (state.copyAnchorPending) {
+    if (state.calcNode.armed) {
+      cancelCalcNodePick();
+    } else if (state.copyAnchorPending) {
       cancelCopyAnchor();
     } else if (state.moveDraft) {
       cancelMove();
@@ -1481,6 +1730,7 @@ function finalizeCopyAnchor(anchor) {
     })),
     wires: selWires.map(w => ({
       points: w.points.map(([x, y]) => [x - anchor[0], y - anchor[1]]),
+      label: w.label,
     })),
   };
 
@@ -1535,9 +1785,13 @@ function pasteClipboard() {
   }
   for (const c of clipboard.wires || []) {
     const id = `W${state.nextId++}`;
+    // Drop the label on duplicate-paste so two wires don't claim the
+    // same net name. The user can re-label one of them after placing.
+    const labelClash = c.label && state.wires.some(w => w.label === c.label);
     state.wires.push({
       id,
       points: c.points.map(([x, y]) => [anchor[0] + x, anchor[1] + y]),
+      ...(c.label && !labelClash ? { label: c.label } : {}),
     });
     newIds.add(id);
   }
@@ -1721,6 +1975,312 @@ function cancelMove() {
   refreshHint();
   render();
 }
+
+// ------------------------------------------------------------------
+// Calc Node — symbolic node-voltage solver, backed by sycan via
+// pyodide.
+//
+// Flow:
+//   1. User clicks the "Calc Node" button → arms a single-shot
+//      "click a wire/terminal" pick.
+//   2. The next canvas click resolves to a snapped grid point. We
+//      look that point up in the netlist's union-find to find the
+//      net name (label or auto-numbered).
+//   3. If pyodide isn't loaded yet, kick off `loadPyodide()` and pip
+//      install sympy + the sycan wheel sitting at ../repl/sycan-*.whl.
+//      First run takes a few seconds; subsequent runs reuse the
+//      interpreter.
+//   4. Send the netlist + the chosen node name into Python, run
+//      sycan.parse + solve_dc / solve_ac, and read back the symbolic
+//      expression as a sympy str + LaTeX. Plain text goes into the
+//      output pane immediately; if MathJax is loaded we typeset the
+//      LaTeX next to it.
+//
+// Errors at any stage land in the same pane in red without throwing.
+// ------------------------------------------------------------------
+
+const calcStatusEl = document.getElementById('calc-status');
+const calcOutputEl = document.getElementById('calc-output');
+const calcBtn = document.getElementById('btn-calc-node');
+const calcModeEl = document.getElementById('calc-mode');
+
+function calcLog(msg) { if (calcStatusEl) calcStatusEl.textContent = msg; }
+function calcOutputEmpty() {
+  calcOutputEl.innerHTML =
+    '<div class="empty-msg">Click <em>Calc Node</em>, then click a wire ' +
+    'or terminal to compute its symbolic voltage.</div>';
+}
+function calcOutputError(msg) {
+  calcOutputEl.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = 'calc-err';
+  div.textContent = msg;
+  calcOutputEl.appendChild(div);
+}
+
+calcBtn.addEventListener('click', () => {
+  if (state.calcNode.armed) {
+    cancelCalcNodePick();
+    return;
+  }
+  startCalcNodePick();
+});
+calcModeEl.addEventListener('change', () => {
+  state.calcNode.mode = calcModeEl.value;
+});
+state.calcNode.mode = calcModeEl.value;
+
+function startCalcNodePick() {
+  // Cancel any other interactive picker first.
+  if (state.moveDraft) cancelMove();
+  if (state.copyAnchorPending) cancelCopyAnchor();
+  state.calcNode.armed = true;
+  calcBtn.classList.add('armed');
+  wrap.classList.add('picking-node');
+  calcLog('Pick a net…');
+  refreshHint();
+  render();
+}
+
+function cancelCalcNodePick() {
+  if (!state.calcNode.armed) return;
+  state.calcNode.armed = false;
+  calcBtn.classList.remove('armed');
+  wrap.classList.remove('picking-node');
+  calcLog('');
+  refreshHint();
+  render();
+}
+
+// Map a clicked grid point to a net name. Strategy:
+//   1. If the snapped point is *exactly* a key in the netlist's DSU
+//      (i.e. coincides with a wire vertex or a part terminal), use it.
+//   2. Otherwise, find the nearest wire vertex / terminal within
+//      HIT_PAD pixels of the *raw* click and use that.
+//   3. Failing that, look for any wire whose segment passes through
+//      the snapped point and use one of that segment's endpoints.
+function resolveNetAt(snapped, world) {
+  const nl = buildNetlist();
+  const direct = nl.nodeAt(snapped);
+  if (direct !== '?') return { node: direct, info: nl };
+
+  // Nearest-vertex / terminal search by raw distance.
+  let bestDist = HIT_PAD * HIT_PAD;
+  let bestPt = null;
+  const consider = (x, y) => {
+    const dx = x - world[0], dy = y - world[1];
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= bestDist) { bestDist = d2; bestPt = [x, y]; }
+  };
+  for (const p of state.parts) {
+    for (const t of partTerminals(p)) consider(t.pos[0], t.pos[1]);
+  }
+  for (const w of state.wires) for (const pt of w.points) consider(pt[0], pt[1]);
+  if (bestPt) {
+    const node = nl.nodeAt(bestPt);
+    if (node !== '?') return { node, info: nl };
+  }
+
+  // Walk every wire, see if any segment contains the snapped point;
+  // segment endpoints are guaranteed DSU keys.
+  for (const w of state.wires) {
+    for (let i = 1; i < w.points.length; i++) {
+      const a = w.points[i - 1], b = w.points[i];
+      if (pointOnSegment(snapped, a, b)) {
+        const node = nl.nodeAt(a);
+        if (node !== '?') return { node, info: nl };
+      }
+    }
+  }
+  return null;
+}
+
+async function finalizeCalcNodePick(snapped, world) {
+  cancelCalcNodePick();
+  const hit = resolveNetAt(snapped, world);
+  if (!hit) {
+    calcOutputError(
+      'No net at that point. Click directly on a wire or a part ' +
+      'terminal.');
+    return;
+  }
+
+  const { node, info } = hit;
+  state.calcNodeHighlight = {
+    node,
+    gridPoints: info.gridPointsOfNode(node),
+  };
+
+  // Up-front output: name first, computation status second.
+  calcOutputEl.innerHTML = '';
+  const heading = document.createElement('div');
+  heading.innerHTML = `Net <span class="calc-node-name">${escapeHtml(node)}</span>` +
+                      (node === '0' ? ' <em>(ground = 0)</em>' : '');
+  calcOutputEl.appendChild(heading);
+
+  if (node === '0') {
+    const expr = document.createElement('div');
+    expr.className = 'calc-expr';
+    expr.textContent = 'V(0) = 0';
+    calcOutputEl.appendChild(expr);
+    render();
+    return;
+  }
+
+  const exprDiv = document.createElement('div');
+  exprDiv.className = 'calc-expr';
+  exprDiv.textContent = 'Loading sycan…';
+  calcOutputEl.appendChild(exprDiv);
+
+  render();
+
+  try {
+    const py = await ensureSycan((s) => calcLog(s));
+    const mode = pickAnalysisMode(info.text);
+    calcLog(`Solving (${mode})…`);
+    const result = await runSycanSolve(py, info.text, node, mode);
+    if (result.error) {
+      exprDiv.classList.add('calc-err');
+      exprDiv.textContent = result.error;
+      calcLog('Solver error');
+      return;
+    }
+    const signature = mode === 'ac' ? `V(${node})(s) = ` : `V(${node}) = `;
+    exprDiv.textContent = signature + result.expr;
+
+    // MathJax block (best-effort; don't block on it).
+    if (result.latex) {
+      const mj = document.createElement('div');
+      mj.className = 'calc-mathjax';
+      mj.textContent =
+        `$$ V_{${escapeForLatex(node)}}${mode === 'ac' ? '(s)' : ''} = ` +
+        `${result.latex} $$`;
+      calcOutputEl.appendChild(mj);
+      typesetCalc(mj);
+    }
+    calcLog(`Solved (${mode})`);
+  } catch (err) {
+    exprDiv.classList.add('calc-err');
+    exprDiv.textContent = String(err && err.message || err);
+    calcLog('Solver error');
+  }
+}
+
+// Decide whether to ask sycan for a DC operating point or an AC
+// transfer function. AC is the only mode that gives a useful symbolic
+// expression for a circuit with capacitors / inductors (DC opens caps
+// and shorts inductors, which collapses interesting filters to 0 V or
+// V_in). The user can override via the dropdown.
+function pickAnalysisMode(netlistText) {
+  if (state.calcNode.mode === 'dc') return 'dc';
+  if (state.calcNode.mode === 'ac') return 'ac';
+  // 'auto' — peek at the netlist.
+  if (/\bAC\b|^\s*[CL]\d|\bC\d/im.test(netlistText)) return 'ac';
+  // Default: DC for purely resistive nets (closed form, fast).
+  return 'dc';
+}
+
+// Pyodide / sycan bootstrap. Resolves to the pyodide instance once
+// sympy + sycan are installed; subsequent calls reuse the same
+// promise. Status updates flow through `onStatus`.
+let _pyodidePromise = null;
+function ensureSycan(onStatus = () => {}) {
+  if (_pyodidePromise) return _pyodidePromise;
+  _pyodidePromise = (async () => {
+    onStatus('Loading pyodide…');
+    // pyodide.js script tag is loaded async — wait for it.
+    let waited = 0;
+    while (typeof loadPyodide !== 'function') {
+      if (waited > 30000) throw new Error('pyodide.js failed to load');
+      await new Promise(r => setTimeout(r, 100));
+      waited += 100;
+    }
+    const py = await loadPyodide();
+    onStatus('Installing sympy…');
+    await py.loadPackage(['sympy', 'micropip']);
+    onStatus('Installing sycan…');
+    await py.runPythonAsync(`
+import micropip
+await micropip.install('../repl/sycan-0.1.6-py3-none-any.whl')
+import sycan, sympy
+print('sycan ready (sympy', sympy.__version__, ')')
+`);
+    onStatus('Ready');
+    return py;
+  })().catch((e) => {
+    _pyodidePromise = null;  // allow a retry on the next click
+    throw e;
+  });
+  return _pyodidePromise;
+}
+
+// Run sycan on the given netlist + node. Returns:
+//   { expr: 'sympy-style string', latex: 'LaTeX' } on success
+//   { error: '...message...' }                    on failure
+async function runSycanSolve(py, netlistText, nodeName, mode /* 'dc'|'ac' */) {
+  py.globals.set('SEDRA_NETLIST', netlistText);
+  py.globals.set('SEDRA_NODE', nodeName);
+  py.globals.set('SEDRA_MODE', mode);
+  const result = await py.runPythonAsync(`
+import json, sympy as sp
+from sycan import parse
+from sycan.mna import solve_dc, solve_ac
+
+try:
+    circuit = parse(SEDRA_NETLIST)
+except Exception as e:
+    _result = {'error': f'Parse failed: {e}'}
+else:
+    target = sp.Symbol(f'V({SEDRA_NODE})')
+    try:
+        if SEDRA_MODE == 'ac':
+            sol = solve_ac(circuit)
+        else:
+            sol = solve_dc(circuit, simplify=True)
+    except Exception as e:
+        _result = {'error': f'Solver failed: {type(e).__name__}: {e}'}
+    else:
+        if target not in sol:
+            avail = ', '.join(str(k) for k in sol)
+            _result = {'error': f'Node "{SEDRA_NODE}" is not an unknown ' +
+                                f'(found: {avail}). Maybe the net is tied ' +
+                                f'directly to a source or to ground?'}
+        else:
+            expr = sol[target]
+            try:
+                expr_simp = sp.simplify(expr)
+            except Exception:
+                expr_simp = expr
+            _result = {
+                'expr': str(expr_simp),
+                'latex': sp.latex(expr_simp),
+            }
+json.dumps(_result)
+`);
+  return JSON.parse(result);
+}
+
+function typesetCalc(el) {
+  if (!window.MathJax || !MathJax.typesetPromise) return;
+  // The MathJax startup promise resolves when the first typeset is
+  // ready. Don't await it — fire-and-forget so the plain-text result
+  // is already visible while we wait.
+  Promise.resolve(MathJax.startup && MathJax.startup.promise)
+    .then(() => MathJax.typesetPromise([el]))
+    .catch(() => { /* render failure: leave the LaTeX source visible */ });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+function escapeForLatex(s) {
+  // Underscores are TeX's only "special" character that shows up in
+  // typical SPICE node names. Wrap whole subscripts in {\\_}.
+  return String(s).replace(/_/g, '\\_');
+}
+
 
 // ------------------------------------------------------------------
 // Boot
