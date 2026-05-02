@@ -1,6 +1,29 @@
 API reference
 =============
 
+Common entry points
+-------------------
+
+.. list-table::
+   :widths: 35 65
+   :header-rows: 1
+
+   * - Task
+     - API
+   * - Build circuits
+     - :class:`sycan.Circuit`, :func:`sycan.parse`
+   * - Run analyses
+     - :func:`sycan.solve_dc`, :func:`sycan.solve_ac`,
+       :func:`sycan.solve_impedance`, :func:`sycan.solve_noise`
+   * - Draw schematics
+     - :func:`sycan.autodraw`
+   * - Add components directly
+     - :mod:`sycan.components.basic`, :mod:`sycan.components.active`,
+       :mod:`sycan.components.rf`
+
+Full module reference
+---------------------
+
 .. autosummary::
    :toctree: _autosummary
    :recursive:

@@ -34,6 +34,7 @@ autodoc_default_options = {
     "members": True,
     "undoc-members": False,
     "show-inheritance": True,
+    "ignore-module-all": True,
 }
 autodoc_typehints = "description"
 autodoc_member_order = "bysource"
@@ -41,10 +42,13 @@ autodoc_member_order = "bysource"
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
-    "sympy": ("https://docs.sympy.org/latest/", None),
-}
+if os.environ.get("SYCAN_ENABLE_INTERSPHINX"):
+    intersphinx_mapping = {
+        "python": ("https://docs.python.org/3", None),
+        "sympy": ("https://docs.sympy.org/latest/", None),
+    }
+else:
+    intersphinx_mapping = {}
 
 myst_enable_extensions = ["colon_fence", "deflist"]
 

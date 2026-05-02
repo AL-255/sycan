@@ -4,8 +4,8 @@ Getting started
 This page walks through installing sycan, building a circuit, and using
 the four core solvers — :func:`~sycan.solve_dc`, :func:`~sycan.solve_ac`,
 :func:`~sycan.solve_impedance`, and :func:`~sycan.solve_noise` — plus
-the schematic renderer :func:`~sycan.autodraw`. Every snippet is
-self-contained; copy-paste into a Python REPL and they should run as-is.
+the schematic renderer :func:`~sycan.autodraw`. The examples are small
+and can be pasted into a Python REPL in order.
 
 Install
 -------
@@ -207,8 +207,8 @@ netlist string) and returns a self-contained SVG:
    # svg is also returned as a string — useful in notebooks where you
    # can call IPython.display.SVG(svg).
 
-The placer wraps simulated annealing around the SA + routing pipeline;
-when wires would lay collinear on top of one another, it automatically
+The placer wraps simulated annealing around the placement and routing
+pipeline; when wires would lie collinear on top of one another, it automatically
 retries with the next seed in a fixed sequence (up to ``max_retries``
 times). See :doc:`autodraw` for the full pipeline and tuning knobs.
 
