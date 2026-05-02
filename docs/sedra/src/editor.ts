@@ -104,6 +104,7 @@ var wrap = document.getElementById('canvas-wrap') as HTMLElement;
 const hint = document.getElementById('hint') as HTMLElement;
 const propPane = document.getElementById('prop-pane') as HTMLElement;
 const netlistEl = document.getElementById('netlist') as HTMLTextAreaElement;
+const coords = document.getElementById('coords') as HTMLElement;
 
 // Convert a screen-space mouse event to world (logical) coordinates.
 function eventToWorld(e: MouseEvent): Point {
@@ -291,7 +292,31 @@ function render(): void {
   }
 
   updateNetlist();
+  updateCoords();
   saveLocal();
+}
+
+// Live coordinate readout in the bottom-right of the canvas. While
+// the user is dragging a box-select rectangle we show the
+// `(x0, y0) → (x1, y1)` pair instead of the bare cursor. Hidden
+// when there's no information to show (cursor off-canvas + no
+// active box).
+function updateCoords(): void {
+  if (state.boxSelect) {
+    const b = state.boxSelect;
+    const [sx0, sy0] = snapPt([b.x0, b.y0]);
+    const [sx1, sy1] = snapPt([b.x1, b.y1]);
+    coords.textContent = `(${sx0}, ${sy0}) → (${sx1}, ${sy1})`;
+    coords.classList.remove('hidden');
+    return;
+  }
+  if (state.cursorInside) {
+    const [cx, cy] = snapPt(state.cursorWorld);
+    coords.textContent = `(${cx}, ${cy})`;
+    coords.classList.remove('hidden');
+    return;
+  }
+  coords.classList.add('hidden');
 }
 
 function drawGrid(): void {
@@ -661,6 +686,16 @@ function mergeCollinearWires(): void {
       };
       if (axisAt(a) !== axisAt(b)) continue;   // 90° turn — preserve
 
+      // If both sides carry distinct user labels, leave them alone.
+      // Merging would silently drop one of the user's labels — the
+      // netlist generator still surfaces a "conflicting net labels"
+      // warning instead, which is actionable feedback. (One side
+      // labelled and the other blank is fine: drop's label is
+      // inherited below.)
+      const labA = sanitizeNetLabel(a.wire.label);
+      const labB = sanitizeNetLabel(b.wire.label);
+      if (labA && labB && labA !== labB) continue;
+
       // Decide which wire to keep (lower-indexed in state.wires so
       // the older, user-named id wins).
       const idxA = state.wires.indexOf(a.wire);
@@ -819,6 +854,42 @@ function wireIdsInSameComponent(wire: Wire | undefined): Set<string> {
   if (!target) { ids.add(wire.id); return ids; }
   for (const [id, root] of wireRoot) if (root === target) ids.add(id);
   return ids;
+}
+
+// ------------------------------------------------------------------
+// Drag-mode helpers
+//
+// `netSignature` builds a normalised string from the current
+// netlist's union-find: every part-terminal is binned into a group
+// keyed by its DSU root, the groups are sorted, and the result is a
+// stable representation of "which terminals are connected to which".
+// Used by the drag-mode parity check — comparing the pre- and post-
+// drag signatures catches stray T-joints, broken connections, and
+// rerouted wires that accidentally cross another terminal.
+//
+// (The end-of-wire bend itself happens inline in `updateMove`'s
+// `wire-spanning` branch — we keep the original middle vertices and
+// only nudge / corner the segment immediately adjacent to the
+// dragged endpoint, mirroring the "drag-the-end" behaviour you'd
+// expect from KiCad / Altium.)
+// ------------------------------------------------------------------
+function netSignature(): string {
+  const nl = buildNetlist();
+  const groups = new Map<string, Set<string>>();
+  for (const p of state.parts) {
+    for (const t of partTerminals(p)) {
+      const node = nl.nodeAt(t.pos);
+      const tid = `${p.id}:${t.name}`;
+      let s = groups.get(node);
+      if (!s) { s = new Set(); groups.set(node, s); }
+      s.add(tid);
+    }
+  }
+  // Drop the (auto-numbered) node names — only the *partition* matters.
+  const parts: string[] = [];
+  for (const s of groups.values()) parts.push([...s].sort().join('|'));
+  parts.sort();
+  return parts.join('\n');
 }
 
 // ------------------------------------------------------------------
@@ -1985,16 +2056,23 @@ function pushHistory(): void {
   // labels to every unlabelled wire in a labelled component so the
   // saved snapshot is in its canonical "named has priority" form.
   propagateLabels();
-  editHistory.length = historyIdx + 1;
-  editHistory.push(snapshot());
-  if (editHistory.length > HISTORY_LIMIT) editHistory.shift();
-  historyIdx = editHistory.length - 1;
   // Any structural edit invalidates the most recent calc-node and
   // net-highlight lookups (the net they pointed at may have been
   // reorganised). Drop the highlights; the user can re-pick if they
   // still care.
   state.calcNodeHighlight = null;
   state.netHighlightOverlay = null;
+  // Dedupe identical snapshots so a click-but-don't-drag mousedown→
+  // mouseup pair (which still calls commitMove → pushHistory with a
+  // zero-delta) doesn't pad history with no-ops. Without this, every
+  // such no-op would consume one Ctrl+Z press, making the user feel
+  // like undo "does nothing" before finally undoing the real edit.
+  const snap = snapshot();
+  if (historyIdx >= 0 && editHistory[historyIdx] === snap) return;
+  editHistory.length = historyIdx + 1;
+  editHistory.push(snap);
+  if (editHistory.length > HISTORY_LIMIT) editHistory.shift();
+  historyIdx = editHistory.length - 1;
 }
 
 function restore(idx: number): boolean {
@@ -2413,6 +2491,53 @@ function startMove(ids: string[], pickup: Point,
     }
   }
   if (!origs.size) return;
+
+  // Drag-mode capture. Off for paste-placement (a fresh paste's
+  // wires aren't connected to the surrounding circuit yet, so there's
+  // nothing to capture or reroute). Otherwise scan the wire list and
+  // bucket each wire by where its endpoints sit relative to the
+  // selected parts' terminals.
+  const dragMode = !freshlyPasted &&
+                   (document.getElementById('drag-mode') as HTMLInputElement | null)?.checked === true;
+  if (dragMode) {
+    const selectedTerminalKeys = new Set<string>();
+    for (const id of ids) {
+      const p = state.parts.find(pp => pp.id === id);
+      if (!p) continue;
+      for (const t of partTerminals(p)) {
+        selectedTerminalKeys.add(`${t.pos[0]},${t.pos[1]}`);
+      }
+    }
+    if (selectedTerminalKeys.size > 0) {
+      for (const w of state.wires) {
+        if (origs.has(w.id)) continue;        // already explicitly selected
+        if (w.points.length < 2) continue;
+        const first = w.points[0];
+        const last = w.points[w.points.length - 1];
+        const startInside = selectedTerminalKeys.has(`${first[0]},${first[1]}`);
+        const endInside = selectedTerminalKeys.has(`${last[0]},${last[1]}`);
+        if (startInside && endInside) {
+          origs.set(w.id, { kind: 'wire-captured',
+                            points: w.points.map(pt => [pt[0], pt[1]] as Point) });
+        } else if (startInside !== endInside) {
+          // Capture the wire's original axis at the inside end so
+          // the reroute keeps the same first-segment orientation.
+          const insideEnd: 'start' | 'end' = startInside ? 'start' : 'end';
+          const a = startInside ? w.points[0] : w.points[w.points.length - 1];
+          const b = startInside ? w.points[1] : w.points[w.points.length - 2];
+          const axisHint: 'h' | 'v' = a[0] === b[0] ? 'v' : 'h';
+          origs.set(w.id, { kind: 'wire-spanning',
+                            points: w.points.map(pt => [pt[0], pt[1]] as Point),
+                            insideEnd, axisHint });
+        }
+      }
+    }
+  }
+
+  // Optional pre-drag connectivity snapshot for the parity check.
+  const parityOn = (document.getElementById('parity-check') as HTMLInputElement | null)?.checked === true;
+  const paritySig = (dragMode && parityOn) ? netSignature() : null;
+
   state.moveDraft = {
     ids: [...ids],
     origs,
@@ -2420,6 +2545,9 @@ function startMove(ids: string[], pickup: Point,
     delta: [0, 0],
     viaDrag,
     freshlyPasted,
+    dragMode,
+    parityCheck: parityOn,
+    paritySig,
   };
   wrap.classList.add('moving');
   refreshHint();
@@ -2436,11 +2564,69 @@ function updateMove(world: Point): void {
     if (orig.kind === 'part') {
       const part = state.parts.find(p => p.id === id);
       if (part) { part.x = orig.x + dx; part.y = orig.y + dy; }
-    } else {
+    } else if (orig.kind === 'wire' || orig.kind === 'wire-captured') {
       const wire = state.wires.find(w => w.id === id);
       if (wire) {
         wire.points = orig.points.map(([x, y]) => [x + dx, y + dy] as Point);
       }
+    } else if (orig.kind === 'wire-spanning') {
+      const wire = state.wires.find(w => w.id === id);
+      if (!wire) continue;
+      // Drag-the-end semantics: keep every original vertex *except*
+      // the inside endpoint, which follows the moved part by `delta`.
+      // If the dragged endpoint stays Manhattan-aligned with its
+      // neighbour vertex (same x or same y on the original axis),
+      // we only nudge the endpoint. Otherwise we splice in one
+      // corner so the segment immediately adjacent to the endpoint
+      // becomes an L — the rest of the wire stays untouched. This
+      // is what KiCad does and it preserves the user's hand-drawn
+      // routing through the middle of long wires.
+      const pts: Point[] = orig.points.map(pt => [pt[0], pt[1]] as Point);
+      if (orig.insideEnd === 'end') {
+        const n = pts.length;
+        const prev = pts[n - 2];
+        const newEnd: Point = [pts[n - 1][0] + dx, pts[n - 1][1] + dy];
+        if (orig.axisHint === 'h') {
+          if (prev[1] === newEnd[1]) {
+            pts[n - 1] = newEnd;
+          } else {
+            // Keep horizontal at prev.y up to newEnd.x, then jog.
+            pts.splice(n - 1, 1, [newEnd[0], prev[1]] as Point, newEnd);
+          }
+        } else {
+          if (prev[0] === newEnd[0]) {
+            pts[n - 1] = newEnd;
+          } else {
+            pts.splice(n - 1, 1, [prev[0], newEnd[1]] as Point, newEnd);
+          }
+        }
+      } else {
+        // insideEnd === 'start': mirror image at the head of the
+        // polyline.
+        const next = pts[1];
+        const newStart: Point = [pts[0][0] + dx, pts[0][1] + dy];
+        if (orig.axisHint === 'h') {
+          if (next[1] === newStart[1]) {
+            pts[0] = newStart;
+          } else {
+            pts.splice(0, 1, newStart, [newStart[0], next[1]] as Point);
+          }
+        } else {
+          if (next[0] === newStart[0]) {
+            pts[0] = newStart;
+          } else {
+            pts.splice(0, 1, newStart, [next[0], newStart[1]] as Point);
+          }
+        }
+      }
+      // Drop consecutive duplicates that can appear when the new
+      // endpoint lands on top of its neighbour vertex.
+      const dedup: Point[] = [pts[0]];
+      for (let i = 1; i < pts.length; i++) {
+        const cur = pts[i], last = dedup[dedup.length - 1];
+        if (cur[0] !== last[0] || cur[1] !== last[1]) dedup.push(cur);
+      }
+      wire.points = dedup;
     }
   }
   render();
@@ -2504,6 +2690,38 @@ function rotateMoveDraft(): void {
 function commitMove(): void {
   if (!state.moveDraft) return;
   const md = state.moveDraft;
+
+  // Parity check (drag-mode only). If the drag changed the
+  // connectivity partition — typically because a re-routed
+  // spanning wire now passes through another terminal, or a
+  // captured wire's seam coincided with an unselected wire — we
+  // restore the originals and abort the commit. The user sees a
+  // status-line note explaining what happened.
+  if (md.dragMode && md.parityCheck && md.paritySig !== null
+      && (md.delta[0] !== 0 || md.delta[1] !== 0)) {
+    const post = netSignature();
+    if (post !== md.paritySig) {
+      // Restore originals (same code path as cancelMove for
+      // non-freshly-pasted drafts).
+      for (const [id, orig] of md.origs) {
+        if (orig.kind === 'part') {
+          const part = state.parts.find(p => p.id === id);
+          if (part) { part.x = orig.x; part.y = orig.y; }
+        } else {
+          const wire = state.wires.find(w => w.id === id);
+          if (wire) wire.points = orig.points;
+        }
+      }
+      state.moveDraft = null;
+      wrap.classList.remove('moving');
+      refreshProps();
+      refreshHint();
+      render();
+      flashHint('Drag reverted — parity check failed (connectivity would change).');
+      return;
+    }
+  }
+
   state.moveDraft = null;
   wrap.classList.remove('moving');
   // Drop any zero-delta no-op straight into history-merging silence.

@@ -11,6 +11,11 @@
     "target": "ES2022",
     "module": "none",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // Disable automatic @types/* inclusion so a transitive
+    // @types/node (pulled in by puppeteer-core for the test
+    // harness) doesn't bleed Node globals into a browser-only
+    // compile and trip on missing peer types like undici-types.
+    "types": [],
     "rootDir": "src",
     "outDir": ".",
     "strict": true,

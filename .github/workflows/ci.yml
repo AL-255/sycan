@@ -35,8 +35,41 @@ jobs:
       - name: Run tests
         run: uv run pytest tests/ -v
 
+  sedra:
+    # Browser tests for the SEDRA schematic editor (TypeScript +
+    # Puppeteer). Compiles the .ts sources, spawns a python http.server
+    # via the runner, and executes every docs/sedra/tests/*.test.mjs in
+    # its own node process. ubuntu-latest already ships with Chrome at
+    # /usr/bin/google-chrome, which `_helpers.mjs` finds automatically.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs/sedra
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: docs/sedra/package-lock.json
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: TypeScript build (sanity check)
+        run: npx tsc
+
+      - name: Run SEDRA browser tests
+        run: npm test
+        env:
+          # Be explicit so the tests fail loudly if the runner image
+          # ever stops shipping Chrome at this path.
+          CHROME_PATH: /usr/bin/google-chrome
+
   pages:
-    needs: test
+    needs: [test, sedra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
@@ -53,6 +86,19 @@ jobs:
       - name: Set up Python
         run: uv python install 3.13
 
+      - name: Set up Node (for SEDRA TypeScript build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: docs/sedra/package-lock.json
+
+      - name: Build SEDRA (tsc)
+        run: |
+          cd docs/sedra
+          npm ci
+          npx tsc
+
       - name: Build wheel
         run: uv build
 
@@ -61,6 +107,16 @@ jobs:
           rm -rf _site
           mkdir _site
           cp -r docs/. _site/
+          # Strip SEDRA's TypeScript build artefacts and dev-only
+          # tooling — the deployed site only needs the compiled JS.
+          rm -rf _site/sedra/node_modules \
+                 _site/sedra/src \
+                 _site/sedra/tests \
+                 _site/sedra/package.json \
+                 _site/sedra/package-lock.json \
+                 _site/sedra/tsconfig.json \
+                 _site/sedra/tsconfig.tsbuildinfo \
+                 _site/sedra/.gitignore
           rm -f _site/repl/sycan-*-py3-none-any.whl
           cp dist/sycan-*-py3-none-any.whl _site/repl/
           wheel=$(basename _site/repl/sycan-*-py3-none-any.whl)

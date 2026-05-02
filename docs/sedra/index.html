@@ -108,6 +108,22 @@
   .tool svg { display: block; }
   .tool .label { font-weight: 500; }
 
+  /* Toolbar checkboxes (Drag / Parity). Visually flush with the
+     adjacent .tool buttons so they feel like part of the strip. */
+  .check {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 8px; cursor: pointer;
+    font-size: 12px; color: var(--btn-fg);
+    background: var(--btn-bg);
+    border: 1px solid var(--line); border-radius: 4px;
+    user-select: none;
+  }
+  .check:hover { background: var(--hover); }
+  .check input[type="checkbox"] {
+    margin: 0; cursor: pointer;
+    accent-color: var(--select);
+  }
+
   /* Components dropdown */
   .picker {
     background: var(--btn-bg); color: var(--btn-fg);
@@ -140,6 +156,21 @@
     width: 100%; height: 100%;
     display: block;
   }
+  /* Live cursor / box-select coordinate readout. Rides the bottom-
+     right of the canvas so it doesn't fight the hint bar. Hidden
+     while the cursor is off-canvas (no coordinates to show). */
+  #coords {
+    position: absolute; right: 8px; bottom: 6px;
+    padding: 2px 8px;
+    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    border: 1px solid var(--line); border-radius: 4px;
+    pointer-events: none; user-select: none;
+    white-space: nowrap;
+  }
+  #coords.hidden { display: none; }
 
   /* Drag handle for resizing the side panel. Sits between the canvas
      and #side; its mousedown→mousemove→mouseup is wired in editor.ts.
@@ -540,6 +571,18 @@
       <span class="label">Highlight</span>
     </button>
   </div>
+  <div class="group" data-group="drag-options">
+    <label class="check"
+           title="When dragging selected components, also move wires that connect them; reroute wires that bridge the selection to the rest of the schematic.">
+      <input type="checkbox" id="drag-mode" checked>
+      <span>Drag</span>
+    </label>
+    <label class="check"
+           title="On commit, verify that the dragged routing didn't change net connectivity. Revert the drag if it did.">
+      <input type="checkbox" id="parity-check" checked>
+      <span>Parity</span>
+    </label>
+  </div>
   <div class="group" data-group="file">
     <button class="tool" id="btn-undo" title="Undo (Ctrl+Z)"><span class="label">Undo</span></button>
     <button class="tool" id="btn-redo" title="Redo (Ctrl+Shift+Z)"><span class="label">Redo</span></button>
@@ -551,6 +594,9 @@
 <main>
   <div id="canvas-wrap" class="tool-R">
     <svg id="canvas" xmlns="http://www.w3.org/2000/svg"></svg>
+    <!-- Live grid-snapped cursor readout. While a box-select drag
+         is in flight this swaps to the start→end coordinate pair. -->
+    <div id="coords" aria-live="off"></div>
   </div>
 
   <!-- Drag handle to resize the side panel. Wired in editor.ts. -->

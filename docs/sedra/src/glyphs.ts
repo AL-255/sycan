@@ -96,9 +96,25 @@ interface Glyph {
 }
 
 // Origin info used by move-mode to restore positions on cancel.
+//
+//   * `wire`           — explicitly-selected wire; translates by the
+//                        full delta (current behaviour).
+//   * `wire-captured`  — auto-captured by drag-mode because both
+//                        endpoints sit on terminals of selected parts;
+//                        also translates by delta.
+//   * `wire-spanning`  — auto-captured by drag-mode because exactly
+//                        one endpoint sits on a selected part's
+//                        terminal. The inside endpoint follows the
+//                        delta; the outside stays anchored; the path
+//                        between them is re-routed each frame.
 type MoveOrig =
   | { kind: 'part'; x: number; y: number }
-  | { kind: 'wire'; points: Point[] };
+  | { kind: 'wire'; points: Point[] }
+  | { kind: 'wire-captured'; points: Point[] }
+  | { kind: 'wire-spanning';
+      points: Point[];
+      insideEnd: 'start' | 'end';
+      axisHint: 'h' | 'v'; };
 
 interface MoveDraft {
   ids: string[];
@@ -107,6 +123,16 @@ interface MoveDraft {
   delta: Point;
   viaDrag: boolean;
   freshlyPasted: boolean;
+  // Drag-mode flags captured at startMove time so the user can flip
+  // the toolbar checkboxes mid-drag without affecting an in-flight
+  // operation.
+  dragMode: boolean;
+  parityCheck: boolean;
+  // Pre-drag connectivity signature (sorted normalised partition of
+  // every part-terminal into its DSU root). `null` when parity check
+  // is disabled. `commitMove` compares against the post-drag value
+  // and reverts the drag if they differ.
+  paritySig: string | null;
 }
 
 interface BoxSelect {
