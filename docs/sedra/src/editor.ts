@@ -1573,28 +1573,64 @@ function netSignature(): string {
 // Auto-router for drag-mode "wire-spanning" wires
 //
 // Runs at commit time: each spanning wire's direct-connect drag
-// preview is replaced with a clean Manhattan path computed by BFS
-// over the snap grid. The router avoids passing through *other*
-// parts' bodies (the moved part's terminals are explicitly allowed
-// — they're the wire's anchor) and prefers paths with fewer corners
-// by always continuing in the current direction first when expanding
-// neighbours.
+// preview is replaced with a clean Manhattan path. The earlier
+// breadth-first router treated bend count as a tie-break only,
+// happily routed straight through unrelated part terminals (which
+// then short-circuited two nets), and ignored existing wires —
+// producing visibly poor paths even on simple cases.
 //
-// `bfsRoute` returns null when no clean path exists within the
-// search bbox; the caller falls back to a direct L-shape so the
-// drag at least commits *something*, and the parity check decides
-// whether that's acceptable.
+// The replacement is A* over the snap grid with three additions:
+//
+//   * **State carries the incoming direction.** Each (x, y, dir)
+//     is its own search node, so the bend cost is exact rather
+//     than a tie-break. Optimal corner count, no zig-zag detours.
+//
+//   * **Bend penalty (`BEND_COST`)** plus an admissible heuristic
+//     ("Manhattan distance + 1 bend if start and goal aren't
+//     already axis-aligned, +0 otherwise") lets A* find an optimal
+//     path without exhausting every cell in the bbox.
+//
+//   * **Smarter obstacle handling:**
+//     - Hard block: part *bodies* (current behaviour) + unrelated
+//       part *terminals* (new — passing through one would unify
+//       two previously-distinct nets, which the parity check
+//       would catch and reject). The wire's own start/end stay
+//       allowed.
+//     - Soft penalty: cells already covered by another wire's
+//       segment cost a small additive `WIRE_OVERLAY_COST`. Routes
+//       that don't retrace existing wires win ties.
+//     - The wire being routed is excluded from the overlay set
+//       (`selfWireId`) so the router doesn't penalise itself for
+//       the cells it currently occupies.
+//
+// `bfsRoute` (name kept for callers; algorithm is now A*) returns
+// null when no path exists within the search bbox; the caller emits
+// a bad-connection placeholder.
 // ------------------------------------------------------------------
-const PARITY_RETRY_LIMIT = 10;
+// Wall-clock budget for the parity-retry loop in `commitMove`. We
+// keep iterating new BFS+coalesce attempts as long as there is time
+// in the budget — count alone was a poor proxy because each retry's
+// cost is dominated by the obstacle-accumulated A* search, and the
+// "easy" cases the router used to fail can need a handful of cheap
+// retries while a worst-case fixture might exhaust a single
+// expensive search well before any retry would help.
+const PARITY_RETRY_BUDGET_MS = 200;
+const BEND_COST = 50;
+const WIRE_OVERLAY_COST = 5;
 
 interface RouteOpts {
   // Cells to treat as obstacles in addition to part bodies. Used by
   // parity-check retries to forbid cells that the previous attempt
   // routed through.
   extraBlocked?: Set<string>;
-  // 'h' tries horizontal-first when a tie arises in BFS expansion;
-  // 'v' tries vertical-first. Different attempts toggle this.
+  // Tiny first-move tie-breaker — biases the very first step
+  // toward 'h' or 'v' when multiple equal-cost routes exist. Used
+  // by the parity-retry loop to diversify candidate paths.
   preferAxis?: 'h' | 'v';
+  // Wire id whose own cells are excluded from the overlay penalty
+  // (so the router doesn't penalise itself for retracing the cells
+  // it currently occupies pre-route).
+  selfWireId?: string;
 }
 
 function routeBlocked(x: number, y: number, allowAt: Set<string>,
@@ -1609,6 +1645,29 @@ function routeBlocked(x: number, y: number, allowAt: Set<string>,
   return false;
 }
 
+// Walk every grid cell along an axis-aligned segment (inclusive of
+// both endpoints), invoking `fn` on each. Diagonal or off-grid
+// segments are silently skipped — applyAutoRoutes runs while sibling
+// spanning wires are still in their diagonal mid-drag form, so this
+// is the cheapest way to keep the wire-overlay scan from looping
+// forever on those.
+function walkAxisAlignedCells(a: Point, b: Point,
+                              fn: (x: number, y: number) => void): void {
+  if (a[0] !== b[0] && a[1] !== b[1]) return;     // diagonal — skip
+  const ax = snap(a[0]), ay = snap(a[1]);
+  const bx = snap(b[0]), by = snap(b[1]);
+  if (ax !== a[0] || ay !== a[1] || bx !== b[0] || by !== b[1]) return;
+  fn(ax, ay);
+  if (ax === bx && ay === by) return;
+  const dx = ax === bx ? 0 : (bx > ax ? GRID : -GRID);
+  const dy = ay === by ? 0 : (by > ay ? GRID : -GRID);
+  let x = ax, y = ay;
+  while (x !== bx || y !== by) {
+    x += dx; y += dy;
+    fn(x, y);
+  }
+}
+
 function bfsRoute(from: Point, to: Point,
                   opts: RouteOpts = {}): Point[] | null {
   const sx = snap(from[0]);
@@ -1617,63 +1676,139 @@ function bfsRoute(from: Point, to: Point,
   const ey = snap(to[1]);
   if (sx === ex && sy === ey) return [[sx, sy]];
 
-  const margin = 16 * GRID;
+  const margin = 24 * GRID;
   const minX = Math.min(sx, ex) - margin;
   const maxX = Math.max(sx, ex) + margin;
   const minY = Math.min(sy, ey) - margin;
   const maxY = Math.max(sy, ey) + margin;
 
-  // Start and end terminals are always passable, even if they sit
-  // inside a part bbox.
-  const allow = new Set<string>([`${sx},${sy}`, `${ex},${ey}`]);
+  const startKey = `${sx},${sy}`;
+  const endKey = `${ex},${ey}`;
+  const allow = new Set<string>([startKey, endKey]);
 
-  // BFS with same-direction-first tie breaking, plus an
-  // axis-preference for the very first move.
-  type Node = { x: number; y: number; dx: number; dy: number };
-  const parent = new Map<string, [number, number] | null>();
-  const queue: Node[] = [{ x: sx, y: sy, dx: 0, dy: 0 }];
-  parent.set(`${sx},${sy}`, null);
-
-  const horiz: Array<[number, number]> = [[GRID, 0], [-GRID, 0]];
-  const vert:  Array<[number, number]> = [[0, GRID], [0, -GRID]];
-  const dirsByAxis = opts.preferAxis === 'v'
-    ? [...vert, ...horiz]
-    : [...horiz, ...vert];
-
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    if (cur.x === ex && cur.y === ey) break;
-
-    // Continue in current direction first, then the other three in
-    // the axis-preference order.
-    const ordered: Array<[number, number]> = [];
-    if (cur.dx !== 0 || cur.dy !== 0) ordered.push([cur.dx, cur.dy]);
-    for (const d of dirsByAxis) {
-      if (d[0] === cur.dx && d[1] === cur.dy) continue;
-      ordered.push(d);
-    }
-
-    for (const [dx, dy] of ordered) {
-      const nx = cur.x + dx;
-      const ny = cur.y + dy;
-      if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
-      const k = `${nx},${ny}`;
-      if (parent.has(k)) continue;
-      if (routeBlocked(nx, ny, allow, opts.extraBlocked)) continue;
-      parent.set(k, [cur.x, cur.y]);
-      queue.push({ x: nx, y: ny, dx, dy });
+  // Soft-penalty cells: every grid point covered by another wire's
+  // segments. Routes that don't retrace existing wires win ties.
+  // The wire being routed is excluded so it doesn't penalise itself
+  // for the path it currently occupies.
+  const wireOverlay = new Set<string>();
+  for (const w of state.wires) {
+    if (w.bad) continue;
+    if (opts.selfWireId && w.id === opts.selfWireId) continue;
+    if (w.points.length < 2) continue;
+    for (let i = 1; i < w.points.length; i++) {
+      walkAxisAlignedCells(w.points[i - 1], w.points[i], (x, y) => {
+        wireOverlay.add(`${x},${y}`);
+      });
     }
   }
 
-  if (!parent.has(`${ex},${ey}`)) return null;
+  // Hard obstacle: any non-self part terminal. Routing through one
+  // would short two unrelated nets — the parity check would catch
+  // it, and forcing the router around is far cheaper than running
+  // the parity-retry loop. The route's own start/end (typically
+  // terminals) are explicitly allowed.
+  const terminalObst = new Set<string>();
+  for (const p of state.parts) {
+    for (const t of partTerminals(p)) {
+      const k = `${t.pos[0]},${t.pos[1]}`;
+      if (!allow.has(k)) terminalObst.add(k);
+    }
+  }
+
+  // Direction encoding for the (x, y, dir) state key.
+  // 0 = none (start), 1 = +x, 2 = -x, 3 = +y, 4 = -y.
+  const dirIdx = (dx: number, dy: number) =>
+    dx > 0 ? 1 : dx < 0 ? 2 : dy > 0 ? 3 : dy < 0 ? 4 : 0;
+  const stateKey = (x: number, y: number, d: number) => `${x},${y},${d}`;
+
+  // Admissible heuristic: Manhattan distance plus a 1-bend lower
+  // bound when the cell is off both axes of the goal, or on-axis
+  // but moving perpendicular to it.
+  const heuristic = (x: number, y: number, d: number): number => {
+    const dist = Math.abs(x - ex) + Math.abs(y - ey);
+    let bends = 0;
+    if (x !== ex && y !== ey) {
+      bends = 1;
+    } else if (x === ex && y !== ey) {
+      if (d === 1 || d === 2) bends = 1;     // currently horizontal, need vertical
+    } else if (y === ey && x !== ex) {
+      if (d === 3 || d === 4) bends = 1;     // currently vertical, need horizontal
+    }
+    return dist + bends * BEND_COST;
+  };
+
+  const firstMoveBias = (dx: number, dy: number): number => {
+    if (!opts.preferAxis) return 0;
+    if (opts.preferAxis === 'h' && dy !== 0) return 0.001;
+    if (opts.preferAxis === 'v' && dx !== 0) return 0.001;
+    return 0;
+  };
+
+  // Sorted-array priority queue (min-heap by f). Schematic-sized
+  // grids keep N small enough that the O(N) splice is negligible.
+  type Node = { x: number; y: number; d: number; g: number; f: number };
+  const open: Node[] = [];
+  const insertSorted = (n: Node) => {
+    let lo = 0, hi = open.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (open[mid].f <= n.f) lo = mid + 1;
+      else hi = mid;
+    }
+    open.splice(lo, 0, n);
+  };
+
+  const bestG = new Map<string, number>();
+  const parent = new Map<string, { px: number; py: number; pd: number }>();
+
+  bestG.set(stateKey(sx, sy, 0), 0);
+  insertSorted({ x: sx, y: sy, d: 0, g: 0, f: heuristic(sx, sy, 0) });
+
+  let goalKey: string | null = null;
+  const dirs: Array<[number, number]> =
+    [[GRID, 0], [-GRID, 0], [0, GRID], [0, -GRID]];
+
+  while (open.length > 0) {
+    const cur = open.shift()!;
+    const curKey = stateKey(cur.x, cur.y, cur.d);
+    if (cur.x === ex && cur.y === ey) { goalKey = curKey; break; }
+    const bestSoFar = bestG.get(curKey);
+    if (bestSoFar !== undefined && bestSoFar < cur.g) continue;
+
+    for (const [dx, dy] of dirs) {
+      const nx = cur.x + dx, ny = cur.y + dy;
+      if (nx < minX || nx > maxX || ny < minY || ny > maxY) continue;
+      const cellKey = `${nx},${ny}`;
+      if (terminalObst.has(cellKey) && cellKey !== endKey) continue;
+      if (routeBlocked(nx, ny, allow, opts.extraBlocked)) continue;
+
+      let stepCost = 1;
+      const newD = dirIdx(dx, dy);
+      if (cur.d !== 0 && newD !== cur.d) stepCost += BEND_COST;
+      if (wireOverlay.has(cellKey)) stepCost += WIRE_OVERLAY_COST;
+      if (cur.d === 0) stepCost += firstMoveBias(dx, dy);
+
+      const ng = cur.g + stepCost;
+      const nKey = stateKey(nx, ny, newD);
+      const prev = bestG.get(nKey);
+      if (prev !== undefined && prev <= ng) continue;
+      bestG.set(nKey, ng);
+      parent.set(nKey, { px: cur.x, py: cur.y, pd: cur.d });
+      insertSorted({ x: nx, y: ny, d: newD, g: ng,
+                     f: ng + heuristic(nx, ny, newD) });
+    }
+  }
+
+  if (!goalKey) return null;
 
   const points: Point[] = [];
-  let curKey: string | null = `${ex},${ey}`;
-  while (curKey !== null) {
-    const [x, y] = curKey.split(',').map(Number);
-    points.push([x, y]);
+  let curKey: string | undefined = goalKey;
+  while (curKey !== undefined) {
+    const [xs, ys] = curKey.split(',');
+    points.push([Number(xs), Number(ys)]);
     const par = parent.get(curKey);
-    curKey = par ? `${par[0]},${par[1]}` : null;
+    if (!par) break;
+    curKey = stateKey(par.px, par.py, par.pd);
   }
   points.reverse();
 
@@ -1711,7 +1846,7 @@ function applyAutoRoutes(md: MoveDraft, opts: RouteOpts = {}): { hasBad: boolean
     const outside = orig.insideEnd === 'start'
       ? wire.points[wire.points.length - 1]
       : wire.points[0];
-    const path = bfsRoute(inside, outside, opts);
+    const path = bfsRoute(inside, outside, { ...opts, selfWireId: id });
     if (!path) {
       // BFS failed (no clean Manhattan path within the search bbox).
       // Fall back to a 2-point direct-connect line and flag it as a
@@ -3914,9 +4049,10 @@ function commitMove(): void {
   // draft (rendered semi-transparent during the drag) with a clean
   // BFS-routed Manhattan path. Parity check (using the netlist —
   // see `netSignature`) verifies the routing didn't change
-  // connectivity; if it did, we retry up to PARITY_RETRY_LIMIT
-  // times with progressively stricter obstacle sets / alternate
-  // axis preferences before giving up and reverting the whole drag.
+  // connectivity; if it did, we retry with progressively stricter
+  // obstacle sets / alternate axis preferences until the parity
+  // budget (`PARITY_RETRY_BUDGET_MS`) is exhausted, then either
+  // emit bad-connection placeholders (no-revert) or revert.
   //
   // The check has to run *after* `coalesceJunctions` so the netlist
   // DSU sees implicit T-junctions (a BFS path that passes through
@@ -3949,6 +4085,11 @@ function commitMove(): void {
 
     let parityOk = true;
     let retries = 0;
+    const retryDeadline = (typeof performance !== 'undefined'
+                           ? performance.now()
+                           : Date.now()) + PARITY_RETRY_BUDGET_MS;
+    const now = () => (typeof performance !== 'undefined'
+                       ? performance.now() : Date.now());
 
     if (hasSpanning) {
       const extraBlocked = new Set<string>();
@@ -3990,7 +4131,9 @@ function commitMove(): void {
           coalesceJunctions();
           const post = netSignature();
           if (post === md.paritySig) { parityOk = true; break; }
-          if (retries >= PARITY_RETRY_LIMIT) { parityOk = false; break; }
+          // Wall-clock budget instead of retry count — see the
+          // PARITY_RETRY_BUDGET_MS comment above.
+          if (now() >= retryDeadline) { parityOk = false; break; }
 
           // Add the failed routes' interior cells as extra
           // obstacles so the next attempt has to take a different
@@ -4097,7 +4240,8 @@ function commitMove(): void {
             `couldn't preserve the netlist (intrinsic short).`
           : `Drag reverted — auto-route failed parity check after ` +
             `${retries} retr${retries === 1 ? 'y' : 'ies'} ` +
-            `(connectivity would change).`,
+            `(${PARITY_RETRY_BUDGET_MS} ms budget exhausted; ` +
+            `connectivity would change).`,
         'warn');
       return;
     }

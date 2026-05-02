@@ -57,6 +57,10 @@ assert(drag.W1manhattan && drag.W3manhattan,
        'BFS commit lays Manhattan paths for spanning wires');
 
 // (2) Parity revert: dragging R1 to overlap R2's terminals reverts.
+// The retry loop is bounded by `PARITY_RETRY_BUDGET_MS` (200 ms),
+// so even an unrouteable case must finish well within that — we
+// give a generous 600 ms wall-clock cap to absorb startup jitter
+// and the surrounding canonicalize/render passes.
 const revert = await page.evaluate(() => {
   state.parts = []; state.wires = []; state.nameCounters = {}; state.nextId = 1;
   state.selectedIds.clear(); state.selectedSegments.clear();
@@ -72,17 +76,29 @@ const revert = await page.evaluate(() => {
   state.selectedIds = new Set(['R1']);
   startMove(['R1'], [0, 0], true, false);
   updateMove([0, 80]);
+  const t0 = performance.now();
   commitMove();
+  const elapsed = performance.now() - t0;
   return {
     parityHeld: netSignature() === sigBefore,
     R1: state.parts.find(p => p.id === 'R1'),
+    elapsed,
   };
 });
 assert(revert.parityHeld, 'parity revert restores connectivity signature');
 assert(revert.R1.x === 200 && revert.R1.y === 0, 'R1 restored to pre-drag position');
+assert(revert.elapsed < 600,
+       `unrouteable drag bottoms out within ~budget — commitMove took ` +
+       `${revert.elapsed.toFixed(1)} ms (cap 600 ms includes canonicalize ` +
+       `+ render around the 200 ms retry budget)`);
 
 // (3) Fixture box-drag: partial-segment selection drags only the
-// selected segments and parity catches the mid-segment T short.
+// selected segments. Pre-A* the router would happily lay a route
+// straight through an unrelated part terminal, the parity check
+// would catch the resulting T-short, and the whole drag would
+// revert. The replacement A* router treats unrelated terminals as
+// obstacles and routes around them — so the drag now commits with
+// parity intact, R2 / R3 / GND1 land at their dragged positions.
 const fix = await page.evaluate((jsonText) => {
   const data = JSON.parse(jsonText);
   state.parts = data.parts || [];
@@ -120,13 +136,17 @@ const after = await page.evaluate(() => {
 });
 assert(!after.moveActive, 'fixture drag finishes (no stuck moveDraft)');
 assert(after.sigAfter === fix.sigBefore,
-       'fixture drag reverted because BFS routes would short via mid-segment Ts');
-const drift = fix.parts.find(p => {
-  const q = after.parts.find(x => x.id === p.id);
-  return !q || q.x !== p.x || q.y !== p.y;
-});
-assert(!drift, `every fixture part restored to its pre-drag position` +
-       (drift ? ` (drift: ${drift.id})` : ''));
+       'A* avoids unrelated terminals, so parity is preserved end-to-end');
+// The drag delta is (-80, 340) from pickup (400, 320) → release
+// (320, 660). The R2/R3/GND1 cluster lifted by the box-select
+// translates by that delta; R1 (and the wire endpoints anchored to
+// it) stay put.
+const r2 = after.parts.find(p => p.id === 'R2');
+assert(r2 && r2.x === 320 && r2.y === 660,
+       `R2 committed at the dragged position (got (${r2?.x}, ${r2?.y}))`);
+const r1 = after.parts.find(p => p.id === 'R1');
+assert(r1 && r1.x === 320 && r1.y === 320,
+       `R1 (outside the box-select) stayed put (got (${r1?.x}, ${r1?.y}))`);
 
 await browser.close();
 process.exit(summary(errors));
