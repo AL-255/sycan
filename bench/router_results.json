@@ -1,0 +1,122 @@
+[
+  {
+    "fixture": "voltage_divider",
+    "dijkstra": {
+      "cold_ms": 8.68,
+      "warm_ms": 8.84,
+      "expansions": 4
+    },
+    "astar": {
+      "cold_ms": 8.68,
+      "warm_ms": 8.66,
+      "expansions": 4
+    },
+    "warm_ratio": 0.98,
+    "exp_ratio": 1.0
+  },
+  {
+    "fixture": "cs_amp",
+    "dijkstra": {
+      "cold_ms": 13.25,
+      "warm_ms": 12.83,
+      "expansions": 334
+    },
+    "astar": {
+      "cold_ms": 12.7,
+      "warm_ms": 12.51,
+      "expansions": 90
+    },
+    "warm_ratio": 0.975,
+    "exp_ratio": 0.269
+  },
+  {
+    "fixture": "current_mirror",
+    "dijkstra": {
+      "cold_ms": 15.89,
+      "warm_ms": 16.07,
+      "expansions": 884
+    },
+    "astar": {
+      "cold_ms": 15.03,
+      "warm_ms": 14.98,
+      "expansions": 246
+    },
+    "warm_ratio": 0.932,
+    "exp_ratio": 0.278
+  },
+  {
+    "fixture": "ce_bjt",
+    "dijkstra": {
+      "cold_ms": 17.42,
+      "warm_ms": 17.71,
+      "expansions": 207
+    },
+    "astar": {
+      "cold_ms": 17.26,
+      "warm_ms": 17.43,
+      "expansions": 60
+    },
+    "warm_ratio": 0.984,
+    "exp_ratio": 0.29
+  },
+  {
+    "fixture": "diff_pair",
+    "dijkstra": {
+      "cold_ms": 43.84,
+      "warm_ms": 44.34,
+      "expansions": 2934
+    },
+    "astar": {
+      "cold_ms": 42.3,
+      "warm_ms": 41.82,
+      "expansions": 802
+    },
+    "warm_ratio": 0.943,
+    "exp_ratio": 0.273
+  },
+  {
+    "fixture": "cascode",
+    "dijkstra": {
+      "cold_ms": 22.85,
+      "warm_ms": 22.74,
+      "expansions": 733
+    },
+    "astar": {
+      "cold_ms": 22.13,
+      "warm_ms": 22.69,
+      "expansions": 170
+    },
+    "warm_ratio": 0.998,
+    "exp_ratio": 0.232
+  },
+  {
+    "fixture": "level_shifter",
+    "dijkstra": {
+      "cold_ms": 24.21,
+      "warm_ms": 24.76,
+      "expansions": 663
+    },
+    "astar": {
+      "cold_ms": 24.6,
+      "warm_ms": 24.95,
+      "expansions": 152
+    },
+    "warm_ratio": 1.008,
+    "exp_ratio": 0.229
+  },
+  {
+    "fixture": "srpp_triode",
+    "dijkstra": {
+      "cold_ms": 24.33,
+      "warm_ms": 24.0,
+      "expansions": 1960
+    },
+    "astar": {
+      "cold_ms": 22.42,
+      "warm_ms": 22.3,
+      "expansions": 521
+    },
+    "warm_ratio": 0.929,
+    "exp_ratio": 0.266
+  }
+]

@@ -81,12 +81,31 @@ The cost is selected by the ``cost_model`` parameter:
 .. rubric:: 4. Routing
 
 Each remaining net — the side ports, plus rail crossings that didn't
-fold into a single branch — is routed with a Lee / Hadlock-style BFS on
-a coarse routing grid. Component bounding boxes are blocked cells, so
-wires never cross a component body. Cells already occupied by a wire
-incur a small penalty so later nets prefer fresh space, which keeps
-clutter down. Turns are penalised lightly to prefer straight wires.
-Three-way junctions on the same net produce a solder dot in the SVG.
+fold into a single branch — is routed on a coarse routing grid.
+Component bounding boxes are blocked cells, so wires never cross a
+component body. Cells already occupied by a wire incur a small penalty
+so later nets prefer fresh space, which keeps clutter down. Turns are
+penalised lightly to prefer straight wires. Three-way junctions on the
+same net produce a solder dot in the SVG.
+
+The grid search is selectable via the ``router=`` flag on
+:func:`~sycan.autodraw`:
+
+* ``"dijkstra"`` *(default)* — uniform-cost Dijkstra. Historical
+  behaviour; the search front spreads roughly circularly out from the
+  source until it hits any cell of the destination set.
+* ``"astar"`` — A\* with an admissible Manhattan-bbox heuristic. Same
+  per-step edge cost (``1 + 4·used + clearance + 2·turn``), so the
+  routed path costs are identical; only the *number of cells expanded*
+  differs. Empirically expands ~3-4× fewer cells than Dijkstra on the
+  benchmark fixtures and gives a 0-7 % wall-time speedup at the call
+  level (final routing is a small fraction of total ``autodraw()``
+  runtime; the SA placement loop dominates). See
+  ``docs/ROUTER_BENCHMARK.md`` for numbers.
+
+The SA cost-evaluation grid (used during placement search) keeps its
+own BFS / Dijkstra-with-clearance implementation regardless of
+``router=``.
 
 .. rubric:: 5. Emit SVG
 

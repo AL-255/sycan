@@ -16,11 +16,15 @@ Pipeline
     (feedback, coupling, controlled sources, ...) get their own
     floating columns.
 4.  *Routing* — each remaining net (the side ports, plus rail crossings
-    that didn't fold into a single branch) is routed with a Lee /
-    Hadlock-style BFS on a coarse routing grid. Component bounding
-    boxes are blocked cells, so wires never cross a component body.
-    Cells already occupied by a wire incur a small penalty so later
-    nets prefer fresh space, which keeps clutter down.
+    that didn't fold into a single branch) is routed on a coarse
+    routing grid. Component bounding boxes are blocked cells, so wires
+    never cross a component body. Cells already occupied by a wire
+    incur a small penalty so later nets prefer fresh space, which keeps
+    clutter down. The grid search is uniform-cost Dijkstra by default
+    or A* with a Manhattan-bbox heuristic when ``router="astar"`` is
+    passed; both share an identical edge-cost function, so swapping
+    only changes which cells the search expands, not the routed path
+    cost.
 5.  *Emit SVG* — components are rendered as labelled boxes with port
     pins; wires are emitted as polylines.
 
@@ -806,16 +810,47 @@ def _collect_nets(
 
 
 # ---------------------------------------------------------------------------
-# Routing on a coarse grid (Lee BFS, with congestion penalty).
+# Routing on a coarse grid.
+#
+# Two algorithms are available; both produce paths with identical edge costs
+# (1 + 4·used + clearance + 2·turn) and are interchangeable from the caller's
+# perspective:
+#
+#   * ``"dijkstra"`` (default, historical) — uniform-cost search with no goal
+#     bias. Exact, simple, but explores a roughly circular front around the
+#     source until it hits any cell of the destination set.
+#   * ``"astar"`` — adds an admissible Manhattan-bbox heuristic so the search
+#     front is biased toward the target. The min step cost is 1 (no
+#     congestion, no clearance, no turn), so Manhattan distance to the
+#     target's bounding box is a valid lower bound on the true cost.
+#
+# The two algorithms use the same per-cell state and `prev` table, so the
+# small "we keep one parent per cell, ignoring incoming-direction history"
+# approximation that affects turn-penalty optimality is shared and the
+# output cost is identical for both. Tie-breaking on equal-cost paths can
+# differ, so the resulting polyline geometry may diverge cell-for-cell on
+# congested grids — `_no_wire_crosses_component` and the other structural
+# autodraw tests still pass either way; only the exact SVG bytes change.
 # ---------------------------------------------------------------------------
 class _RouteGrid:
-    def __init__(self, w: int, h: int) -> None:
+    def __init__(self, w: int, h: int, algorithm: str = "dijkstra") -> None:
+        if algorithm not in ("dijkstra", "astar"):
+            raise ValueError(
+                f"_RouteGrid algorithm must be 'dijkstra' or 'astar', "
+                f"got {algorithm!r}"
+            )
         self.w = w
         self.h = h
+        self.algorithm = algorithm
         self.blocked = [[False] * h for _ in range(w)]
         self.used = [[0] * h for _ in range(w)]
         self.clearance = [[0] * h for _ in range(w)]  # filled by finalize()
         self.allow_pin: set[tuple[int, int]] = set()
+        # Counter for the most recent search — bumped per cell pop. The
+        # benchmark harness reads this to compare the two algorithms'
+        # actual work, since wall time alone is dominated by the rest of
+        # the autodraw pipeline.
+        self.last_expansions = 0
 
     def block_rect(self, x0: int, y0: int, x1: int, y1: int) -> None:
         for x in range(max(0, x0), min(self.w, x1)):
@@ -871,28 +906,51 @@ class _RouteGrid:
 
     def lee(self, src: tuple[int, int], dst_set: set[tuple[int, int]]
             ) -> Optional[list[tuple[int, int]]]:
-        """Shortest-path Dijkstra. Returns cell path."""
+        """Shortest path from ``src`` to the nearest cell of ``dst_set``.
+
+        Dispatches to :meth:`_dijkstra` or :meth:`_astar` based on
+        ``self.algorithm``. Both branches use the same edge-cost
+        function and the same per-cell ``prev`` table, so the cost of
+        the returned path is identical; only the *number of cells the
+        search expands* (and tie-broken geometry on equal-cost paths)
+        differs.
+        """
         if not dst_set:
             return None
         if src in dst_set:
+            self.last_expansions = 0
             return [src]
+        sx, sy = src
+        if not (0 <= sx < self.w and 0 <= sy < self.h):
+            return None
+        if self.algorithm == "astar":
+            return self._astar(src, dst_set)
+        return self._dijkstra(src, dst_set)
 
+    def _dijkstra(self, src: tuple[int, int], dst_set: set[tuple[int, int]]
+                  ) -> Optional[list[tuple[int, int]]]:
+        """Uniform-cost Dijkstra over the routing grid.
+
+        Explores cells in order of accumulated cost from ``src`` with no
+        goal bias, so the search front is roughly a circle around the
+        source. Stops as soon as any cell of ``dst_set`` is popped.
+        """
         INF = 10 ** 9
         dist = [[INF] * self.h for _ in range(self.w)]
         prev: dict[tuple[int, int], tuple[int, int]] = {}
         sx, sy = src
-        if not (0 <= sx < self.w and 0 <= sy < self.h):
-            return None
         dist[sx][sy] = 0
 
         from heapq import heappush, heappop
         heap: list[tuple[int, int, int]] = [(0, sx, sy)]
 
         target_hit: Optional[tuple[int, int]] = None
+        expansions = 0
         while heap:
             cost, x, y = heappop(heap)
             if cost > dist[x][y]:
                 continue
+            expansions += 1
             if (x, y) in dst_set:
                 target_hit = (x, y)
                 break
@@ -918,6 +976,82 @@ class _RouteGrid:
                     prev[(nx, ny)] = (x, y)
                     heappush(heap, (ncost, nx, ny))
 
+        self.last_expansions = expansions
+        if target_hit is None:
+            return None
+        path = [target_hit]
+        while path[-1] != src:
+            path.append(prev[path[-1]])
+        path.reverse()
+        return path
+
+    def _astar(self, src: tuple[int, int], dst_set: set[tuple[int, int]]
+               ) -> Optional[list[tuple[int, int]]]:
+        """A* with a Manhattan-distance-to-target-bbox heuristic.
+
+        The minimum step cost is 1 (no congestion, no clearance, no
+        turn), so Manhattan distance is an admissible lower bound on
+        the true path cost. We use the *bounding box* of ``dst_set``
+        rather than the per-target min — that's O(1) per node, vs.
+        O(|dst_set|), and is exact when the target set fills its bbox
+        (the common rail-row case: ``h = |y - rail_y|`` whenever the
+        node's x lies inside the rail's x-extent). For sparse target
+        sets (e.g. growing Steiner tree cells scattered across the
+        canvas) the bound is looser, so A* expands more cells, but it
+        is never *worse* than Dijkstra — at h=0 it degenerates to it.
+        """
+        # Target bbox for the heuristic.
+        min_tx = min(t[0] for t in dst_set)
+        max_tx = max(t[0] for t in dst_set)
+        min_ty = min(t[1] for t in dst_set)
+        max_ty = max(t[1] for t in dst_set)
+
+        def heuristic(x: int, y: int) -> int:
+            dx = 0 if min_tx <= x <= max_tx else min(abs(x - min_tx), abs(x - max_tx))
+            dy = 0 if min_ty <= y <= max_ty else min(abs(y - min_ty), abs(y - max_ty))
+            return dx + dy
+
+        INF = 10 ** 9
+        g: list[list[int]] = [[INF] * self.h for _ in range(self.w)]
+        prev: dict[tuple[int, int], tuple[int, int]] = {}
+        sx, sy = src
+        g[sx][sy] = 0
+
+        from heapq import heappush, heappop
+        # Heap entries are (f, g, x, y); g is the tiebreaker so equal-f
+        # nodes pop in best-g order, which matches Dijkstra's behaviour
+        # closely and avoids re-expanding nodes with stale g.
+        heap: list[tuple[int, int, int, int]] = [(heuristic(sx, sy), 0, sx, sy)]
+
+        target_hit: Optional[tuple[int, int]] = None
+        expansions = 0
+        while heap:
+            _f, cost, x, y = heappop(heap)
+            if cost > g[x][y]:
+                continue
+            expansions += 1
+            if (x, y) in dst_set:
+                target_hit = (x, y)
+                break
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < self.w and 0 <= ny < self.h):
+                    continue
+                if self.blocked[nx][ny] and (nx, ny) not in dst_set \
+                        and (nx, ny) not in self.allow_pin:
+                    continue
+                step = 1 + 4 * self.used[nx][ny] + self.clearance[nx][ny]
+                if (x, y) in prev:
+                    px, py = prev[(x, y)]
+                    if (x - px, y - py) != (dx, dy):
+                        step += 2
+                ng = cost + step
+                if ng < g[nx][ny]:
+                    g[nx][ny] = ng
+                    prev[(nx, ny)] = (x, y)
+                    heappush(heap, (ng + heuristic(nx, ny), ng, nx, ny))
+
+        self.last_expansions = expansions
         if target_hit is None:
             return None
         path = [target_hit]
@@ -2015,6 +2149,7 @@ def autodraw(
     reverse_isolated_branches: bool = False,
     back_annotation: Optional[dict[str, Sequence[str]]] = None,
     max_retries: int = 5,
+    router: str = "dijkstra",
 ) -> str:
     """Render ``circuit`` to an SVG schematic and return the SVG string.
 
@@ -2082,7 +2217,24 @@ def autodraw(
         :data:`_OVERLAP_TOL` is accepted. If every attempt has overlap
         the lowest-overlap render is returned. Default is 5; pass 0 to
         disable the loop.
+    router:
+        Grid-routing algorithm used at the final routing pass.
+        ``"dijkstra"`` (default, historical) is a uniform-cost search
+        with no goal bias. ``"astar"`` adds an admissible Manhattan
+        bbox heuristic so the search front is steered toward the
+        target — typically expands fewer cells per net and gives a
+        modest wall-time speedup on larger circuits. Both algorithms
+        share the same edge-cost function (1 + 4·used + clearance +
+        2·turn), so the routed cost of each net is identical; only
+        tie-broken polyline geometry can differ. Note that the SA
+        cost-evaluation grid (used during placement search) keeps its
+        own BFS/Dijkstra implementation regardless of this flag.
+        See ``bench/bench_router.py`` for performance numbers.
     """
+    if router not in ("dijkstra", "astar"):
+        raise ValueError(
+            f"router must be 'dijkstra' or 'astar', got {router!r}"
+        )
     if isinstance(circuit, str):
         from sycan.spice import parse
         circuit = parse(circuit)
@@ -2256,7 +2408,7 @@ def autodraw(
         # ---- Routing ----
         grid_w = int(canvas_w / GRID_PX) + 2
         grid_h = int(canvas_h / GRID_PX) + 2
-        rg = _RouteGrid(grid_w, grid_h)
+        rg = _RouteGrid(grid_w, grid_h, algorithm=router)
 
         def to_cell(x: float, y: float) -> tuple[int, int]:
             return int(round(x / GRID_PX)), int(round(y / GRID_PX))

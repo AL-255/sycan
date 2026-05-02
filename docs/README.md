@@ -46,6 +46,12 @@ folder is overlaid into `_site/` so the REPL ends up at `/repl/`.
   the emitted JS, then serves `docs/` over plain HTTP).
 - `analysis.md`, `level_shifter.py`, `tline_sparams.py` — standalone
   reference material kept alongside the site.
+- `BE_BENCHMARK.md`, `BE_PORT_STATUS.md` — sympy↔symengine backend
+  benchmark report and migration status.
+- `ROUTER_BENCHMARK.md` — autodraw final-routing-pass comparison
+  between the default Dijkstra and the optional A\* router (selected
+  via ``autodraw(router="astar")``); includes the harness in
+  `bench/bench_router.py`.
 
 ## Preview locally
 
