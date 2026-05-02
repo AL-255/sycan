@@ -134,33 +134,65 @@ function selectWholeWire(wireId) {
         state.selectedSegments.add(segKey(wireId, i));
     }
 }
-// Walk a polyline's segments and group them into contiguous runs of
-// the same selectedness. Used at drag-start to physically split a
-// wire whose selection only covers some of its segments — the
-// selected pieces become wires that move, the unselected pieces
-// become wires that stay put.
-function splitWireBySegments(points, selectedSegs) {
+function splitWireBySegments(points, selectedSegs, selectedTerminalKeys) {
     const segCount = points.length - 1;
     if (segCount <= 0)
         return [];
-    const out = [];
-    let runStart = 0;
-    let runSel = selectedSegs.has(0);
-    for (let i = 1; i < segCount; i++) {
-        const sel = selectedSegs.has(i);
-        if (sel !== runSel) {
-            out.push({
-                points: points.slice(runStart, i + 1).map(p => [p[0], p[1]]),
-                selected: runSel,
-            });
-            runStart = i;
-            runSel = sel;
+    // Vertex-level "is this vertex part of the selected cluster?"
+    // table. A vertex is selected via *either* incident-to-a-
+    // selected-segment OR sitting-on-a-selected-device-terminal.
+    // Both pathways feed the same boundary classification.
+    const vtxSel = new Array(segCount + 1).fill(false);
+    for (let i = 0; i < segCount; i++) {
+        if (selectedSegs.has(i)) {
+            vtxSel[i] = true;
+            vtxSel[i + 1] = true;
         }
     }
-    out.push({
-        points: points.slice(runStart, segCount + 1).map(p => [p[0], p[1]]),
-        selected: runSel,
-    });
+    for (let i = 0; i <= segCount; i++) {
+        if (selectedTerminalKeys.has(`${points[i][0]},${points[i][1]}`)) {
+            vtxSel[i] = true;
+        }
+    }
+    const segKindArr = [];
+    for (let i = 0; i < segCount; i++) {
+        if (selectedSegs.has(i)) {
+            segKindArr.push('moving');
+        }
+        else {
+            const leftSel = vtxSel[i];
+            const rightSel = vtxSel[i + 1];
+            if (leftSel && rightSel)
+                segKindArr.push('moving'); // sandwich
+            else if (leftSel || rightSel)
+                segKindArr.push('boundary');
+            else
+                segKindArr.push('fixed');
+        }
+    }
+    const out = [];
+    let i = 0;
+    while (i < segCount) {
+        if (segKindArr[i] === 'boundary') {
+            // Each boundary segment is its own piece — adjacent boundary
+            // segments would have different inside-ends.
+            out.push({
+                points: points.slice(i, i + 2).map(p => [p[0], p[1]]),
+                kind: 'boundary',
+            });
+            i++;
+            continue;
+        }
+        const k = segKindArr[i];
+        let j = i;
+        while (j + 1 < segCount && segKindArr[j + 1] === k)
+            j++;
+        out.push({
+            points: points.slice(i, j + 2).map(p => [p[0], p[1]]),
+            kind: k,
+        });
+        i = j + 1;
+    }
     return out;
 }
 function deepCopyWires(wires) {
@@ -171,46 +203,56 @@ function deepCopyWires(wires) {
         };
         if (w.label !== undefined)
             copy.label = w.label;
+        if (w.bad)
+            copy.bad = true;
         return copy;
     });
 }
-// Locate every wire in `ids` that has *some but not all* of its
-// segments selected and split it into pieces in place. Returns a
-// new id list where each partially-selected wire has been replaced
-// by the ids of its newly-extracted *selected* pieces (the
-// unselected pieces become independent wires that aren't part of
-// the move). Whole-wire selections (every segment marked) are
-// returned unchanged.
-function splitPartialWires(ids) {
-    const out = [];
+function splitPartialWires(ids, selectedTerminalKeys) {
+    const movingIds = [];
+    const boundaries = [];
     for (const id of ids) {
         const w = state.wires.find(x => x.id === id);
         if (!w) {
             // Part id (or stale wire id) — pass through unchanged.
-            out.push(id);
+            movingIds.push(id);
             continue;
         }
         const segCount = w.points.length - 1;
         if (segCount <= 0) {
-            out.push(id);
+            movingIds.push(id);
             continue;
         }
         const selSegs = new Set(wireSelectedSegments(id));
         if (selSegs.size === 0 || selSegs.size === segCount) {
             // Either nothing or everything selected — no split needed.
-            out.push(id);
+            movingIds.push(id);
             continue;
         }
-        // Partial: split. Replace the original wire with pieces.
-        const pieces = splitWireBySegments(w.points, selSegs);
+        // Partial: split into moving / boundary / fixed pieces.
+        const pieces = splitWireBySegments(w.points, selSegs, selectedTerminalKeys);
         const idx = state.wires.indexOf(w);
         if (idx === -1) {
-            out.push(id);
+            movingIds.push(id);
             continue;
         }
         state.selectedIds.delete(id);
         clearWireSegSel(id);
         state.wires.splice(idx, 1);
+        // Vertex-level selection table reused below to decide each
+        // boundary piece's inside endpoint.
+        const vtxSel = new Array(segCount + 1).fill(false);
+        for (let i = 0; i < segCount; i++) {
+            if (selSegs.has(i)) {
+                vtxSel[i] = true;
+                vtxSel[i + 1] = true;
+            }
+        }
+        for (let i = 0; i <= segCount; i++) {
+            if (selectedTerminalKeys.has(`${w.points[i][0]},${w.points[i][1]}`)) {
+                vtxSel[i] = true;
+            }
+        }
         const pieceWires = pieces.map(piece => {
             const newWire = {
                 id: `W${state.nextId++}`,
@@ -221,19 +263,41 @@ function splitPartialWires(ids) {
             return newWire;
         });
         state.wires.splice(idx, 0, ...pieceWires);
-        for (let i = 0; i < pieces.length; i++) {
-            const piece = pieces[i];
-            const newWire = pieceWires[i];
-            if (piece.selected) {
+        // Walk the original wire's segment-index space to recover each
+        // piece's `[startSegIdx, endSegIdx]` for boundary classification.
+        let segCursor = 0;
+        for (let pi = 0; pi < pieces.length; pi++) {
+            const piece = pieces[pi];
+            const pieceSegLen = piece.points.length - 1;
+            const segStart = segCursor; // first segment index in the piece
+            const segEnd = segCursor + pieceSegLen - 1;
+            segCursor = segEnd + 1;
+            const newWire = pieceWires[pi];
+            if (piece.kind === 'moving') {
                 state.selectedIds.add(newWire.id);
                 for (let s = 0; s < newWire.points.length - 1; s++) {
                     state.selectedSegments.add(segKey(newWire.id, s));
                 }
-                out.push(newWire.id);
+                movingIds.push(newWire.id);
             }
+            else if (piece.kind === 'boundary') {
+                // Boundary pieces are always size-1 (one segment): segStart
+                // === segEnd. The "inside" vertex is whichever endpoint is
+                // shared with the selected run.
+                const leftSel = vtxSel[segStart];
+                const rightSel = vtxSel[segEnd + 1];
+                const insideEnd = leftSel && !rightSel ? 'start' :
+                    !leftSel && rightSel ? 'end' :
+                        'start'; // both-selected sandwich (degenerate, shouldn't reach here)
+                const a = newWire.points[0];
+                const b = newWire.points[1];
+                const axisHint = a[0] === b[0] ? 'v' : 'h';
+                boundaries.push({ wireId: newWire.id, insideEnd, axisHint });
+            }
+            // 'fixed' pieces are bystanders — no entry in either output.
         }
     }
-    return out;
+    return { movingIds, boundaries };
 }
 // Restore wires + selection from a `PreDragSnapshot`. Part positions
 // come from the move-draft's origs map (parts aren't snapshotted in
@@ -343,8 +407,19 @@ function render() {
         const selSegs = state.selectedIds.has(w.id)
             ? wireSelectedSegments(w.id)
             : [];
+        // Wires being live-rerouted by an in-flight drag get a "draft"
+        // class so the renderer can paint them semi-transparent — the
+        // direct-connect during the drag is only a placeholder until
+        // commit replaces it with a clean BFS-routed Manhattan path.
+        const dragKind = state.moveDraft?.origs.get(w.id)?.kind;
+        const isDraft = dragKind === 'wire-spanning';
+        const classes = ['wire'];
+        if (isDraft)
+            classes.push('wire-draft');
+        if (w.bad)
+            classes.push('wire-bad');
         el('path', { d: wirePath(w.points),
-            class: 'wire',
+            class: classes.join(' '),
             'data-id': w.id, 'data-kind': 'wire' }, svg);
         for (const i of selSegs) {
             if (i < 0 || i >= w.points.length - 1)
@@ -662,6 +737,8 @@ function drawJunctions() {
             bump(t.pos, 1);
     }
     for (const w of state.wires) {
+        if (w.bad)
+            continue; // bad-connection wires don't form junctions
         if (w.points.length < 2)
             continue;
         bump(w.points[0], 1);
@@ -728,11 +805,15 @@ function coalesceJunctions() {
                 points.push(t.pos);
         }
         for (const w of state.wires) {
+            if (w.bad)
+                continue; // bad wires don't contribute interest points
             for (const pt of w.points)
                 points.push(pt);
         }
         let changed = false;
         for (const w of state.wires) {
+            if (w.bad)
+                continue; // bad wires aren't coalesced into either
             const out = [w.points[0]];
             for (let i = 1; i < w.points.length; i++) {
                 const a = w.points[i - 1];
@@ -787,6 +868,16 @@ function coalesceJunctions() {
 // `pushHistory` so each "wire" object spans end-to-end, terminating
 // only at a 90° turn, a Steiner point, or a free endpoint.
 //
+//   * `mergeOverlappingCollinearSegments`: two separate wires whose
+//     segments lie on the same axis-aligned line *and overlap* (i.e.
+//     share more than just a single endpoint) collapse into a single
+//     canonical interval. The lowest-indexed wire keeps the segment;
+//     the others lose it. A wire that loses every segment is removed
+//     from `state.wires` entirely. This handles the case where a user
+//     loads / pastes a fixture with redundant duplicated wires (e.g.
+//     two wires both spanning the same trunk) — without it, dragging
+//     the trunk would create one ghost per duplicate.
+//
 //   * `mergeCollinearWires`: two separate wires whose endpoints
 //     coincide at point P and whose incident segments at P share an
 //     axis (no 90° turn) merge into a single polyline. Skipped if a
@@ -802,6 +893,228 @@ function coalesceJunctions() {
 //     segment all the way through.
 //
 // ------------------------------------------------------------------
+function mergeOverlappingCollinearSegments() {
+    // Decompose every wire into individual axis-aligned segments.
+    // Skip the whole pass on the (impossible-in-practice but cheap to
+    // guard) case where a polyline contains a diagonal piece — our
+    // overlap geometry only makes sense on axis-aligned intervals.
+    // Bad-connection wires are intentional diagonals (the auto-router
+    // failed) and never participate in overlap-merging.
+    const allSegs = [];
+    for (let wi = 0; wi < state.wires.length; wi++) {
+        const w = state.wires[wi];
+        if (w.bad)
+            continue;
+        for (let i = 0; i < w.points.length - 1; i++) {
+            const a = w.points[i], b = w.points[i + 1];
+            if (a[0] === b[0] && a[1] === b[1])
+                continue;
+            if (a[1] === b[1]) {
+                allSegs.push({
+                    axis: 'h', axisVal: a[1],
+                    lo: Math.min(a[0], b[0]), hi: Math.max(a[0], b[0]),
+                    wireIdx: wi, wireId: w.id, origSegIdx: i,
+                });
+            }
+            else if (a[0] === b[0]) {
+                allSegs.push({
+                    axis: 'v', axisVal: a[0],
+                    lo: Math.min(a[1], b[1]), hi: Math.max(a[1], b[1]),
+                    wireIdx: wi, wireId: w.id, origSegIdx: i,
+                });
+            }
+            else {
+                return; // diagonal — bail
+            }
+        }
+    }
+    // Group segments by (axis, axisVal). Within each group sort by `lo`
+    // and merge any whose intervals strictly overlap. Touching intervals
+    // (s.lo === cur.hi) do NOT merge here — those join up via
+    // `mergeCollinearWires` next, which respects T-junction rules.
+    const groups = new Map();
+    for (const s of allSegs) {
+        const k = `${s.axis}|${s.axisVal}`;
+        let g = groups.get(k);
+        if (!g) {
+            g = [];
+            groups.set(k, g);
+        }
+        g.push(s);
+    }
+    const allMerged = [];
+    let anyOverlap = false;
+    for (const segs of groups.values()) {
+        segs.sort((x, y) => x.lo - y.lo || x.hi - y.hi);
+        let cur = null;
+        for (const s of segs) {
+            if (cur && s.lo < cur.hi) {
+                cur.hi = Math.max(cur.hi, s.hi);
+                cur.contributors.push(s);
+                anyOverlap = true;
+            }
+            else {
+                if (cur)
+                    allMerged.push(cur);
+                cur = { axis: s.axis, axisVal: s.axisVal, lo: s.lo, hi: s.hi,
+                    contributors: [s], primary: s };
+            }
+        }
+        if (cur)
+            allMerged.push(cur);
+    }
+    if (!anyOverlap)
+        return;
+    // For each merged interval, the primary contributor is the one
+    // with the lowest wire-index (older wire wins, preserving its id);
+    // tie-break by the segment's position in that wire's polyline.
+    for (const m of allMerged) {
+        let primary = m.contributors[0];
+        for (const c of m.contributors) {
+            if (c.wireIdx < primary.wireIdx ||
+                (c.wireIdx === primary.wireIdx && c.origSegIdx < primary.origSegIdx)) {
+                primary = c;
+            }
+        }
+        m.primary = primary;
+    }
+    // Group surviving intervals back by their primary wire.
+    const survivingByWire = new Map();
+    for (const m of allMerged) {
+        let arr = survivingByWire.get(m.primary.wireId);
+        if (!arr) {
+            arr = [];
+            survivingByWire.set(m.primary.wireId, arr);
+        }
+        arr.push({ axis: m.axis, axisVal: m.axisVal,
+            lo: m.lo, hi: m.hi, origSegIdx: m.primary.origSegIdx });
+    }
+    // Reassemble each wire from its surviving segments. Sort by the
+    // primary's position in the original polyline so the chain follows
+    // the original direction; orient each segment to match the original
+    // (so a wire originally drawn right-to-left stays right-to-left).
+    const newWires = [];
+    const droppedIds = new Set();
+    const absorbedLabel = new Map(); // wireId → label
+    const same = (p, q) => p[0] === q[0] && p[1] === q[1];
+    for (const w of state.wires) {
+        if (w.points.length < 2) {
+            newWires.push(w);
+            continue;
+        }
+        const surviving = survivingByWire.get(w.id);
+        if (!surviving || surviving.length === 0) {
+            droppedIds.add(w.id);
+            const lab = sanitizeNetLabel(w.label);
+            if (lab)
+                absorbedLabel.set(w.id, w.label);
+            continue;
+        }
+        surviving.sort((x, y) => x.origSegIdx - y.origSegIdx);
+        const points = [];
+        for (const s of surviving) {
+            const orig = w.points[s.origSegIdx];
+            const orig2 = w.points[s.origSegIdx + 1];
+            let from, to;
+            if (s.axis === 'h') {
+                if (orig[0] <= orig2[0]) {
+                    from = [s.lo, s.axisVal];
+                    to = [s.hi, s.axisVal];
+                }
+                else {
+                    from = [s.hi, s.axisVal];
+                    to = [s.lo, s.axisVal];
+                }
+            }
+            else {
+                if (orig[1] <= orig2[1]) {
+                    from = [s.axisVal, s.lo];
+                    to = [s.axisVal, s.hi];
+                }
+                else {
+                    from = [s.axisVal, s.hi];
+                    to = [s.axisVal, s.lo];
+                }
+            }
+            if (points.length === 0) {
+                points.push(from, to);
+            }
+            else {
+                const tail = points[points.length - 1];
+                if (same(tail, from))
+                    points.push(to);
+                else if (same(tail, to))
+                    points.push(from);
+                else
+                    points.push(from, to); // discontinuity (split below)
+            }
+        }
+        // Split the polyline at any non-axis-aligned jump (a "discontinuity"
+        // from the case above, where surviving segments aren't contiguous).
+        // Each disconnected piece becomes its own wire — the primary keeps
+        // its id, extras get fresh ones.
+        const polylines = [];
+        let cur = [points[0]];
+        for (let i = 1; i < points.length; i++) {
+            const a = points[i - 1], b = points[i];
+            if (a[0] !== b[0] && a[1] !== b[1]) {
+                if (cur.length >= 2)
+                    polylines.push(cur);
+                cur = [b];
+            }
+            else {
+                cur.push(b);
+            }
+        }
+        if (cur.length >= 2)
+            polylines.push(cur);
+        if (polylines.length === 0) {
+            droppedIds.add(w.id);
+            continue;
+        }
+        w.points = polylines[0];
+        newWires.push(w);
+        for (let pi = 1; pi < polylines.length; pi++) {
+            const nid = `W${state.nextId++}`;
+            newWires.push({ id: nid, points: polylines[pi], label: w.label });
+        }
+    }
+    // Hand absorbed labels down to the primary that swallowed them, but
+    // only when the primary is itself unlabeled — never silently overwrite.
+    // Conflicting labels stay where they were; the netlist's "conflicting
+    // net labels" warning is the actionable surface for that.
+    if (absorbedLabel.size > 0) {
+        for (const m of allMerged) {
+            const primary = newWires.find(x => x.id === m.primary.wireId);
+            if (!primary || sanitizeNetLabel(primary.label))
+                continue;
+            for (const c of m.contributors) {
+                if (c.wireId === m.primary.wireId)
+                    continue;
+                const lab = absorbedLabel.get(c.wireId);
+                if (lab) {
+                    primary.label = lab;
+                    break;
+                }
+            }
+        }
+    }
+    state.wires = newWires;
+    for (const id of droppedIds) {
+        clearWireSegSel(id);
+        state.selectedIds.delete(id);
+    }
+    // Per-segment selection keys reference indices into the *old* polylines.
+    // For any primary whose shape changed, refresh whole-wire selection.
+    for (const m of allMerged) {
+        if (m.contributors.length <= 1)
+            continue;
+        if (state.selectedIds.has(m.primary.wireId)) {
+            clearWireSegSel(m.primary.wireId);
+            selectWholeWire(m.primary.wireId);
+        }
+    }
+}
 function mergeCollinearWires() {
     for (let iter = 0; iter < 64; iter++) {
         // (Re)build endpoint / interior / terminal incidence each pass —
@@ -811,6 +1124,8 @@ function mergeCollinearWires() {
         const interiorCount = new Map();
         const terminalCount = new Map();
         for (const w of state.wires) {
+            if (w.bad)
+                continue; // bad wires never fuse with anything
             if (w.points.length < 2)
                 continue;
             const fst = w.points[0];
@@ -927,15 +1242,29 @@ function mergeCollinearWires() {
     }
 }
 function simplifyCollinearVertices() {
-    // Every-grid-point incidence of *all* wire vertices and part
-    // terminals — two indices we can subtract this wire's contribution
-    // from to see whether anything else sits at a candidate vertex.
-    const wireVertexCount = new Map();
+    // Per-grid-point per-axis segment-incidence count. Each segment of
+    // axis 'h' contributes 1 to *both* its endpoints' h-count; ditto
+    // for 'v'. A "real T-junction" has both horizontal AND vertical
+    // incidence (or a part terminal), and we keep its vertex; a
+    // collinear-only meeting (every incident segment along the same
+    // axis as the host's flanking pair, no terminal) is excessive
+    // visual noise and gets dropped — buildNetlist's DSU still
+    // unions the resulting mid-segment crossing, so connectivity is
+    // preserved even after the explicit vertex is gone.
+    const hAt = new Map();
+    const vAt = new Map();
     const terminalCount = new Map();
     for (const w of state.wires) {
-        for (const pt of w.points) {
-            const k = `${pt[0]},${pt[1]}`;
-            wireVertexCount.set(k, (wireVertexCount.get(k) || 0) + 1);
+        if (w.bad)
+            continue; // bad wires don't contribute to T-counting
+        for (let i = 0; i < w.points.length - 1; i++) {
+            const a = w.points[i], b = w.points[i + 1];
+            const axis = (a[1] === b[1]) ? 'h' : 'v';
+            const map = axis === 'h' ? hAt : vAt;
+            const ka = `${a[0]},${a[1]}`;
+            const kb = `${b[0]},${b[1]}`;
+            map.set(ka, (map.get(ka) || 0) + 1);
+            map.set(kb, (map.get(kb) || 0) + 1);
         }
     }
     for (const p of state.parts) {
@@ -945,37 +1274,167 @@ function simplifyCollinearVertices() {
         }
     }
     for (const w of state.wires) {
+        if (w.bad)
+            continue;
         if (w.points.length < 3)
             continue;
-        // Per-wire self-incidence so we can identify "other" wires at a
-        // shared vertex (T-junction → keep) vs "only this wire" (drop).
-        const ownAt = new Map();
-        for (const pt of w.points) {
-            const k = `${pt[0]},${pt[1]}`;
-            ownAt.set(k, (ownAt.get(k) || 0) + 1);
-        }
         const out = [w.points[0]];
         for (let i = 1; i < w.points.length - 1; i++) {
             const prev = w.points[i - 1];
             const cur = w.points[i];
             const next = w.points[i + 1];
-            const collinear = (prev[0] === cur[0] && cur[0] === next[0])
-                || (prev[1] === cur[1] && cur[1] === next[1]);
-            if (!collinear) {
+            const isHoriz = (prev[1] === cur[1] && cur[1] === next[1]);
+            const isVert = (prev[0] === cur[0] && cur[0] === next[0]);
+            if (!isHoriz && !isVert) {
                 out.push(cur);
                 continue;
             }
             const k = `${cur[0]},${cur[1]}`;
-            const otherWires = (wireVertexCount.get(k) || 0) - (ownAt.get(k) || 0);
+            // The host wire's own flanking segments contribute to its own
+            // axis but never to the perpendicular axis at this vertex
+            // (that would make it a corner, not a collinear interior).
+            // So `perpCount` directly reflects "other wires' perpendicular
+            // incidence at this point".
+            const perpCount = (isHoriz ? vAt : hAt).get(k) || 0;
             const terminals = terminalCount.get(k) || 0;
-            if (otherWires > 0 || terminals > 0) {
-                out.push(cur); // T-junction or terminal connection — keep.
+            if (perpCount > 0 || terminals > 0) {
+                out.push(cur); // real T-junction or terminal connection — keep.
             }
-            // else: redundant collinear interior vertex — drop.
+            // else: collinear-only — every incident segment runs along the
+            // host's axis, so the vertex is excessive visual noise. Drop.
         }
         out.push(w.points[w.points.length - 1]);
         if (out.length !== w.points.length)
             w.points = out;
+    }
+}
+// ------------------------------------------------------------------
+// Free-endpoint tracking for drag-time dangle trimming
+//
+// A "free" wire endpoint is a multi-segment wire's terminal vertex
+// that connects to nothing else — no other wire vertex (interior or
+// endpoint) at the same grid cell, no part terminal there. Before a
+// drag, we snapshot every such endpoint so that `commitMove` can tell
+// the difference between:
+//
+//   * a dangle the user authored (pre-existing free endpoint) —
+//     leave it alone, the user wants it that way.
+//
+//   * a dangle the auto-router created (a free endpoint that wasn't
+//     free pre-drag) — trim it. This happens when BFS routes a
+//     spanning wire's path along an existing wire's line, and after
+//     `mergeOverlappingCollinearSegments` consolidates the redundant
+//     overlap, one wire's old endpoint is left orphaned where the
+//     other wire used to terminate.
+//
+// Single-point "label anchor" wires (length-1 polylines) are excluded
+// from both the snapshot and the trim — they have no segments to
+// shorten, and label anchors are deliberate even when isolated.
+// ------------------------------------------------------------------
+function freeEndpointKeys() {
+    const counts = new Map();
+    const partTerminal = new Set();
+    for (const w of state.wires) {
+        if (w.bad)
+            continue; // bad wires don't count as occupants
+        for (const p of w.points) {
+            const k = `${p[0]},${p[1]}`;
+            counts.set(k, (counts.get(k) || 0) + 1);
+        }
+    }
+    for (const p of state.parts) {
+        for (const t of partTerminals(p)) {
+            partTerminal.add(`${t.pos[0]},${t.pos[1]}`);
+        }
+    }
+    const result = new Set();
+    for (const w of state.wires) {
+        if (w.bad)
+            continue;
+        if (w.points.length < 2)
+            continue;
+        for (const idx of [0, w.points.length - 1]) {
+            const p = w.points[idx];
+            const k = `${p[0]},${p[1]}`;
+            if (partTerminal.has(k))
+                continue;
+            if ((counts.get(k) || 0) > 1)
+                continue;
+            result.add(k);
+        }
+    }
+    return result;
+}
+// Trim wires whose endpoints became free *because* of the operation
+// just committed. `preFree` is the snapshot of free-endpoint grid
+// keys taken at startMove time; any current free endpoint NOT in
+// that set is the trim target. Iterates because trimming a vertex
+// can expose another collinear interior as the new endpoint.
+function trimNewDangles(preFree) {
+    for (let pass = 0; pass < 32; pass++) {
+        const counts = new Map();
+        const partTerminal = new Set();
+        for (const w of state.wires) {
+            if (w.bad)
+                continue;
+            for (const p of w.points) {
+                const k = `${p[0]},${p[1]}`;
+                counts.set(k, (counts.get(k) || 0) + 1);
+            }
+        }
+        for (const p of state.parts) {
+            for (const t of partTerminals(p)) {
+                partTerminal.add(`${t.pos[0]},${t.pos[1]}`);
+            }
+        }
+        const isNewFree = (p) => {
+            const k = `${p[0]},${p[1]}`;
+            if (partTerminal.has(k))
+                return false;
+            if ((counts.get(k) || 0) !== 1)
+                return false;
+            if (preFree.has(k))
+                return false;
+            return true;
+        };
+        let changed = false;
+        const toDelete = new Set();
+        for (const w of state.wires) {
+            if (w.bad)
+                continue; // never trim a bad wire — user's job
+            if (w.points.length < 2)
+                continue;
+            // A length-3+ wire's first/last vertex can be popped without
+            // dropping the wire. Single trim per wire per pass — counts is
+            // a snapshot, so multi-trim within one pass would race against
+            // its own state.
+            if (w.points.length >= 3 && isNewFree(w.points[0])) {
+                w.points.shift();
+                changed = true;
+                continue;
+            }
+            if (w.points.length >= 3 && isNewFree(w.points[w.points.length - 1])) {
+                w.points.pop();
+                changed = true;
+                continue;
+            }
+            // A length-2 wire with a freshly-free endpoint is itself the
+            // dangle — trim the whole wire.
+            if (w.points.length === 2 &&
+                (isNewFree(w.points[0]) || isNewFree(w.points[1]))) {
+                toDelete.add(w.id);
+                changed = true;
+            }
+        }
+        if (toDelete.size > 0) {
+            state.wires = state.wires.filter(w => !toDelete.has(w.id));
+            for (const id of toDelete) {
+                clearWireSegSel(id);
+                state.selectedIds.delete(id);
+            }
+        }
+        if (!changed)
+            return;
     }
 }
 // ------------------------------------------------------------------
@@ -1016,6 +1475,24 @@ function wireComponentRoots() {
             seen(`${t.pos[0]},${t.pos[1]}`);
     }
     for (const w of state.wires) {
+        if (w.bad) {
+            // Bad wires keep their endpoints' net connection — the user
+            // will re-route the visual placeholder into a real Manhattan
+            // path later, but the netlist must stay correct in the
+            // meantime. Union start↔end without contributing to interior
+            // / mid-segment crossings (the diagonal body has no meaningful
+            // interior).
+            if (w.points.length >= 2) {
+                const a = w.points[0];
+                const b = w.points[w.points.length - 1];
+                const ka = `${a[0]},${a[1]}`;
+                const kb = `${b[0]},${b[1]}`;
+                seen(ka);
+                seen(kb);
+                union(ka, kb);
+            }
+            continue;
+        }
         for (const pt of w.points)
             seen(`${pt[0]},${pt[1]}`);
         for (let i = 1; i < w.points.length; i++) {
@@ -1089,6 +1566,155 @@ function netSignature() {
     return parts.join('\n');
 }
 // ------------------------------------------------------------------
+// Auto-router for drag-mode "wire-spanning" wires
+//
+// Runs at commit time: each spanning wire's direct-connect drag
+// preview is replaced with a clean Manhattan path computed by BFS
+// over the snap grid. The router avoids passing through *other*
+// parts' bodies (the moved part's terminals are explicitly allowed
+// — they're the wire's anchor) and prefers paths with fewer corners
+// by always continuing in the current direction first when expanding
+// neighbours.
+//
+// `bfsRoute` returns null when no clean path exists within the
+// search bbox; the caller falls back to a direct L-shape so the
+// drag at least commits *something*, and the parity check decides
+// whether that's acceptable.
+// ------------------------------------------------------------------
+const PARITY_RETRY_LIMIT = 10;
+function routeBlocked(x, y, allowAt, extraBlocked) {
+    const k = `${x},${y}`;
+    if (allowAt.has(k))
+        return false;
+    if (extraBlocked && extraBlocked.has(k))
+        return true;
+    for (const p of state.parts) {
+        const [bx0, by0, bx1, by1] = partBBox(p);
+        if (x > bx0 && x < bx1 && y > by0 && y < by1)
+            return true;
+    }
+    return false;
+}
+function bfsRoute(from, to, opts = {}) {
+    const sx = snap(from[0]);
+    const sy = snap(from[1]);
+    const ex = snap(to[0]);
+    const ey = snap(to[1]);
+    if (sx === ex && sy === ey)
+        return [[sx, sy]];
+    const margin = 16 * GRID;
+    const minX = Math.min(sx, ex) - margin;
+    const maxX = Math.max(sx, ex) + margin;
+    const minY = Math.min(sy, ey) - margin;
+    const maxY = Math.max(sy, ey) + margin;
+    // Start and end terminals are always passable, even if they sit
+    // inside a part bbox.
+    const allow = new Set([`${sx},${sy}`, `${ex},${ey}`]);
+    const parent = new Map();
+    const queue = [{ x: sx, y: sy, dx: 0, dy: 0 }];
+    parent.set(`${sx},${sy}`, null);
+    const horiz = [[GRID, 0], [-GRID, 0]];
+    const vert = [[0, GRID], [0, -GRID]];
+    const dirsByAxis = opts.preferAxis === 'v'
+        ? [...vert, ...horiz]
+        : [...horiz, ...vert];
+    while (queue.length > 0) {
+        const cur = queue.shift();
+        if (cur.x === ex && cur.y === ey)
+            break;
+        // Continue in current direction first, then the other three in
+        // the axis-preference order.
+        const ordered = [];
+        if (cur.dx !== 0 || cur.dy !== 0)
+            ordered.push([cur.dx, cur.dy]);
+        for (const d of dirsByAxis) {
+            if (d[0] === cur.dx && d[1] === cur.dy)
+                continue;
+            ordered.push(d);
+        }
+        for (const [dx, dy] of ordered) {
+            const nx = cur.x + dx;
+            const ny = cur.y + dy;
+            if (nx < minX || nx > maxX || ny < minY || ny > maxY)
+                continue;
+            const k = `${nx},${ny}`;
+            if (parent.has(k))
+                continue;
+            if (routeBlocked(nx, ny, allow, opts.extraBlocked))
+                continue;
+            parent.set(k, [cur.x, cur.y]);
+            queue.push({ x: nx, y: ny, dx, dy });
+        }
+    }
+    if (!parent.has(`${ex},${ey}`))
+        return null;
+    const points = [];
+    let curKey = `${ex},${ey}`;
+    while (curKey !== null) {
+        const [x, y] = curKey.split(',').map(Number);
+        points.push([x, y]);
+        const par = parent.get(curKey);
+        curKey = par ? `${par[0]},${par[1]}` : null;
+    }
+    points.reverse();
+    // Compact collinear runs into Manhattan segments.
+    if (points.length < 3)
+        return points;
+    const compact = [points[0]];
+    for (let i = 1; i < points.length - 1; i++) {
+        const prev = compact[compact.length - 1];
+        const cur = points[i];
+        const next = points[i + 1];
+        const collinear = (prev[0] === cur[0] && cur[0] === next[0])
+            || (prev[1] === cur[1] && cur[1] === next[1]);
+        if (!collinear)
+            compact.push(cur);
+    }
+    compact.push(points[points.length - 1]);
+    return compact;
+}
+// Replace each ``wire-spanning`` wire's direct-connect draft with a
+// BFS-routed Manhattan path. Returns `{ hasBad: true }` when any
+// wire couldn't be routed and was emitted as a bad-connection
+// placeholder instead — the caller skips parity / retry and accepts
+// the drag as committed, leaving the red TODO marker for the user.
+function applyAutoRoutes(md, opts = {}) {
+    let hasBad = false;
+    for (const [id, orig] of md.origs) {
+        if (orig.kind !== 'wire-spanning')
+            continue;
+        const wire = state.wires.find(w => w.id === id);
+        if (!wire || wire.points.length < 2)
+            continue;
+        // Inside endpoint = the one currently moved; outside = the
+        // other (unchanged from origs).
+        const inside = orig.insideEnd === 'start'
+            ? wire.points[0]
+            : wire.points[wire.points.length - 1];
+        const outside = orig.insideEnd === 'start'
+            ? wire.points[wire.points.length - 1]
+            : wire.points[0];
+        const path = bfsRoute(inside, outside, opts);
+        if (!path) {
+            // BFS failed (no clean Manhattan path within the search bbox).
+            // Fall back to a 2-point direct-connect line and flag it as a
+            // bad connection so the user can spot and fix it manually,
+            // rather than reverting the whole drag.
+            wire.points = orig.insideEnd === 'start'
+                ? [[inside[0], inside[1]], [outside[0], outside[1]]]
+                : [[outside[0], outside[1]], [inside[0], inside[1]]];
+            wire.bad = true;
+            hasBad = true;
+            continue;
+        }
+        wire.bad = undefined;
+        wire.points = orig.insideEnd === 'start'
+            ? path
+            : path.slice().reverse();
+    }
+    return { hasBad };
+}
+// ------------------------------------------------------------------
 // Net-label propagation
 //
 // Companion to `coalesceJunctions`. After the schematic is in canonical
@@ -1122,6 +1748,8 @@ function propagateLabels() {
     // root -> Set(labels). Multiple distinct entries → no propagation.
     const labelsByRoot = new Map();
     for (const w of state.wires) {
+        if (w.bad)
+            continue;
         const lab = sanitizeNetLabel(w.label);
         if (!lab)
             continue;
@@ -1136,6 +1764,8 @@ function propagateLabels() {
         s.add(lab);
     }
     for (const w of state.wires) {
+        if (w.bad)
+            continue;
         if (sanitizeNetLabel(w.label))
             continue; // already named
         const r = wireRoot.get(w.id);
@@ -1282,8 +1912,10 @@ wrap.addEventListener('mousedown', (e) => {
         e.preventDefault();
         return;
     }
-    // Middle / right / shift-left → pan.
-    if (e.button === 1 || e.button === 2 || (e.button === 0 && e.shiftKey)) {
+    // Middle / right → pan. (Shift+left used to pan too, but that
+    // conflicts with the selection-additive convention; shift+left is
+    // now reserved for "add to selection".)
+    if (e.button === 1 || e.button === 2) {
         e.preventDefault();
         panning = true;
         panStart = { x: e.clientX, y: e.clientY,
@@ -1354,7 +1986,7 @@ wrap.addEventListener('mousedown', (e) => {
         }
         state.boxSelect = { x0: world[0], y0: world[1],
             x1: world[0], y1: world[1],
-            additive: e.ctrlKey || e.metaKey };
+            additive: e.shiftKey || e.ctrlKey || e.metaKey };
         if (!state.boxSelect.additive) {
             state.selectedSegments.clear();
         }
@@ -1522,23 +2154,70 @@ wrap.addEventListener('click', (e) => {
         case 'select': {
             // mousedown handles the simple-click-on-hit case (it sets the
             // segment-only highlights there and starts a move-draft). This
-            // arm fires for empty-space clicks and modifier-toggle clicks,
-            // so we always drop the segment markers — additive selections
-            // span multiple things and segment-only is a transient visual.
-            state.selectedSegments.clear();
+            // arm fires for empty-space clicks and modifier-augmented
+            // clicks. For wire hits we resolve the specific segment under
+            // the cursor so additive selections operate at segment
+            // granularity — shift+click on a wire segment adds *that*
+            // segment, not the whole wire.
+            let segTarget = null;
+            if (hit && hit.kind === 'wire') {
+                const w = state.wires.find(x => x.id === hit.id);
+                if (w && w.points.length >= 2) {
+                    const idx = closestSegmentIndex(world, w);
+                    segTarget = { wireId: hit.id, key: segKey(hit.id, idx) };
+                }
+            }
             if (!hit) {
                 state.selectedIds.clear();
+                state.selectedSegments.clear();
             }
-            else if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                // Toggle membership when modifier held.
-                if (state.selectedIds.has(hit.id))
-                    state.selectedIds.delete(hit.id);
-                else
+            else if (e.shiftKey) {
+                // Shift = additive. Add to the selection without ever
+                // removing — clicking the same target twice is a no-op.
+                // Existing segment markers on other wires are preserved.
+                if (segTarget) {
+                    state.selectedIds.add(segTarget.wireId);
+                    state.selectedSegments.add(segTarget.key);
+                }
+                else {
                     state.selectedIds.add(hit.id);
+                }
+            }
+            else if (e.ctrlKey || e.metaKey) {
+                // Ctrl / Cmd = toggle. For wires, toggle the specific
+                // segment; the wire id stays in selectedIds as long as any
+                // of its segments are still selected.
+                if (segTarget) {
+                    if (state.selectedSegments.has(segTarget.key)) {
+                        state.selectedSegments.delete(segTarget.key);
+                        const stillAny = [...state.selectedSegments]
+                            .some(k => k.startsWith(segTarget.wireId + '|'));
+                        if (!stillAny)
+                            state.selectedIds.delete(segTarget.wireId);
+                    }
+                    else {
+                        state.selectedSegments.add(segTarget.key);
+                        state.selectedIds.add(segTarget.wireId);
+                    }
+                }
+                else {
+                    if (state.selectedIds.has(hit.id))
+                        state.selectedIds.delete(hit.id);
+                    else
+                        state.selectedIds.add(hit.id);
+                }
             }
             else {
+                // Plain click: replace the selection with just this target.
                 state.selectedIds.clear();
-                state.selectedIds.add(hit.id);
+                state.selectedSegments.clear();
+                if (segTarget) {
+                    state.selectedIds.add(segTarget.wireId);
+                    state.selectedSegments.add(segTarget.key);
+                }
+                else {
+                    state.selectedIds.add(hit.id);
+                }
             }
             refreshProps();
             render();
@@ -1674,6 +2353,24 @@ function netMembers(seedWire) {
             seen(`${t.pos[0]},${t.pos[1]}`);
     }
     for (const w of state.wires) {
+        if (w.bad) {
+            // Bad wires keep their endpoints' net connection — the user
+            // will re-route the visual placeholder into a real Manhattan
+            // path later, but the netlist must stay correct in the
+            // meantime. Union start↔end without contributing to interior
+            // / mid-segment crossings (the diagonal body has no meaningful
+            // interior).
+            if (w.points.length >= 2) {
+                const a = w.points[0];
+                const b = w.points[w.points.length - 1];
+                const ka = `${a[0]},${a[1]}`;
+                const kb = `${b[0]},${b[1]}`;
+                seen(ka);
+                seen(kb);
+                union(ka, kb);
+            }
+            continue;
+        }
         for (const pt of w.points)
             seen(`${pt[0]},${pt[1]}`);
         for (let i = 1; i < w.points.length; i++) {
@@ -1816,8 +2513,26 @@ function refreshProps() {
         const lab = document.createElement('label');
         lab.innerHTML = `<span>Type</span><span style="font-weight:600">Wire</span>`;
         propPane.appendChild(lab);
+        // Selection in this editor is segment-level (see comment on
+        // ``state.selectedSegments``), so the Id row prints the
+        // composite ``${wireId}|${segIdx}`` keys for each selected
+        // segment of this wire instead of just the wire id. A wire
+        // selected end-to-end shows every segment in order — that's
+        // the canonical representation; there's no whole-wire id.
+        const segIdxs = wireSelectedSegments(wire.id);
+        const idText = segIdxs.length
+            ? segIdxs.map(i => `${wire.id}|${i}`).join(', ')
+            : wire.id;
         const lab2 = document.createElement('label');
-        lab2.innerHTML = `<span>Id</span><span>${wire.id}</span>`;
+        const lab2Sp = document.createElement('span');
+        lab2Sp.textContent = 'Id';
+        const lab2Val = document.createElement('span');
+        lab2Val.textContent = idText;
+        lab2Val.style.cssText =
+            'font-family: "JetBrains Mono", monospace; ' +
+                'word-break: break-all; text-align: right;';
+        lab2.appendChild(lab2Sp);
+        lab2.appendChild(lab2Val);
         propPane.appendChild(lab2);
         // Editable net label. The same label propagates to every wire in
         // the same connected component via propagateLabels, but the user
@@ -2016,10 +2731,68 @@ function buildNetlist() {
             seen(`${t.pos[0]},${t.pos[1]}`);
     }
     for (const w of state.wires) {
+        if (w.bad) {
+            // Bad wires keep their endpoints' net connection — the user
+            // will re-route the visual placeholder into a real Manhattan
+            // path later, but the netlist must stay correct in the
+            // meantime. Union start↔end without contributing to interior
+            // / mid-segment crossings (the diagonal body has no meaningful
+            // interior).
+            if (w.points.length >= 2) {
+                const a = w.points[0];
+                const b = w.points[w.points.length - 1];
+                const ka = `${a[0]},${a[1]}`;
+                const kb = `${b[0]},${b[1]}`;
+                seen(ka);
+                seen(kb);
+                union(ka, kb);
+            }
+            continue;
+        }
         for (const pt of w.points)
             seen(`${pt[0]},${pt[1]}`);
         for (let i = 1; i < w.points.length; i++) {
             union(`${w.points[i - 1][0]},${w.points[i - 1][1]}`, `${w.points[i][0]},${w.points[i][1]}`);
+        }
+    }
+    // Mid-segment crossings: a wire whose segment passes strictly
+    // through another wire's vertex / part terminal still connects
+    // the two even when no explicit T-vertex sits on the segment.
+    // (`simplifyCollinearVertices` aggressively drops collinear-only
+    // interior vertices, so the explicit T may have been removed.)
+    // For each segment, walk every other interest-point and union
+    // the crossing into the segment's endpoints when it lies inside.
+    const interestPoints = [];
+    for (const { terminals } of partTerms) {
+        for (const t of terminals)
+            interestPoints.push(t.pos);
+    }
+    for (const w of state.wires) {
+        if (w.bad) {
+            // Bad wires only contribute their endpoints as interest points
+            // (so a normal wire that happens to pass through a bad wire's
+            // endpoint cell still unions). Their interior is meaningless.
+            if (w.points.length >= 2) {
+                interestPoints.push(w.points[0]);
+                interestPoints.push(w.points[w.points.length - 1]);
+            }
+            continue;
+        }
+        for (const pt of w.points)
+            interestPoints.push(pt);
+    }
+    for (const w of state.wires) {
+        if (w.bad)
+            continue; // bad wires' diagonal body never hosts crossings
+        for (let i = 1; i < w.points.length; i++) {
+            const a = w.points[i - 1], b = w.points[i];
+            // pointOnSegment requires axis-aligned input — that's the
+            // invariant we keep for every wire segment, so it's safe.
+            for (const p of interestPoints) {
+                if (pointOnSegment(p, a, b)) {
+                    union(`${p[0]},${p[1]}`, `${a[0]},${a[1]}`);
+                }
+            }
         }
     }
     // Ground roots → node "0".
@@ -2038,6 +2811,8 @@ function buildNetlist() {
     const labelConflicts = [];
     const labelToRoot = new Map();
     for (const w of state.wires) {
+        if (w.bad)
+            continue;
         const lab = sanitizeNetLabel(w.label);
         if (!lab)
             continue;
@@ -2253,6 +3028,71 @@ function flashHint(msg) {
     hintTimer = window.setTimeout(refreshHint, 1600);
 }
 // ------------------------------------------------------------------
+// Pop-up notifications
+//
+// `notify(msg, level)` appends a toast to the bottom-left stack:
+//
+//   * `info`  — blue accent, auto-dismisses after `INFO_AUTO_DISMISS_MS`.
+//                Use for "thing-happened" status (drag committed,
+//                paste placed, netlist copied).
+//
+//   * `warn`  — amber accent, sticky. Use for situations the user
+//                should notice but isn't an error (drag reverted
+//                because parity check failed, label conflict, etc.).
+//
+//   * `error` — red accent, sticky. Use for failures the user must
+//                act on (parse error, file load failed).
+//
+// Sticky toasts grow an [×] close button. The stack reverses so the
+// newest message lands at the top and older messages flow downward.
+// A "Clear all" button hangs below the stack and removes every
+// toast at once; it hides itself when the stack is empty.
+// ------------------------------------------------------------------
+const INFO_AUTO_DISMISS_MS = 3500;
+function refreshClearAllButton() {
+    const stack = document.getElementById('notifications');
+    const btn = document.getElementById('notifications-clear-all');
+    if (!btn)
+        return;
+    btn.hidden = stack.children.length === 0;
+}
+function notify(msg, level = 'info') {
+    const stack = document.getElementById('notifications');
+    const el = document.createElement('div');
+    el.className = `notification notification-${level}`;
+    el.setAttribute('role', level === 'info' ? 'status' : 'alert');
+    const text = document.createElement('span');
+    text.className = 'notification-text';
+    text.textContent = msg;
+    el.appendChild(text);
+    const dismiss = () => {
+        if (el.parentElement)
+            el.parentElement.removeChild(el);
+        refreshClearAllButton();
+    };
+    if (level === 'info') {
+        window.setTimeout(dismiss, INFO_AUTO_DISMISS_MS);
+    }
+    else {
+        const close = document.createElement('button');
+        close.className = 'notification-close';
+        close.type = 'button';
+        close.textContent = '×';
+        close.setAttribute('aria-label', 'Dismiss');
+        close.addEventListener('click', dismiss);
+        el.appendChild(close);
+    }
+    stack.appendChild(el);
+    refreshClearAllButton();
+    return el;
+}
+document.getElementById('notifications-clear-all').addEventListener('click', () => {
+    const stack = document.getElementById('notifications');
+    while (stack.firstChild)
+        stack.removeChild(stack.firstChild);
+    refreshClearAllButton();
+});
+// ------------------------------------------------------------------
 // Undo / redo
 // ------------------------------------------------------------------
 function snapshot() {
@@ -2263,22 +3103,38 @@ function snapshot() {
         nextId: state.nextId,
     });
 }
+// Bring `state.wires` into canonical Steiner-T form: insert
+// T-vertices where they're geometrically real (coalesce), fuse
+// adjacent collinear wires (merge), drop excessive collinear-only
+// vertices (simplify), then propagate labels along connected
+// components. Used by `pushHistory` (so committed snapshots are
+// always canonical) and by `updateMove` (so the live drag preview
+// shows the same canonical form the user will get on commit).
+function canonicalizeWires() {
+    coalesceJunctions();
+    mergeOverlappingCollinearSegments();
+    mergeCollinearWires();
+    simplifyCollinearVertices();
+    propagateLabels();
+}
+// Slimmer canonicalisation for the mid-drag preview: skip merge
+// (it's confused by the diagonal direct-connect lines that
+// `wire-spanning` produces, and visually fusing wires while the
+// user is actively dragging is jarring) and skip propagate (label
+// propagation is a structural commit, not a per-frame thing). The
+// remaining passes — coalesce + simplify — are what removes stale
+// T-vertices from bystander wires whose perpendicular neighbour
+// just dragged away.
+function canonicalizeWiresForDraft() {
+    coalesceJunctions();
+    simplifyCollinearVertices();
+}
 function pushHistory() {
     // Every committed state is canonical Steiner-T form: any wire that
     // touches another wire's vertex or a part terminal mid-segment has
     // that point split into a vertex on its own polyline. Doing this in
     // pushHistory means a forgotten coalesce at a call-site is impossible.
-    coalesceJunctions();
-    // Then collapse every "wire" object so it spans end-to-end —
-    // separate wires meeting collinearly with no third party at the
-    // seam fuse into one polyline, and any redundant interior vertex
-    // (collinear, no other wire / terminal there) gets erased.
-    mergeCollinearWires();
-    simplifyCollinearVertices();
-    // After coalesce we know the connected components — propagate user
-    // labels to every unlabelled wire in a labelled component so the
-    // saved snapshot is in its canonical "named has priority" form.
-    propagateLabels();
+    canonicalizeWires();
     // Any structural edit invalidates the most recent calc-node and
     // net-highlight lookups (the net they pointed at may have been
     // reorganised). Drop the highlights; the user can re-pick if they
@@ -2776,13 +3632,40 @@ function startMove(ids, pickup, viaDrag, freshlyPasted) {
         selectedSegments: [...state.selectedSegments],
         nextId: state.nextId,
     };
+    // Snapshot every wire-endpoint grid cell that was already a free
+    // dangle pre-drag, so `commitMove` can tell user-authored dangles
+    // (left untouched) from auto-router artefacts (trimmed). Compute
+    // before any partial-segment splitting below — splits introduce
+    // transient new endpoints we don't want in this set.
+    const preFreeEndpoints = freeEndpointKeys();
+    // Selected device-terminal coordinates — fed into the segment
+    // split so a vertex sitting on a selected device's terminal also
+    // counts as "selected" for boundary classification. That's how
+    // an unselected segment that bridges a selected device and a
+    // selected segment via a single corner gets promoted to 'moving'
+    // (sandwich rule) instead of leaving the device dangling on a
+    // diagonal direct-connect line.
+    const selectedTerminalKeys = new Set();
+    if (!freshlyPasted) {
+        for (const id of ids) {
+            const p = state.parts.find(pp => pp.id === id);
+            if (!p)
+                continue;
+            for (const t of partTerminals(p)) {
+                selectedTerminalKeys.add(`${t.pos[0]},${t.pos[1]}`);
+            }
+        }
+    }
     // Segment-level drag: split any partially-selected wire into
-    // pieces. The selected pieces become new wires that move; the
-    // unselected pieces become new wires that stay put. After this,
-    // every wire in `effectiveIds` either translates entirely or
-    // doesn't appear in the move at all — same invariant the rest of
-    // startMove (and updateMove) already assumed.
-    const effectiveIds = freshlyPasted ? ids : splitPartialWires(ids);
+    // moving / boundary / fixed pieces.
+    //   * Moving pieces translate by the delta (kind 'wire').
+    //   * Boundary pieces re-route on commit (kind 'wire-spanning' —
+    //     direct connect during the drag, BFS Manhattan on mouseup).
+    //   * Fixed pieces stay put and don't appear in the move-draft.
+    const splitResult = freshlyPasted
+        ? { movingIds: ids, boundaries: [] }
+        : splitPartialWires(ids, selectedTerminalKeys);
+    const effectiveIds = splitResult.movingIds;
     const origs = new Map();
     for (const id of effectiveIds) {
         const part = state.parts.find(p => p.id === id);
@@ -2795,6 +3678,18 @@ function startMove(ids, pickup, viaDrag, freshlyPasted) {
             origs.set(id, { kind: 'wire',
                 points: wire.points.map(pt => [pt[0], pt[1]]) });
         }
+    }
+    // Boundary pieces from partial-selection split → spanning wires.
+    for (const b of splitResult.boundaries) {
+        const wire = state.wires.find(w => w.id === b.wireId);
+        if (!wire)
+            continue;
+        origs.set(b.wireId, {
+            kind: 'wire-spanning',
+            points: wire.points.map(pt => [pt[0], pt[1]]),
+            insideEnd: b.insideEnd,
+            axisHint: b.axisHint,
+        });
     }
     if (!origs.size)
         return;
@@ -2835,6 +3730,8 @@ function startMove(ids, pickup, viaDrag, freshlyPasted) {
             for (const w of state.wires) {
                 if (origs.has(w.id))
                     continue; // already explicitly selected
+                if (w.bad)
+                    continue; // bad wires aren't auto-rerouted
                 if (w.points.length < 2)
                     continue;
                 const first = w.points[0];
@@ -2862,6 +3759,7 @@ function startMove(ids, pickup, viaDrag, freshlyPasted) {
     // Optional pre-drag connectivity snapshot for the parity check.
     const parityOn = document.getElementById('parity-check')?.checked === true;
     const paritySig = (dragMode && parityOn) ? netSignature() : null;
+    const noRevert = document.getElementById('no-revert')?.checked === true;
     state.moveDraft = {
         ids: [...effectiveIds],
         origs,
@@ -2871,8 +3769,10 @@ function startMove(ids, pickup, viaDrag, freshlyPasted) {
         freshlyPasted,
         dragMode,
         parityCheck: parityOn,
+        noRevert,
         paritySig,
         preDragSnapshot,
+        preFreeEndpoints,
     };
     wrap.classList.add('moving');
     refreshHint();
@@ -2904,71 +3804,34 @@ function updateMove(world) {
             const wire = state.wires.find(w => w.id === id);
             if (!wire)
                 continue;
-            // Drag-the-end semantics: keep every original vertex *except*
-            // the inside endpoint, which follows the moved part by `delta`.
-            // If the dragged endpoint stays Manhattan-aligned with its
-            // neighbour vertex (same x or same y on the original axis),
-            // we only nudge the endpoint. Otherwise we splice in one
-            // corner so the segment immediately adjacent to the endpoint
-            // becomes an L — the rest of the wire stays untouched. This
-            // is what KiCad does and it preserves the user's hand-drawn
-            // routing through the middle of long wires.
-            const pts = orig.points.map(pt => [pt[0], pt[1]]);
-            if (orig.insideEnd === 'end') {
-                const n = pts.length;
-                const prev = pts[n - 2];
-                const newEnd = [pts[n - 1][0] + dx, pts[n - 1][1] + dy];
-                if (orig.axisHint === 'h') {
-                    if (prev[1] === newEnd[1]) {
-                        pts[n - 1] = newEnd;
-                    }
-                    else {
-                        // Keep horizontal at prev.y up to newEnd.x, then jog.
-                        pts.splice(n - 1, 1, [newEnd[0], prev[1]], newEnd);
-                    }
-                }
-                else {
-                    if (prev[0] === newEnd[0]) {
-                        pts[n - 1] = newEnd;
-                    }
-                    else {
-                        pts.splice(n - 1, 1, [prev[0], newEnd[1]], newEnd);
-                    }
-                }
-            }
-            else {
-                // insideEnd === 'start': mirror image at the head of the
-                // polyline.
-                const next = pts[1];
-                const newStart = [pts[0][0] + dx, pts[0][1] + dy];
-                if (orig.axisHint === 'h') {
-                    if (next[1] === newStart[1]) {
-                        pts[0] = newStart;
-                    }
-                    else {
-                        pts.splice(0, 1, newStart, [newStart[0], next[1]]);
-                    }
-                }
-                else {
-                    if (next[0] === newStart[0]) {
-                        pts[0] = newStart;
-                    }
-                    else {
-                        pts.splice(0, 1, newStart, [next[0], newStart[1]]);
-                    }
-                }
-            }
-            // Drop consecutive duplicates that can appear when the new
-            // endpoint lands on top of its neighbour vertex.
-            const dedup = [pts[0]];
-            for (let i = 1; i < pts.length; i++) {
-                const cur = pts[i], last = dedup[dedup.length - 1];
-                if (cur[0] !== last[0] || cur[1] !== last[1])
-                    dedup.push(cur);
-            }
-            wire.points = dedup;
+            // Direct connect for the duration of the drag: the wire
+            // becomes a single straight (potentially diagonal!) segment
+            // between the moved inside endpoint and the unmoved outside
+            // endpoint. Render paints it semi-transparent via the
+            // ``wire-draft`` class. On mouseup, ``commitMove`` runs the
+            // BFS auto-router to lay down a clean Manhattan path in its
+            // place.
+            const insideOrig = orig.insideEnd === 'start'
+                ? orig.points[0]
+                : orig.points[orig.points.length - 1];
+            const outsideOrig = orig.insideEnd === 'start'
+                ? orig.points[orig.points.length - 1]
+                : orig.points[0];
+            const insideNew = [insideOrig[0] + dx, insideOrig[1] + dy];
+            wire.points = orig.insideEnd === 'start'
+                ? [insideNew, [outsideOrig[0], outsideOrig[1]]]
+                : [[outsideOrig[0], outsideOrig[1]], insideNew];
         }
     }
+    // Canonicalise the live state so the semi-transparent draft
+    // shows the same junction layout the user will see on commit:
+    // stale T-vertices that the dragged-away wire used to anchor
+    // disappear, and any new T-junction the moved geometry creates
+    // is materialised as an explicit vertex (which `drawJunctions`
+    // then renders as a dot). No history write — `pushHistory` runs
+    // exactly once per drag, in `commitMove`, so undo collapses the
+    // whole drag sequence into a single Ctrl+Z.
+    canonicalizeWiresForDraft();
     render();
 }
 // Rotate the entire move-draft 90° (CW in screen space) around the
@@ -3045,19 +3908,172 @@ function commitMove() {
         render();
         return;
     }
-    // Parity check (drag-mode only). If the drag changed the
-    // connectivity partition — typically because a re-routed
-    // spanning wire now passes through another terminal, or a
-    // captured wire's seam coincided with an unselected wire — we
-    // restore the originals and abort the commit. The user sees a
-    // status-line note explaining what happened.
-    if (md.dragMode && md.parityCheck && md.paritySig !== null
-        && (md.delta[0] !== 0 || md.delta[1] !== 0)) {
-        const post = netSignature();
-        if (post !== md.paritySig) {
-            // Restore from the pre-drag snapshot — startMove may have
-            // physically split partially-selected wires, so the origs
-            // map alone can't undo all of it.
+    // Drag-mode commit: replace each spanning wire's direct-connect
+    // draft (rendered semi-transparent during the drag) with a clean
+    // BFS-routed Manhattan path. Parity check (using the netlist —
+    // see `netSignature`) verifies the routing didn't change
+    // connectivity; if it did, we retry up to PARITY_RETRY_LIMIT
+    // times with progressively stricter obstacle sets / alternate
+    // axis preferences before giving up and reverting the whole drag.
+    //
+    // The check has to run *after* `coalesceJunctions` so the netlist
+    // DSU sees implicit T-junctions (a BFS path that passes through
+    // R1.top mid-segment, for instance, only registers as a T after
+    // coalesce inserts the explicit vertex). Without that, the
+    // pre-coalesce DSU misses spurious connections and a routing
+    // that visually short-circuits unrelated nets passes the check.
+    if (md.dragMode && (md.delta[0] !== 0 || md.delta[1] !== 0)) {
+        const hasSpanning = [...md.origs.values()]
+            .some(o => o.kind === 'wire-spanning');
+        // Snapshot every wire's points at the pre-commit drag state
+        // (post-updateMove, pre-BFS, pre-coalesce). The retry loop
+        // restores from this baseline because both `applyAutoRoutes` and
+        // `coalesceJunctions` mutate wire vertex lists; the noRevert
+        // path also uses it to reset spanning wires to their direct-
+        // connect form before marking them as bad.
+        const dragWires = state.wires.map(w => ({
+            id: w.id,
+            points: w.points.map(p => [p[0], p[1]]),
+        }));
+        const restoreDraftWires = () => {
+            const byId = new Map(dragWires.map(w => [w.id, w.points]));
+            for (const w of state.wires) {
+                const pts = byId.get(w.id);
+                if (pts)
+                    w.points = pts.map(p => [p[0], p[1]]);
+            }
+        };
+        let parityOk = true;
+        let retries = 0;
+        if (hasSpanning) {
+            const extraBlocked = new Set();
+            let preferAxis = 'h';
+            let firstAttempt = true;
+            while (true) {
+                // Reset to the direct-connect baseline before each routing
+                // attempt so paths from the failed run don't carry over.
+                restoreDraftWires();
+                const { hasBad } = applyAutoRoutes(md, { extraBlocked, preferAxis });
+                // BFS failed on the very first attempt: there's no clean
+                // Manhattan path from the moved cluster back to the rest of
+                // the schematic at all. Emit the bad-connection wires (the
+                // direct-connect line, marked red) and accept the drag —
+                // reverting the whole drag because of an unreachable corner
+                // would discard everything else the user moved. The user
+                // resolves the red TODO by selecting and re-routing.
+                if (firstAttempt && hasBad) {
+                    parityOk = true;
+                    break;
+                }
+                // BFS failed during a parity retry — i.e. earlier attempts
+                // produced valid Manhattan paths but didn't satisfy parity,
+                // and the obstacle-accumulation has now closed off the
+                // remaining alternatives. Treat as parity-retry exhaustion
+                // and revert the whole drag (existing behaviour).
+                if (hasBad) {
+                    parityOk = false;
+                    break;
+                }
+                firstAttempt = false;
+                if (md.parityCheck && md.paritySig !== null) {
+                    // Run coalesce *before* the netlist comparison so the
+                    // DSU inside `buildNetlist` sees every implicit
+                    // T-junction the BFS path created.
+                    coalesceJunctions();
+                    const post = netSignature();
+                    if (post === md.paritySig) {
+                        parityOk = true;
+                        break;
+                    }
+                    if (retries >= PARITY_RETRY_LIMIT) {
+                        parityOk = false;
+                        break;
+                    }
+                    // Add the failed routes' interior cells as extra
+                    // obstacles so the next attempt has to take a different
+                    // shape, then flip the axis preference too.
+                    for (const [id, orig] of md.origs) {
+                        if (orig.kind !== 'wire-spanning')
+                            continue;
+                        const w = state.wires.find(x => x.id === id);
+                        if (!w)
+                            continue;
+                        for (let i = 1; i < w.points.length - 1; i++) {
+                            extraBlocked.add(`${w.points[i][0]},${w.points[i][1]}`);
+                        }
+                    }
+                    retries++;
+                    preferAxis = preferAxis === 'h' ? 'v' : 'h';
+                    continue;
+                }
+                // Routing succeeded and parity check is off — accept.
+                parityOk = true;
+                break;
+            }
+        }
+        else if (md.parityCheck && md.paritySig !== null) {
+            // No spanning wires: still need coalesce-before-check so any
+            // moving wire that translated onto another wire's path is
+            // caught.
+            coalesceJunctions();
+            parityOk = (netSignature() === md.paritySig);
+        }
+        // Last-ditch parity rescue: when the BFS+retry loop has exhausted
+        // every Manhattan variant and the no-revert option is on, try
+        // converting each spanning wire into a red bad-connection
+        // placeholder and re-check parity. Bad wires union their two
+        // endpoints in the netlist DSU but don't participate in mid-
+        // segment crossings, so a routing whose only sin was an
+        // accidental crossing through a third party's terminal IS
+        // salvageable this way. Routings whose sin is intrinsic — e.g.
+        // a moved part's terminal coinciding with an unrelated terminal
+        // — are not, and we still revert in those cases. The contract
+        // is "netlist after the drag is identical to before, at all
+        // costs"; the bad wire is a less-disruptive way to honour it
+        // than reverting, but it's not always achievable.
+        let badRescued = 0;
+        if (!parityOk && md.noRevert) {
+            restoreDraftWires();
+            for (const [id, orig] of md.origs) {
+                if (orig.kind !== 'wire-spanning')
+                    continue;
+                const w = state.wires.find(x => x.id === id);
+                if (!w || w.points.length < 2)
+                    continue;
+                const inside = orig.insideEnd === 'start'
+                    ? w.points[0]
+                    : w.points[w.points.length - 1];
+                const outside = orig.insideEnd === 'start'
+                    ? w.points[w.points.length - 1]
+                    : w.points[0];
+                w.points = orig.insideEnd === 'start'
+                    ? [[inside[0], inside[1]], [outside[0], outside[1]]]
+                    : [[outside[0], outside[1]], [inside[0], inside[1]]];
+                w.bad = true;
+                badRescued++;
+            }
+            // Re-check parity with bad wires in place. coalesce first so
+            // mid-segment crossings on the *normal* moved wires register.
+            if (md.parityCheck && md.paritySig !== null) {
+                coalesceJunctions();
+                if (netSignature() === md.paritySig) {
+                    parityOk = true;
+                }
+            }
+            else {
+                // Parity check disabled — the noRevert path doesn't get to
+                // bypass connectivity verification, but if the user opted
+                // out of it entirely, accept the bad-wire commit.
+                parityOk = true;
+            }
+        }
+        if (!parityOk) {
+            // Either noRevert was off, or the bad-wire rescue failed to
+            // preserve the netlist (intrinsic short — typically a moved
+            // part's terminal landing on an unrelated terminal). Restore
+            // from the pre-drag snapshot — startMove may have physically
+            // split partially-selected wires, so the origs map alone
+            // can't undo all of it.
             if (md.preDragSnapshot) {
                 restorePreDragSnapshot(md);
             }
@@ -3082,9 +4098,28 @@ function commitMove() {
             refreshProps();
             refreshHint();
             render();
-            flashHint('Drag reverted — parity check failed (connectivity would change).');
+            notify(md.noRevert
+                ? `Drag reverted — even bad-connection placeholders ` +
+                    `couldn't preserve the netlist (intrinsic short).`
+                : `Drag reverted — auto-route failed parity check after ` +
+                    `${retries} retr${retries === 1 ? 'y' : 'ies'} ` +
+                    `(connectivity would change).`, 'warn');
             return;
         }
+        if (badRescued > 0) {
+            notify(`Drag committed with ${badRescued} bad-connection wire` +
+                `${badRescued === 1 ? '' : 's'} — auto-router couldn't find ` +
+                `a clean path; select and re-route the red lines manually.`, 'warn');
+        }
+        // Drag is going to commit. Bring wires into canonical Steiner-T
+        // form *now* (so any auto-router-induced overlap is consolidated
+        // by `mergeOverlappingCollinearSegments` and visible as a free
+        // endpoint), then trim wires whose endpoints became newly free.
+        // The `pushHistory` below re-runs canonicalize on the trimmed
+        // result — idempotent, but needed so labels propagate over the
+        // post-trim component layout.
+        canonicalizeWires();
+        trimNewDangles(md.preFreeEndpoints);
     }
     state.moveDraft = null;
     wrap.classList.remove('moving');

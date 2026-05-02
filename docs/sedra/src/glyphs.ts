@@ -87,6 +87,16 @@ interface Wire {
   id: string;
   points: Point[];
   label?: string;
+  // "Bad connection" marker: a placeholder polyline emitted by
+  // `commitMove` when the BFS auto-router can't find a clean path
+  // between a wire-spanning wire's outside endpoint and its (newly
+  // moved) inside endpoint. Renders red, draws as a straight
+  // point-to-point line without snapping to the Manhattan grid, and
+  // is excluded from every connectivity-aware pass (coalesce, merge,
+  // simplify, propagate, netlist, junction dots, dangle trim) so it
+  // reads purely as a visual TODO. The user is expected to select
+  // and delete it, then re-route by hand.
+  bad?: boolean;
 }
 
 interface Glyph {
@@ -141,6 +151,11 @@ interface MoveDraft {
   // operation.
   dragMode: boolean;
   parityCheck: boolean;
+  // When true, a parity check that exhausts every routing retry (and
+  // would normally revert the whole drag) instead commits the drag
+  // with each wire-spanning wire marked as a red bad-connection
+  // placeholder. The user clears the placeholders by hand.
+  noRevert: boolean;
   // Pre-drag connectivity signature (sorted normalised partition of
   // every part-terminal into its DSU root). `null` when parity check
   // is disabled. `commitMove` compares against the post-drag value
@@ -151,6 +166,13 @@ interface MoveDraft {
   // moves (they can't be reverted into a pre-drag state). Cancel and
   // parity-revert restore from this.
   preDragSnapshot: PreDragSnapshot | null;
+  // Grid keys "x,y" of wire endpoints that were already a "free
+  // dangling endpoint" pre-drag — i.e. the only thing at that grid
+  // cell, no other wire/terminal there. `commitMove` uses this so
+  // it can trim *newly* created dangles produced by the auto-router
+  // overlaying an existing wire's path, while leaving pre-existing
+  // dangles untouched (the user may have authored them deliberately).
+  preFreeEndpoints: Set<string>;
 }
 
 interface BoxSelect {

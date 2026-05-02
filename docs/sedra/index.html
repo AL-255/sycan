@@ -309,6 +309,50 @@
     border-radius: 3px; color: var(--fg);
   }
 
+  /* Pop-up notification stack. Anchored bottom-left, grows up. Each
+     toast carries a severity class — info auto-dismisses after a few
+     seconds; warnings/errors stick until the user clicks the [x].
+     A "Clear all" button hangs below the stack and removes every
+     toast in one click. */
+  #notifications-wrap {
+    position: fixed; left: 16px; bottom: 64px;
+    display: flex; flex-direction: column; gap: 6px;
+    z-index: 1000; pointer-events: none;
+    max-width: min(420px, calc(100vw - 32px));
+  }
+  #notifications {
+    display: flex; flex-direction: column-reverse; gap: 8px;
+  }
+  #notifications-clear-all {
+    pointer-events: auto;
+    align-self: flex-start;
+    padding: 4px 10px; font-size: 0.72rem;
+    background: var(--panel); color: var(--muted);
+    border: 1px solid var(--line); border-radius: 4px;
+    cursor: pointer;
+  }
+  #notifications-clear-all:hover { color: var(--fg); border-color: var(--fg); }
+  .notification {
+    pointer-events: auto;
+    padding: 8px 32px 8px 12px; border-radius: 6px;
+    font-size: 0.82rem; line-height: 1.4;
+    border: 1px solid var(--line); background: var(--panel);
+    color: var(--fg); position: relative;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    word-wrap: break-word;
+  }
+  .notification-info    { border-left: 4px solid #3b82f6; }
+  .notification-warn    { border-left: 4px solid #f59e0b; background: #fef3c7; color: #78350f; }
+  .notification-error   { border-left: 4px solid #d73a49; background: #fee2e2; color: #7f1d1d; }
+  .notification-close {
+    position: absolute; top: 4px; right: 4px;
+    width: 20px; height: 20px; border-radius: 3px;
+    background: transparent; border: none; cursor: pointer;
+    color: inherit; opacity: 0.6; font-size: 14px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .notification-close:hover { opacity: 1; background: rgba(0,0,0,0.06); }
+
   /* Canvas SVG element styling */
   .grid-dot { fill: var(--grid); }
   /* Glyphs imported from res/ inherit `color` from the parent group;
@@ -338,6 +382,23 @@
   }
   .wire-selected {
     stroke: var(--select); stroke-width: 2.4;
+  }
+  /* Spanning wires being live-rerouted by an in-flight drag. The
+     direct (non-Manhattan) line is purely a placeholder until
+     mouseup; commitMove replaces it with a BFS-routed Manhattan
+     path. The semi-transparent + dashed treatment signals "not
+     committed yet" to the user. */
+  .wire-draft {
+    opacity: 0.55;
+    stroke-dasharray: 5 4;
+  }
+  /* "Bad connection" wires emitted when the BFS auto-router fails
+     to find a clean Manhattan path. Drawn red as a point-to-point
+     line (may be diagonal) — a visual marker telling the user to
+     select, delete, and re-route by hand. */
+  .wire-bad {
+    stroke: #d73a49; stroke-width: 2.2;
+    stroke-dasharray: 6 3;
   }
   .move-ghost {
     opacity: 0.6;
@@ -582,6 +643,11 @@
       <input type="checkbox" id="parity-check" checked>
       <span>Parity</span>
     </label>
+    <label class="check"
+           title="When a drag would normally revert (parity check fails after every retry), instead commit it and mark each unrouteable spanning wire as a red bad-connection placeholder for the user to fix manually.">
+      <input type="checkbox" id="no-revert">
+      <span>No-revert</span>
+    </label>
   </div>
   <div class="group" data-group="file">
     <button class="tool" id="btn-undo" title="Undo (Ctrl+Z)"><span class="label">Undo</span></button>
@@ -638,6 +704,16 @@
 </main>
 
 <div id="hint"></div>
+
+<!-- Pop-up notification stack. Anchored bottom-left and grown upward
+     so the most-recent toast is at the top of the stack. `notify()`
+     in editor.js appends children here. The "Clear all" button at
+     the bottom dismisses every visible toast in one click; it hides
+     itself when the stack is empty. -->
+<div id="notifications-wrap">
+  <div id="notifications" aria-live="polite"></div>
+  <button id="notifications-clear-all" type="button" hidden>Clear all</button>
+</div>
 
 <input type="file" id="file-input" accept=".json,application/json" style="display:none">
 
