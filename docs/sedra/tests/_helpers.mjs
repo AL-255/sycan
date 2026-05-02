@@ -29,8 +29,9 @@ function findChrome() {
     if (p && existsSync(p)) return p;
   }
   throw new Error(
-    'No Chrome/Chromium binary found. Set CHROME_PATH or install ' +
-    'google-chrome / chromium (see docs/sedra/tests/README).');
+    'No Chrome/Chromium binary found. Set CHROME_PATH=/path/to/chrome ' +
+    '(or PUPPETEER_EXECUTABLE_PATH) or install google-chrome / chromium ' +
+    'in one of the standard locations searched above.');
 }
 
 // Launch a fresh headless browser and return a page already loaded

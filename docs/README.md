@@ -8,22 +8,42 @@ folder is overlaid into `_site/` so the REPL ends up at `/repl/`.
 - `repl/` — in-browser sycan REPL (Pyodide + CodeMirror + MathJax).
   - `index.html` — the REPL page itself, served at `/repl/`.
   - `examples/` — preset example scripts loaded on demand.
-    - `manifest.json` — `{label, file}` entries; one button per entry.
+    - `manifest.json` — `{category, label, file}` entries grouped
+      into one `<optgroup>` per category in the example picker.
     - `*.py` — one example per file.
   - `res/` — glyph SVGs (mirrored from top-level `res/`) plus the
     SYCAN logo.
   - `sycan-*.whl` — the wheel the page installs via `micropip`.
-- `sedra/` — in-browser schematic capture editor, served at `/sedra/`.
-  Vanilla-JS app modelled after the Java circedit reference in
-  <https://github.com/andrescg2sj/Sycan>: snap-grid canvas, R/L/C/V/I
-  /OA/GND/wire tools, click-to-place + Manhattan multi-segment wires
-  with Steiner T-junction coalescing, box-select, copy/paste,
-  auto-naming, netlist export, JSON save/load.
-  - `index.html` — markup + styles (inline `<style>` only).
-  - `editor.js` — all interactive logic.
+- `sedra/` — SYCAN's in-browser schematic capture editor, served at
+  `/sedra/`. Originally inspired by the Java circedit reference in
+  <https://github.com/andrescg2sj/Sycan>; now a TypeScript app with:
+  snap-grid canvas, full SYCAN component library (R, L, C, V, I, D,
+  NPN/PNP BJT, NMOS/PMOS — 3T and 4T, triode, VCVS/VCCS/CCCS/CCVS,
+  ground, wire), click-to-place + Manhattan multi-segment wires with
+  Steiner T-junction coalescing, A\* auto-router for drag-mode wire
+  re-routing with parity check, segment-level selection, undo/redo,
+  copy/paste, auto-naming, drag-to-move with optional bad-connection
+  placeholders, net highlight overlay, symbolic node-voltage solver
+  (`Calc Node` — runs sycan in the page via Pyodide), netlist export,
+  JSON save/load, notification center.
+  - `index.html` — markup + inline `<style>`.
+  - `src/glyphs.ts`, `src/editor.ts` — TypeScript sources.
+  - `glyphs.js`, `editor.js` — `tsc` output, loaded as classic
+    `<script defer>` tags in document order so `glyphs.ts` symbols
+    (`ELEM_TYPES`, `drawPart`, the cross-file `interface`s, …) are
+    in scope by the time `editor.js` runs. `tsconfig.json` sets
+    `module: "none"` to keep the two files sharing one global scope,
+    so neither file uses `import`/`export`.
+  - `tests/` — Puppeteer-driven browser test suite. `node tests/run.mjs`
+    (or `npm test`) compiles TypeScript if needed, spawns a local
+    `python -m http.server`, then runs every `*.test.mjs` against the
+    live page.
+  - `package.json`, `tsconfig.json` — only used during local builds /
+    tests. Stripped from `_site/` by `run_webpage.sh` before deploy.
 
   Iterate quickly with `./run_webpage.sh --sedra` (no Sphinx, no
-  wheel build — the page is plain static HTML+JS).
+  wheel build — runs `tsc` first if any `src/*.ts` is newer than
+  the emitted JS, then serves `docs/` over plain HTTP).
 - `analysis.md`, `level_shifter.py`, `tline_sparams.py` — standalone
   reference material kept alongside the site.
 

@@ -385,14 +385,14 @@
   }
   /* Spanning wires being live-rerouted by an in-flight drag. The
      direct (non-Manhattan) line is purely a placeholder until
-     mouseup; commitMove replaces it with a BFS-routed Manhattan
+     mouseup; commitMove replaces it with an A*-routed Manhattan
      path. The semi-transparent + dashed treatment signals "not
      committed yet" to the user. */
   .wire-draft {
     opacity: 0.55;
     stroke-dasharray: 5 4;
   }
-  /* "Bad connection" wires emitted when the BFS auto-router fails
+  /* "Bad connection" wires emitted when the A* auto-router fails
      to find a clean Manhattan path. Drawn red as a point-to-point
      line (may be diagonal) — a visual marker telling the user to
      select, delete, and re-route by hand. */

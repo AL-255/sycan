@@ -5,9 +5,9 @@ Tracks the migration off a hard sympy dependency to the pluggable
 
 ## Status
 
-- **sympy backend** — default, full coverage. 187/187 tests pass.
+- **sympy backend** — default, full coverage. 220/220 tests pass.
 - **symengine backend** — opt-in via `SYCAN_CAS_BACKEND=symengine`.
-  177 pass, 10 skipped (representation / API divergences listed below);
+  210 pass, 10 skipped (representation / API divergences listed below);
   no failures.
 
 ## What changed (sympy migration)
@@ -102,7 +102,7 @@ SYCAN_CAS_BACKEND=symengine .venv/bin/pytest -q
    `Poly`, `PolynomialError`, `lambdify(modules="numpy")`) are
    wrapper functions that sympify, run sympy, and convert back via
    `se.sympify` so the rest of sycan keeps a uniform expression type.
-3. **Patched names** — `Rational(...)` accepts a decimal string like
+5. **Patched names** — `Rational(...)` accepts a decimal string like
    `Rational("0.5")` (sympy parses these; symengine's only accepts
    `(num, den)`). The wrapper round-trips through `fractions.Fraction`.
 
