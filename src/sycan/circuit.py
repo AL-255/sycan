@@ -32,7 +32,9 @@ from sycan.components.active import (
 from sycan.components.blocks import (
     Gain,
     Integrator,
+    OPAMP,
     Quantizer,
+    SubCircuit,
     Summer,
     TransferFunction,
 )
@@ -80,6 +82,131 @@ class Circuit:
     def available_components() -> dict[str, type[Component]]:
         """Return a name → class map of every registered component type."""
         return Component.available()
+
+    def flat_components(self) -> list[Component]:
+        """All leaf components, recursively expanding any :class:`SubCircuit`.
+
+        :class:`SubCircuit` instances are flattened into renamed,
+        node-rerouted clones of their bodies (see
+        :meth:`SubCircuit.expand_leaves`). Non-subcircuit components are
+        passed through unchanged. Used by the MNA build / solve path so
+        that hierarchical designs are stamped as if hand-inlined.
+        """
+        out: list[Component] = []
+        for c in self.components:
+            if isinstance(c, SubCircuit):
+                out.extend(c.expand_leaves())
+            else:
+                out.append(c)
+        return out
+
+    def subcircuits(self) -> list[SubCircuit]:
+        """Top-level :class:`SubCircuit` instances in this circuit."""
+        return [c for c in self.components if isinstance(c, SubCircuit)]
+
+    def print_hierarchy(self, file=None) -> None:
+        """Print the design's component tree, expanding subcircuits.
+
+        Output has three sections:
+
+        1. A header naming the top-level circuit.
+        2. A summary listing each :class:`SubCircuit` instance found at
+           any depth, grouped by class, with its dotted instance path.
+        3. A box-drawn tree of every component, with subcircuit bodies
+           shown as nested branches under their instance node.
+        """
+        import sys
+
+        out = file if file is not None else sys.stdout
+
+        print(f"Circuit {self.name!r}", file=out)
+
+        # Section: subcircuit summary (recursive across all depths).
+        subs = self._collect_subcircuits()
+        if subs:
+            print("", file=out)
+            print(f"Subcircuits ({len(subs)} total):", file=out)
+            by_class: dict[str, list[str]] = {}
+            for path, sc in subs:
+                by_class.setdefault(type(sc).__name__, []).append(path)
+            for cls_name in sorted(by_class):
+                paths = by_class[cls_name]
+                print(f"  {cls_name}  x{len(paths)}", file=out)
+                for path in paths:
+                    print(f"    - {path}", file=out)
+        else:
+            print("", file=out)
+            print("Subcircuits: (none)", file=out)
+
+        # Section: full component tree.
+        print("", file=out)
+        print("Tree:", file=out)
+        self._print_tree(self.components, prefix="", file=out)
+
+    def _collect_subcircuits(
+        self, prefix: str = "", components: Optional[list[Component]] = None
+    ) -> list[tuple[str, SubCircuit]]:
+        """Walk the hierarchy and return ``(dotted_path, instance)`` pairs."""
+        if components is None:
+            components = self.components
+        found: list[tuple[str, SubCircuit]] = []
+        for c in components:
+            if isinstance(c, SubCircuit):
+                path = f"{prefix}{c.name}" if not prefix else f"{prefix}.{c.name}"
+                found.append((path, c))
+                found.extend(
+                    self._collect_subcircuits(
+                        prefix=path, components=c.body.components
+                    )
+                )
+        return found
+
+    def _print_tree(
+        self, components: list[Component], prefix: str, file
+    ) -> None:
+        n = len(components)
+        for i, c in enumerate(components):
+            is_last = i == n - 1
+            connector = "└── " if is_last else "├── "
+            print(f"{prefix}{connector}{self._fmt_component(c)}", file=file)
+            if isinstance(c, SubCircuit):
+                child_prefix = prefix + ("    " if is_last else "│   ")
+                self._print_tree(c.body.components, child_prefix, file)
+
+    @staticmethod
+    def _fmt_component(c: Component) -> str:
+        cls = type(c).__name__
+        if isinstance(c, SubCircuit):
+            pins = ", ".join(
+                f"{pin}={node}" for pin, node in c.port_map.items()
+            )
+            return f"{c.name} [{cls}]  ({pins})"
+        nodes = ", ".join(
+            str(getattr(c, attr))
+            for attr in c.ports
+            if getattr(c, attr, None) is not None
+        )
+        return f"{c.name} [{cls}]  ({nodes})"
+
+    def add_subcircuit(
+        self,
+        name: str,
+        body: "Circuit",
+        port_map: dict[str, str],
+    ) -> SubCircuit:
+        """Add a generic subcircuit instance wrapping ``body``."""
+        return self.add(SubCircuit(name=name, body=body, port_map=port_map))  # type: ignore[return-value]
+
+    def add_opamp(
+        self,
+        name: str,
+        in_p: str,
+        in_n: str,
+        out: str,
+        A: Optional[Value] = None,
+    ) -> OPAMP:
+        """Add an ideal differential op-amp (:class:`OPAMP` subcircuit)."""
+        return self.add(OPAMP(name, in_p, in_n, out, A))  # type: ignore[return-value]
 
     def add_resistor(self, name: str, n_plus: str, n_minus: str, value: Value) -> Resistor:
         return self.add(Resistor(name, n_plus, n_minus, value))  # type: ignore[return-value]

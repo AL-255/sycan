@@ -205,7 +205,8 @@ def build_mna(
 
     nodes = circuit.nodes
     n = len(nodes)
-    aux_owners = [c for c in circuit.components if c.aux_count(mode) > 0]
+    flat = circuit.flat_components()
+    aux_owners = [c for c in flat if c.aux_count(mode) > 0]
     m = len(aux_owners)
 
     A = cas.zeros(n + m, n + m)
@@ -216,7 +217,7 @@ def build_mna(
     ctx = StampContext(
         A=A, b=b, node_rows=node_rows, aux_rows=aux_rows, mode=mode, s=s
     )
-    for c in circuit.components:
+    for c in flat:
         c.stamp(ctx)
 
     x = cas.Matrix(
@@ -243,14 +244,15 @@ def build_residuals(
 
     nodes = circuit.nodes
     n = len(nodes)
-    aux_owners = [c for c in circuit.components if c.aux_count(mode) > 0]
+    flat = circuit.flat_components()
+    aux_owners = [c for c in flat if c.aux_count(mode) > 0]
     node_rows = {name: idx - 1 for name, idx in circuit._nodes.items()}
     aux_rows = {c.name: n + k for k, c in enumerate(aux_owners)}
     ctx = StampContext(
         A=A, b=b, node_rows=node_rows, aux_rows=aux_rows,
         mode=mode, s=s, x=x, residuals=residuals,
     )
-    for c in circuit.components:
+    for c in flat:
         if c.has_nonlinear:
             c.stamp_nonlinear(ctx)
     return x, residuals
@@ -264,7 +266,8 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[cas.Symbol, cas.
     :func:`sympy.solve`. Otherwise, LU on the linear system.
     """
     A, x, b = build_mna(circuit, mode="dc")
-    nonlinear = [c for c in circuit.components if c.has_nonlinear]
+    flat = circuit.flat_components()
+    nonlinear = [c for c in flat if c.has_nonlinear]
 
     if not nonlinear:
         sol = A.LUsolve(b)
@@ -272,7 +275,7 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[cas.Symbol, cas.
     else:
         residuals = list(A * x - b)
         nodes = circuit.nodes
-        aux_owners = [c for c in circuit.components if c.aux_count("dc") > 0]
+        aux_owners = [c for c in flat if c.aux_count("dc") > 0]
         node_rows = {name: idx - 1 for name, idx in circuit._nodes.items()}
         aux_rows = {c.name: len(nodes) + k for k, c in enumerate(aux_owners)}
         ctx = StampContext(
@@ -531,7 +534,7 @@ def solve_noise(
 
     contributions: dict[str, cas.Expr] = {}
     total: cas.Expr = cas.S.Zero
-    for c in circuit.components:
+    for c in circuit.flat_components():
         for src in c.noise_sources():
             for endpoint in (src.n_plus, src.n_minus):
                 if endpoint not in circuit._nodes:

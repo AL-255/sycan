@@ -188,7 +188,7 @@ def _build_sat_residuals(circuit: Circuit) -> tuple[cas.Matrix, list[cas.Expr]]:
         idx = node_rows.get(node, 0)
         return x[idx] if idx >= 0 else cas.Integer(0)
 
-    for c in circuit.components:
+    for c in circuit.flat_components():
         if not isinstance(c, (_MOSFET_L1, _MOSFET_4T)):
             continue
         d = node_rows.get(c.drain, -1)
@@ -481,7 +481,7 @@ def solve_headroom(
         sympy expressions in the swept variable's coefficients.
     """
     mosfets = [
-        c for c in circuit.components
+        c for c in circuit.flat_components()
         if isinstance(c, (_MOSFET_L1, _MOSFET_4T))
     ]
     if not mosfets:

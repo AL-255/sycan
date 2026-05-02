@@ -6,6 +6,11 @@ Supported syntax:
 * lines starting with ``*`` are comments; text after ``;`` is trimmed
 * lines starting with ``+`` are continuations of the previous element
 * ``.end`` stops parsing; other dot-directives are ignored
+* ``.subckt name pin1 pin2 ...`` / ``.ends [name]`` defines a reusable
+  subcircuit. The body may itself contain ``X`` references to other
+  user subcircuits or to the built-in ``OPAMP`` / ``TRIODE`` blocks.
+  Nested ``.subckt`` *in source* is rejected; nest semantically by
+  having one subckt instantiate another via its ``X`` element.
 * elements::
 
       Rxxx  N+ N- value
@@ -28,6 +33,7 @@ Supported syntax:
       Txxx  N1+ N1- N2+ N2- Z0 td                   ; lossless transmission line
       Xxxx  P G K TRIODE K mu [V_g_op V_p_op [C_gk C_gp C_pk]]
                                                     ; vacuum-tube triode subcircuit
+      Xxxx  IN+ IN- OUT OPAMP [A]                   ; ideal differential op-amp
       GND[n] NODE                  ; ties NODE to the absolute zero reference
 
 Values may be plain numbers with an engineering suffix
@@ -37,7 +43,9 @@ letters, or a bare identifier that becomes a sympy symbol.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 from sycan import cas as cas
 
@@ -84,6 +92,96 @@ def parse_value(token: str) -> cas.Expr:
     if m.group("suffix"):
         value *= _SUFFIXES[m.group("suffix").lower()]
     return value
+
+
+@dataclass
+class _SubcktDef:
+    """A parsed ``.SUBCKT`` block awaiting instantiation.
+
+    ``pins`` are the positional pin names declared on the ``.SUBCKT``
+    line, in order. ``lines`` are the body lines (already
+    preprocessed) — they get re-parsed into a body :class:`Circuit`
+    the first time the subckt is referenced via an ``X`` element.
+    """
+    name: str
+    pins: list[str]
+    lines: list[tuple[int, str]] = field(default_factory=list)
+
+
+def _slice_subckts(
+    lines: list[tuple[int, str]],
+) -> tuple[list[tuple[int, str]], dict[str, _SubcktDef]]:
+    """Split preprocessed lines into ``(top_lines, subckt_defs)``.
+
+    ``subckt_defs`` is keyed by lower-cased subckt name (SPICE is
+    case-insensitive for subcircuit identifiers). Nested ``.SUBCKT``
+    in source is rejected; ``.ends`` may include the closing name as
+    a sanity check.
+    """
+    top_lines: list[tuple[int, str]] = []
+    subckt_defs: dict[str, _SubcktDef] = {}
+    cur: Optional[_SubcktDef] = None
+    for lineno, line in lines:
+        parts = line.split()
+        head_lc = parts[0].lower()
+
+        if head_lc == ".subckt":
+            if cur is not None:
+                raise ValueError(
+                    f"line {lineno}: nested .SUBCKT not supported "
+                    f"(still inside {cur.name!r})"
+                )
+            if len(parts) < 2:
+                raise ValueError(f"line {lineno}: .SUBCKT needs a name")
+            sub_name = parts[1]
+            # Pin names are positional tokens; ignore any trailing
+            # ``params:`` keyword or ``key=val`` parameter declarations.
+            pins: list[str] = []
+            for tok in parts[2:]:
+                if tok.lower() == "params:" or "=" in tok:
+                    break
+                pins.append(tok)
+            cur = _SubcktDef(name=sub_name, pins=pins, lines=[])
+            continue
+
+        if head_lc == ".ends":
+            if cur is None:
+                raise ValueError(
+                    f"line {lineno}: .ENDS without matching .SUBCKT"
+                )
+            if len(parts) > 1 and parts[1].lower() != cur.name.lower():
+                raise ValueError(
+                    f"line {lineno}: .ENDS {parts[1]!r} does not match "
+                    f"open .SUBCKT {cur.name!r}"
+                )
+            key = cur.name.lower()
+            if key in subckt_defs:
+                raise ValueError(
+                    f"line {lineno}: duplicate .SUBCKT {cur.name!r}"
+                )
+            subckt_defs[key] = cur
+            cur = None
+            continue
+
+        if head_lc == ".end":
+            if cur is not None:
+                raise ValueError(
+                    f"line {lineno}: .end inside .SUBCKT {cur.name!r}; "
+                    "close the subcircuit with .ENDS first"
+                )
+            top_lines.append((lineno, line))
+            break
+
+        if cur is not None:
+            cur.lines.append((lineno, line))
+        else:
+            top_lines.append((lineno, line))
+
+    if cur is not None:
+        raise ValueError(
+            f".SUBCKT {cur.name!r}: missing .ENDS at end of input"
+        )
+    return top_lines, subckt_defs
 
 
 def _preprocess(text: str) -> list[tuple[int, str]]:
@@ -162,9 +260,47 @@ def _require(parts: list[str], count: int, lineno: int, name: str) -> None:
 
 
 def parse(text: str) -> Circuit:
-    """Parse a SPICE netlist string into a :class:`Circuit`."""
-    circuit = Circuit()
-    for lineno, line in _preprocess(text):
+    """Parse a SPICE netlist string into a :class:`Circuit`.
+
+    Top-level lines populate the returned circuit directly. Lines
+    inside ``.SUBCKT name pin1 pin2 ... .ENDS`` blocks are stored as
+    reusable templates and instantiated whenever an ``X`` element
+    references their name (case-insensitive). Subcircuit bodies may
+    themselves reference other user subcircuits or the built-in
+    ``OPAMP`` / ``TRIODE`` blocks.
+    """
+    lines = _preprocess(text)
+    top_lines, subckt_defs = _slice_subckts(lines)
+    bodies: dict[str, Circuit] = {}
+    in_progress: set[str] = set()
+    return _build_circuit(
+        top_lines,
+        subckt_defs=subckt_defs,
+        bodies=bodies,
+        in_progress=in_progress,
+        circuit_name="circuit",
+    )
+
+
+def _build_circuit(
+    lines: list[tuple[int, str]],
+    *,
+    subckt_defs: dict[str, _SubcktDef],
+    bodies: dict[str, Circuit],
+    in_progress: set[str],
+    circuit_name: str,
+) -> Circuit:
+    """Parse a flat line list into a :class:`Circuit`.
+
+    Used both for the top-level netlist and recursively for each
+    ``.SUBCKT`` body the moment it is first referenced. ``bodies``
+    memoizes already-built bodies — every instance of a given subckt
+    name shares the same body :class:`Circuit` (each instance
+    namespaces and reroutes that body independently at expand time,
+    so sharing is safe and cheaper than duplicating).
+    """
+    circuit = Circuit(name=circuit_name)
+    for lineno, line in lines:
         parts = line.split()
         name = parts[0]
         head = name[0].lower()
@@ -362,6 +498,33 @@ def parse(text: str) -> Circuit:
                     "N/PMOS_3T, or N/PMOS_4T"
                 )
         elif head == "x":
+            _require(parts, 3, lineno, name)
+            # User-defined subckts win when the LAST positional token
+            # matches a ``.SUBCKT`` name (standard SPICE convention:
+            # ``Xinst node1 ... nodeN subckt_name``). Otherwise fall
+            # back to the built-in TRIODE / OPAMP dispatch keyed at
+            # parts[4] (which preserves their positional model
+            # parameters trailing the keyword).
+            last_lc = parts[-1].lower()
+            if last_lc in subckt_defs:
+                sub_def = subckt_defs[last_lc]
+                pins = parts[1:-1]
+                if len(pins) != len(sub_def.pins):
+                    raise ValueError(
+                        f"line {lineno}: X{name!r} provides {len(pins)} pin "
+                        f"node(s) but subckt {sub_def.name!r} declares "
+                        f"{len(sub_def.pins)}: {sub_def.pins!r}"
+                    )
+                body = _resolve_subckt_body(
+                    sub_def,
+                    subckt_defs=subckt_defs,
+                    bodies=bodies,
+                    in_progress=in_progress,
+                )
+                port_map = dict(zip(sub_def.pins, pins))
+                circuit.add_subcircuit(name, body, port_map)
+                continue
+
             _require(parts, 5, lineno, name)
             subckt = parts[4].upper()
             if subckt == "TRIODE":
@@ -381,14 +544,55 @@ def parse(text: str) -> Circuit:
                 if len(parts) > 11:
                     kwargs["C_pk"] = parse_value(parts[11])
                 circuit.add_triode(name, plate, grid, cathode, K_val, mu_val, **kwargs)
+            elif subckt == "OPAMP":
+                # Xxxx IN+ IN- OUT OPAMP [A]
+                in_p, in_n, out = parts[1], parts[2], parts[3]
+                A_val = parse_value(parts[5]) if len(parts) > 5 else None
+                circuit.add_opamp(name, in_p, in_n, out, A_val)
             else:
                 raise ValueError(
-                    f"line {lineno}: unknown subcircuit type {subckt!r} for {name!r}"
+                    f"line {lineno}: unknown subcircuit type {subckt!r} for "
+                    f"{name!r} (no .SUBCKT defined and not a built-in)"
                 )
         else:
             raise ValueError(f"line {lineno}: unsupported element {name!r}")
 
     return circuit
+
+
+def _resolve_subckt_body(
+    sub_def: _SubcktDef,
+    *,
+    subckt_defs: dict[str, _SubcktDef],
+    bodies: dict[str, Circuit],
+    in_progress: set[str],
+) -> Circuit:
+    """Return the body :class:`Circuit` for a referenced subckt.
+
+    Memoized in ``bodies``: every ``X`` reference to the same subckt
+    name shares the same body object. Detects circular references
+    (subckt A → B → A) via an in-progress guard.
+    """
+    key = sub_def.name.lower()
+    if key in bodies:
+        return bodies[key]
+    if key in in_progress:
+        raise ValueError(
+            f".SUBCKT {sub_def.name!r}: circular subcircuit reference"
+        )
+    in_progress.add(key)
+    try:
+        body = _build_circuit(
+            sub_def.lines,
+            subckt_defs=subckt_defs,
+            bodies=bodies,
+            in_progress=in_progress,
+            circuit_name=sub_def.name,
+        )
+    finally:
+        in_progress.discard(key)
+    bodies[key] = body
+    return body
 
 
 def parse_file(path: str | Path) -> Circuit:

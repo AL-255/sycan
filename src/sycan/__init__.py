@@ -16,7 +16,9 @@ from sycan.components.active import (
 from sycan.components.blocks import (
     Gain,
     Integrator,
+    OPAMP,
     Quantizer,
+    SubCircuit,
     Summer,
     TransferFunction,
 )
@@ -92,6 +94,7 @@ __all__ = [
     "NMOS_subthreshold",
     "NoiseSource",
     "NoiseSpec",
+    "OPAMP",
     "PMOS_3T",
     "PMOS_4T",
     "PMOS_L1",
@@ -100,6 +103,7 @@ __all__ = [
     "Quantizer",
     "Resistor",
     "StampContext",
+    "SubCircuit",
     "Summer",
     "T_kelvin",
     "TLINE",
