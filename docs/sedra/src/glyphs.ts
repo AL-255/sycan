@@ -116,6 +116,19 @@ type MoveOrig =
       insideEnd: 'start' | 'end';
       axisHint: 'h' | 'v'; };
 
+// Pre-drag wire / selection snapshot. Used to revert partial-segment
+// drags (where startMove physically splits each partially-selected
+// wire into pieces — the selected pieces become new wires that move,
+// the unselected pieces become new wires that don't). The origs map
+// alone can't restore those splits, so we also keep the pre-split
+// state.wires / selection / nextId here.
+interface PreDragSnapshot {
+  wires: Wire[];
+  selectedIds: string[];
+  selectedSegments: string[];
+  nextId: number;
+}
+
 interface MoveDraft {
   ids: string[];
   origs: Map<string, MoveOrig>;
@@ -133,6 +146,11 @@ interface MoveDraft {
   // is disabled. `commitMove` compares against the post-drag value
   // and reverts the drag if they differ.
   paritySig: string | null;
+  // Snapshot of state.wires + selection + nextId taken at startMove
+  // *before* any partial-segment splitting. `null` for paste-place
+  // moves (they can't be reverted into a pre-drag state). Cancel and
+  // parity-revert restore from this.
+  preDragSnapshot: PreDragSnapshot | null;
 }
 
 interface BoxSelect {
@@ -157,14 +175,19 @@ interface NetHighlightOverlay {
   gridPoints: Set<string>;
 }
 
-// Narrow visual selection on a single wire segment. `selectedIds`
-// still holds the parent wire's id so delete/copy/move keep working
-// on the whole wire — this only changes what *renders* highlighted.
-// Pressing `u` promotes a segment selection to the whole net.
-interface SegmentSelection {
-  wireId: string;
-  segIdx: number;
-}
+// Narrow visual selection on individual wire segments. The wire's id
+// stays in `selectedIds` so delete/copy/move keep working on the whole
+// wire — this only changes what *renders* highlighted. Both clicking
+// (single segment) and box-selecting (potentially many segments,
+// possibly across several wires) feed into the same Set.
+//
+// Each entry is the string ``${wireId}|${segIdx}`` so the runtime can
+// dedupe and look up by composite key without needing a Map of Maps.
+// The helper ``segKey(wireId, segIdx)`` formats consistently.
+//
+// Pressing `u` promotes the segment-only selection to the whole net of
+// the *first* selected segment's wire (every wire in that connected
+// component is added to ``selectedIds``).
 
 interface CalcNodeHighlight {
   node: string;
@@ -199,7 +222,7 @@ interface EditorState {
   calcNode: CalcNodeArm;
   calcNodeHighlight: CalcNodeHighlight | null;
   netHighlightOverlay: NetHighlightOverlay | null;
-  selectedSegment: SegmentSelection | null;
+  selectedSegments: Set<string>;
 }
 
 // Editor's own clipboard payload — *not* the browser `Clipboard`

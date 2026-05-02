@@ -20,17 +20,20 @@ await page.evaluate(() => {
   pushHistory(); render();
 
   state.tool = 'select';
-  state.selectedSegment = { wireId: 'W1', segIdx: 0 };
+  state.selectedSegments.clear();
+  state.selectedSegments.add(`W1|0`);
   state.selectedIds = new Set(['W1']);
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', bubbles: true }));
 });
 const after = await page.evaluate(() => ({
   ids: [...state.selectedIds].sort(),
-  segment: state.selectedSegment,
+  segs: [...state.selectedSegments].sort(),
 }));
 assert(JSON.stringify(after.ids) === JSON.stringify(['W1']),
        `'u' selects only the wire (got ${JSON.stringify(after.ids)})`);
-assert(after.segment === null, "'u' clears the segment marker");
+// W1 has one segment in this fixture; 'u' marks it.
+assert(JSON.stringify(after.segs) === '["W1|0"]',
+       `'u' populates per-segment markers (got ${JSON.stringify(after.segs)})`);
 
 // (2) hint bar height = 2 lines + 8px padding (~44 px at 0.78rem * 1.45 line-height).
 const hintHeight = await page.evaluate(() =>

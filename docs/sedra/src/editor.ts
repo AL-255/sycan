@@ -69,14 +69,197 @@ const state: EditorState = {
   // Cleared by clicking empty space, by structural edits (pushHistory),
   // and by Esc while the highlight tool is active.
   netHighlightOverlay: null,
-  // Narrow segment selection: clicking a wire in the select tool
-  // highlights just the segment under the cursor (rather than the
-  // whole end-to-end-merged wire). `selectedIds` still holds the wire
-  // id so delete/copy/move continue to work on the wire object — this
-  // only changes the *visual* selection. Press `u` to promote to the
-  // whole net (every wire + part in the same connected component).
-  selectedSegment: null,
+  // Narrow segment selection. Two paths populate this Set:
+  //
+  //   * Click on a wire in the select tool → one entry under the
+  //     cursor; the wire id also lands in ``selectedIds``.
+  //   * Box-select drag → every segment whose two endpoints are
+  //     strictly inside the rectangle is added (potentially many
+  //     entries across many wires); each affected wire's id is also
+  //     added to ``selectedIds`` so existing whole-wire operations
+  //     (delete / copy / move) still apply.
+  //
+  // Render walks ``selectedSegments`` per wire to decide whether to
+  // light up the whole polyline (no per-segment entries) or just the
+  // listed sub-segments. Press ``u`` to promote a segment-level
+  // selection to the whole net of the first picked wire.
+  selectedSegments: new Set<string>(),
 };
+
+// Composite key for a single segment of a wire. Used as the entry
+// type for ``state.selectedSegments``.
+function segKey(wireId: string, segIdx: number): string {
+  return `${wireId}|${segIdx}`;
+}
+
+// Returns true if any segment of ``wireId`` is in
+// ``state.selectedSegments``.
+function wireHasSegSel(wireId: string): boolean {
+  const prefix = wireId + '|';
+  for (const k of state.selectedSegments) {
+    if (k.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+// Returns the indices of ``wireId``'s segments that are individually
+// selected, in ascending order.
+function wireSelectedSegments(wireId: string): number[] {
+  const prefix = wireId + '|';
+  const out: number[] = [];
+  for (const k of state.selectedSegments) {
+    if (k.startsWith(prefix)) {
+      out.push(Number(k.slice(prefix.length)));
+    }
+  }
+  out.sort((a, b) => a - b);
+  return out;
+}
+
+// Drop every entry for ``wireId`` from ``state.selectedSegments``.
+function clearWireSegSel(wireId: string): void {
+  const prefix = wireId + '|';
+  for (const k of [...state.selectedSegments]) {
+    if (k.startsWith(prefix)) state.selectedSegments.delete(k);
+  }
+}
+
+// Mark *every* segment of ``wireId`` as selected. The wire id also
+// goes into ``selectedIds`` so existing whole-wire bookkeeping (e.g.
+// move drag membership) keeps working. Used wherever a code path
+// wants to express "this wire is selected end-to-end" — segment-only
+// is the source of truth, so the selection state always exposes one
+// entry per segment instead of leaving a wire's render to fall
+// through to a special whole-wire branch.
+function selectWholeWire(wireId: string): void {
+  const w = state.wires.find(x => x.id === wireId);
+  if (!w) return;
+  state.selectedIds.add(wireId);
+  for (let i = 0; i < w.points.length - 1; i++) {
+    state.selectedSegments.add(segKey(wireId, i));
+  }
+}
+
+// Walk a polyline's segments and group them into contiguous runs of
+// the same selectedness. Used at drag-start to physically split a
+// wire whose selection only covers some of its segments — the
+// selected pieces become wires that move, the unselected pieces
+// become wires that stay put.
+function splitWireBySegments(
+  points: Point[],
+  selectedSegs: Set<number>,
+): Array<{ points: Point[]; selected: boolean }> {
+  const segCount = points.length - 1;
+  if (segCount <= 0) return [];
+  const out: Array<{ points: Point[]; selected: boolean }> = [];
+  let runStart = 0;
+  let runSel = selectedSegs.has(0);
+  for (let i = 1; i < segCount; i++) {
+    const sel = selectedSegs.has(i);
+    if (sel !== runSel) {
+      out.push({
+        points: points.slice(runStart, i + 1).map(p => [p[0], p[1]] as Point),
+        selected: runSel,
+      });
+      runStart = i;
+      runSel = sel;
+    }
+  }
+  out.push({
+    points: points.slice(runStart, segCount + 1).map(p => [p[0], p[1]] as Point),
+    selected: runSel,
+  });
+  return out;
+}
+
+function deepCopyWires(wires: Wire[]): Wire[] {
+  return wires.map(w => {
+    const copy: Wire = {
+      id: w.id,
+      points: w.points.map(p => [p[0], p[1]] as Point),
+    };
+    if (w.label !== undefined) copy.label = w.label;
+    return copy;
+  });
+}
+
+// Locate every wire in `ids` that has *some but not all* of its
+// segments selected and split it into pieces in place. Returns a
+// new id list where each partially-selected wire has been replaced
+// by the ids of its newly-extracted *selected* pieces (the
+// unselected pieces become independent wires that aren't part of
+// the move). Whole-wire selections (every segment marked) are
+// returned unchanged.
+function splitPartialWires(ids: string[]): string[] {
+  const out: string[] = [];
+  for (const id of ids) {
+    const w = state.wires.find(x => x.id === id);
+    if (!w) {
+      // Part id (or stale wire id) — pass through unchanged.
+      out.push(id);
+      continue;
+    }
+    const segCount = w.points.length - 1;
+    if (segCount <= 0) {
+      out.push(id);
+      continue;
+    }
+    const selSegs = new Set(wireSelectedSegments(id));
+    if (selSegs.size === 0 || selSegs.size === segCount) {
+      // Either nothing or everything selected — no split needed.
+      out.push(id);
+      continue;
+    }
+    // Partial: split. Replace the original wire with pieces.
+    const pieces = splitWireBySegments(w.points, selSegs);
+    const idx = state.wires.indexOf(w);
+    if (idx === -1) { out.push(id); continue; }
+    state.selectedIds.delete(id);
+    clearWireSegSel(id);
+    state.wires.splice(idx, 1);
+
+    const pieceWires: Wire[] = pieces.map(piece => {
+      const newWire: Wire = {
+        id: `W${state.nextId++}`,
+        points: piece.points,
+      };
+      if (w.label !== undefined) newWire.label = w.label;
+      return newWire;
+    });
+    state.wires.splice(idx, 0, ...pieceWires);
+
+    for (let i = 0; i < pieces.length; i++) {
+      const piece = pieces[i];
+      const newWire = pieceWires[i];
+      if (piece.selected) {
+        state.selectedIds.add(newWire.id);
+        for (let s = 0; s < newWire.points.length - 1; s++) {
+          state.selectedSegments.add(segKey(newWire.id, s));
+        }
+        out.push(newWire.id);
+      }
+    }
+  }
+  return out;
+}
+
+// Restore wires + selection from a `PreDragSnapshot`. Part positions
+// come from the move-draft's origs map (parts aren't snapshotted in
+// the wire-only struct). Used by both cancelMove and the parity-
+// revert path in commitMove.
+function restorePreDragSnapshot(md: MoveDraft): void {
+  if (!md.preDragSnapshot) return;
+  state.wires = deepCopyWires(md.preDragSnapshot.wires);
+  state.nextId = md.preDragSnapshot.nextId;
+  state.selectedIds = new Set(md.preDragSnapshot.selectedIds);
+  state.selectedSegments = new Set(md.preDragSnapshot.selectedSegments);
+  for (const [id, orig] of md.origs) {
+    if (orig.kind === 'part') {
+      const part = state.parts.find(p => p.id === id);
+      if (part) { part.x = orig.x; part.y = orig.y; }
+    }
+  }
+}
 
 // Clipboard. Holds both parts and wires; positions are offsets from
 // the user-picked anchor.
@@ -160,36 +343,33 @@ function render(): void {
   // Layer 0: grid (drawn within the current viewBox)
   drawGrid();
 
-  // Layer 1: wires.
+  // Layer 1: wires. Selection in this editor lives at the segment
+  // level — there is no "whole-wire selected" visual mode. Each
+  // entry in ``state.selectedSegments`` paints one ``wire-selected``
+  // overlay over its segment; a wire that's selected end-to-end
+  // simply has every segment marked, and the overlapping overlays
+  // visually equal a continuous highlight.
   //
-  //   * "Whole-wire selected" (in selectedIds, not in segment-only mode):
-  //     the visible polyline gets the `wire-selected` class and lights up
-  //     end to end — this is what `u` produces, what box-select produces,
-  //     and what part-rotate / Ctrl+A produce.
-  //   * "Segment-only selected" (`state.selectedSegment` points at this
-  //     wire): the polyline draws plain, with a separate `wire-selected`
-  //     overlay over just the picked segment. The wire's id is still in
-  //     `selectedIds` so delete/copy/move work on the whole wire — this
-  //     branch only changes the visual.
-  //   * Plain: no highlight.
+  // The base polyline always renders plain — no class flip — so
+  // clicking on (or box-selecting around) any segment never causes
+  // a stylistic transition for the rest of the wire.
   for (const w of state.wires) {
-    const segMode = state.selectedSegment?.wireId === w.id;
-    const wholeSel = state.selectedIds.has(w.id) && !segMode;
+    const selSegs = state.selectedIds.has(w.id)
+      ? wireSelectedSegments(w.id)
+      : [];
     el('path', { d: wirePath(w.points),
-                 class: wholeSel ? 'wire wire-selected' : 'wire',
+                 class: 'wire',
                  'data-id': w.id, 'data-kind': 'wire' }, svg);
-    if (segMode) {
-      const i = state.selectedSegment!.segIdx;
-      if (i >= 0 && i < w.points.length - 1) {
-        const a = w.points[i], b = w.points[i + 1];
-        el('path', {
-          d: `M${a[0]},${a[1]} L${b[0]},${b[1]}`,
-          class: 'wire wire-selected',
-          'pointer-events': 'none',
-        }, svg);
-      }
+    for (const i of selSegs) {
+      if (i < 0 || i >= w.points.length - 1) continue;
+      const a = w.points[i], b = w.points[i + 1];
+      el('path', {
+        d: `M${a[0]},${a[1]} L${b[0]},${b[1]}`,
+        class: 'wire wire-selected',
+        'pointer-events': 'none',
+      }, svg);
     }
-    // Invisible thicker hit-stroke for easier clicking
+    // Invisible thicker hit-stroke for easier clicking.
     el('path', { d: wirePath(w.points), class: 'hit',
                  'data-id': w.id, 'data-kind': 'wire' }, svg);
   }
@@ -726,10 +906,17 @@ function mergeCollinearWires(): void {
         keep.wire.label = drop.wire.label;
       }
       state.wires = state.wires.filter(w => w !== drop.wire);
-      // If the dropped wire was selected, transfer the selection.
-      if (state.selectedIds.has(drop.wire.id)) {
+      // If either input wire participated in the selection, mark
+      // the kept wire as selected end-to-end. Old per-segment
+      // markers are dropped (they reference indices on the
+      // pre-merge polylines) and replaced with a fresh full set
+      // for the merged geometry.
+      if (state.selectedIds.has(drop.wire.id)
+          || state.selectedIds.has(keep.wire.id)) {
+        clearWireSegSel(drop.wire.id);
+        clearWireSegSel(keep.wire.id);
         state.selectedIds.delete(drop.wire.id);
-        state.selectedIds.add(keep.wire.id);
+        selectWholeWire(keep.wire.id);
       }
       didMerge = true;
       break;
@@ -980,7 +1167,7 @@ function setTool(tool: ToolName): void {
   state.tool = tool;
   state.wireDraft = null;
   state.boxSelect = null;
-  state.selectedSegment = null;
+  state.selectedSegments.clear();
   placementPreview = null;
   for (const b of document.querySelectorAll<HTMLElement>('.tool[data-tool]')) {
     b.classList.toggle('active', b.dataset['tool'] === tool);
@@ -1082,42 +1269,64 @@ wrap.addEventListener('mousedown', (e: MouseEvent) => {
     return;
   }
 
-  // Left-click in select tool: clicking on an item that's already in
-  // the selection picks up a *move drag* (the user is rubber-banding
-  // the whole selection); clicking on an unselected item with no
-  // modifier pre-selects it and then picks up; clicking on empty
-  // space starts a box-select.
+  // Left-click in select tool. The unit of selection is a *line
+  // segment* for wires and the part itself for parts, with no
+  // intermediate "whole-wire" abstraction. The handler pivots on
+  // whether the exact thing under the cursor is already selected:
+  //
+  //   * Already selected (segment in ``selectedSegments`` or part
+  //     in ``selectedIds``) → start a move drag with the current
+  //     selection unchanged. This preserves the visible
+  //     highlights so that clicking a multi-selected item never
+  //     mutates the visual state.
+  //   * Not yet selected, no modifier → replace the selection with
+  //     just this target and start the drag.
+  //   * Not yet selected, with modifier → defer to the ``click``
+  //     event, which toggles membership.
+  //
+  // Empty-space clicks fall through to box-select.
   if (e.button === 0 && state.tool === 'select' && !state.moveDraft) {
     const world = eventToWorld(e);
     const hit = pickAt(world);
     if (hit) {
       const additive = e.shiftKey || e.ctrlKey || e.metaKey;
-      // If the user clicked an unselected item with no modifier,
-      // make it the sole selection before starting the drag.
-      if (!state.selectedIds.has(hit.id) && !additive) {
-        state.selectedIds.clear();
-        state.selectedIds.add(hit.id);
-        refreshProps();
-      } else if (!state.selectedIds.has(hit.id) && additive) {
-        // Modifier + unselected: just toggle selection in `click`.
-        // Don't start a move drag here.
+
+      // For a wire hit, the actual unit being picked is the specific
+      // segment under the cursor. Compute its segKey so we can ask
+      // the same "is this thing selected?" question for both wires
+      // and parts.
+      let segTarget: { wireId: string; key: string; idx: number } | null = null;
+      if (hit.kind === 'wire') {
+        const w = state.wires.find(x => x.id === hit.id);
+        if (w && w.points.length >= 2) {
+          const idx = closestSegmentIndex(world, w);
+          segTarget = { wireId: hit.id, key: segKey(hit.id, idx), idx };
+        }
+      }
+
+      const alreadySelected = segTarget
+        ? state.selectedSegments.has(segTarget.key)
+        : state.selectedIds.has(hit.id);
+
+      if (additive) {
+        // Toggle membership is the click handler's job; don't start
+        // a drag here.
         return;
       }
-      // Wire hit (no modifier): also update the segment-only
-      // highlight so the user sees which segment of an end-to-end
-      // wire they're pointing at. A part hit clears any segment.
-      if (!additive) {
-        if (hit.kind === 'wire') {
-          const w = state.wires.find(x => x.id === hit.id);
-          if (w && w.points.length >= 2) {
-            state.selectedSegment = {
-              wireId: hit.id,
-              segIdx: closestSegmentIndex(world, w),
-            };
-          }
+
+      if (!alreadySelected) {
+        // Replace the selection with just this target. Clearing
+        // ``selectedSegments`` only affects entries on *other*
+        // wires; the new target is added back below.
+        state.selectedIds.clear();
+        state.selectedSegments.clear();
+        if (segTarget) {
+          state.selectedIds.add(segTarget.wireId);
+          state.selectedSegments.add(segTarget.key);
         } else {
-          state.selectedSegment = null;
+          state.selectedIds.add(hit.id);
         }
+        refreshProps();
       }
       startMove([...state.selectedIds], snapPt(world),
                 /*viaDrag=*/true, /*freshlyPasted=*/false);
@@ -1127,7 +1336,9 @@ wrap.addEventListener('mousedown', (e: MouseEvent) => {
     state.boxSelect = { x0: world[0], y0: world[1],
                         x1: world[0], y1: world[1],
                         additive: e.ctrlKey || e.metaKey };
-    state.selectedSegment = null;
+    if (!state.boxSelect.additive) {
+      state.selectedSegments.clear();
+    }
     e.preventDefault();
   }
 });
@@ -1220,10 +1431,17 @@ wrap.addEventListener('mouseup', (e: MouseEvent) => {
     const minSize = 3;  // ignore micro-drags (treat as click)
     const isClick = (x1 - x0) < minSize && (y1 - y0) < minSize;
     if (!isClick) {
-      // Pick parts whose bbox centre lies inside, and wires whose
-      // every vertex lies inside (strict containment so a stray
-      // half-overlapping wire doesn't get scooped up).
-      if (!b.additive) state.selectedIds.clear();
+      // Parts: bbox-centre containment (unchanged — a part is
+      // atomic). Wires: pick at *segment* granularity instead of
+      // requiring every vertex inside, so a box that crosses through
+      // a multi-segment wire selects only the segments whose two
+      // endpoints fall inside. Each affected wire's id is also added
+      // to ``selectedIds`` so the existing whole-wire delete / copy /
+      // move semantics still apply.
+      if (!b.additive) {
+        state.selectedIds.clear();
+        state.selectedSegments.clear();
+      }
       for (const p of state.parts) {
         const [bx0, by0, bx1, by1] = partBBox(p);
         const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
@@ -1231,11 +1449,17 @@ wrap.addEventListener('mouseup', (e: MouseEvent) => {
           state.selectedIds.add(p.id);
         }
       }
+      const inside = ([x, y]: Point): boolean =>
+        x >= x0 && x <= x1 && y >= y0 && y <= y1;
       for (const w of state.wires) {
-        if (w.points.every(([x, y]) =>
-              x >= x0 && x <= x1 && y >= y0 && y <= y1)) {
-          state.selectedIds.add(w.id);
+        let pickedAny = false;
+        for (let i = 0; i < w.points.length - 1; i++) {
+          if (inside(w.points[i]) && inside(w.points[i + 1])) {
+            state.selectedSegments.add(segKey(w.id, i));
+            pickedAny = true;
+          }
         }
+        if (pickedAny) state.selectedIds.add(w.id);
       }
       suppressNextClick = true;
       refreshProps();
@@ -1291,11 +1515,11 @@ wrap.addEventListener('click', (e: MouseEvent) => {
   switch (state.tool) {
     case 'select': {
       // mousedown handles the simple-click-on-hit case (it sets the
-      // segment-only highlight there and starts a move-draft). This
+      // segment-only highlights there and starts a move-draft). This
       // arm fires for empty-space clicks and modifier-toggle clicks,
-      // so we always drop the segment marker — additive selections
-      // span multiple things and segment is a single-wire concept.
-      state.selectedSegment = null;
+      // so we always drop the segment markers — additive selections
+      // span multiple things and segment-only is a transient visual.
+      state.selectedSegments.clear();
       if (!hit) {
         state.selectedIds.clear();
       } else if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -2088,7 +2312,7 @@ function restore(idx: number): boolean {
   state.moveDraft = null;
   state.calcNodeHighlight = null;
   state.netHighlightOverlay = null;
-  state.selectedSegment = null;
+  state.selectedSegments.clear();
   wrap.classList.remove('moving');
   historyIdx = idx;
   return true;
@@ -2214,19 +2438,23 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     return;  // any other Ctrl/Cmd combo: don't intercept
   }
 
-  // 'U' expands a single-segment wire selection (set by clicking a
-  // wire in the select tool) to every *wire* in the same connected
-  // component. Connected parts are *not* included — this stays a
-  // wires-only selection so subsequent moves/deletes don't drag the
-  // surrounding components along. Handled before the tool-letter map
-  // so the bare `u` doesn't get diverted into a part-placement
-  // shortcut.
-  if (k === 'u' && !e.altKey && state.selectedSegment) {
-    const seed = state.wires.find(w => w.id === state.selectedSegment!.wireId);
+  // 'U' expands a segment-only selection (set by clicking or
+  // box-selecting a portion of a wire in the select tool) to every
+  // *wire* in the same connected component, seeded from the first
+  // entry in ``selectedSegments``. Connected parts are *not* included
+  // — this stays a wires-only selection so subsequent moves/deletes
+  // don't drag the surrounding components along. Handled before the
+  // tool-letter map so the bare `u` doesn't get diverted into a
+  // part-placement shortcut.
+  if (k === 'u' && !e.altKey && state.selectedSegments.size) {
+    const firstKey = state.selectedSegments.values().next().value as string;
+    const wireId = firstKey.slice(0, firstKey.indexOf('|'));
+    const seed = state.wires.find(w => w.id === wireId);
     if (seed) {
       const { wireIds } = netMembers(seed);
-      state.selectedIds = new Set(wireIds);
-      state.selectedSegment = null;
+      state.selectedIds.clear();
+      state.selectedSegments.clear();
+      for (const id of wireIds) selectWholeWire(id);
       flashHint(`Extended to net (${wireIds.size} wire${wireIds.size === 1 ? '' : 's'})`);
       refreshProps();
       render();
@@ -2287,9 +2515,9 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
       state.netHighlightOverlay = null;
       flashHint('Net highlight cleared');
       render();
-    } else if (state.selectedIds.size || state.selectedSegment) {
+    } else if (state.selectedIds.size || state.selectedSegments.size) {
       state.selectedIds.clear();
-      state.selectedSegment = null;
+      state.selectedSegments.clear();
       refreshProps();
       render();
     } else {
@@ -2298,7 +2526,8 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     e.preventDefault();
     return;
   }
-  if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedIds.size) {
+  if ((e.key === 'Delete' || e.key === 'Backspace')
+      && (state.selectedIds.size || state.selectedSegments.size)) {
     deleteSelection();
     e.preventDefault();
     return;
@@ -2332,10 +2561,55 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 // ------------------------------------------------------------------
 
 function deleteSelection(): void {
-  if (!state.selectedIds.size) return;
+  if (!state.selectedIds.size && !state.selectedSegments.size) return;
+
+  // Selected parts vanish whole.
   state.parts = state.parts.filter(p => !state.selectedIds.has(p.id));
-  state.wires = state.wires.filter(w => !state.selectedIds.has(w.id));
+
+  // Wires: delete is segment-level. For each wire we ask
+  // "which of its segments are marked?" and rebuild the wire from
+  // the unmarked runs. A wire whose every segment is marked
+  // vanishes; a wire with a chunk taken out of the middle splits
+  // into two; one with a contiguous head or tail removed shrinks.
+  const newWires: Wire[] = [];
+  for (const w of state.wires) {
+    const numSegs = w.points.length - 1;
+    const sel = new Set(wireSelectedSegments(w.id));
+    if (sel.size === 0) {
+      newWires.push(w);
+      continue;
+    }
+    if (sel.size === numSegs) {
+      // Every segment selected → drop the wire entirely.
+      continue;
+    }
+    // Walk segments, emitting one sub-wire per contiguous run of
+    // *unselected* indices. Each run [runStart, runEnd] consumes
+    // points[runStart .. runEnd + 1] (one more point than segments).
+    let runStart: number | null = null;
+    const flushRun = (runEnd: number) => {
+      if (runStart === null) return;
+      const points = w.points.slice(runStart, runEnd + 2);
+      newWires.push({
+        id: `W${state.nextId++}`,
+        points,
+        label: w.label,
+      });
+      runStart = null;
+    };
+    for (let i = 0; i < numSegs; i++) {
+      if (sel.has(i)) {
+        if (runStart !== null) flushRun(i - 1);
+      } else if (runStart === null) {
+        runStart = i;
+      }
+    }
+    if (runStart !== null) flushRun(numSegs - 1);
+  }
+  state.wires = newWires;
+
   state.selectedIds.clear();
+  state.selectedSegments.clear();
   pushHistory();
   refreshProps();
   render();
@@ -2389,6 +2663,7 @@ function finalizeCopyAnchor(anchor: Point): void {
     state.parts = state.parts.filter(p => !idSet.has(p.id));
     state.wires = state.wires.filter(w => !idSet.has(w.id));
     state.selectedIds.clear();
+    state.selectedSegments.clear();
     pushHistory();
     refreshProps();
   }
@@ -2477,8 +2752,27 @@ function pasteClipboard(): void {
 // ------------------------------------------------------------------
 function startMove(ids: string[], pickup: Point,
                    viaDrag: boolean, freshlyPasted: boolean): void {
+  // Snapshot pre-drag state so cancel / parity-revert can undo any
+  // partial-segment splits we're about to perform. Skip for paste-
+  // place moves — there's no pre-drag state to roll back to (the
+  // pasted items only exist *because* of the paste).
+  const preDragSnapshot: PreDragSnapshot | null = freshlyPasted ? null : {
+    wires: deepCopyWires(state.wires),
+    selectedIds: [...state.selectedIds],
+    selectedSegments: [...state.selectedSegments],
+    nextId: state.nextId,
+  };
+
+  // Segment-level drag: split any partially-selected wire into
+  // pieces. The selected pieces become new wires that move; the
+  // unselected pieces become new wires that stay put. After this,
+  // every wire in `effectiveIds` either translates entirely or
+  // doesn't appear in the move at all — same invariant the rest of
+  // startMove (and updateMove) already assumed.
+  const effectiveIds = freshlyPasted ? ids : splitPartialWires(ids);
+
   const origs = new Map<string, MoveOrig>();
-  for (const id of ids) {
+  for (const id of effectiveIds) {
     const part = state.parts.find(p => p.id === id);
     if (part) {
       origs.set(id, { kind: 'part', x: part.x, y: part.y });
@@ -2500,12 +2794,29 @@ function startMove(ids: string[], pickup: Point,
   const dragMode = !freshlyPasted &&
                    (document.getElementById('drag-mode') as HTMLInputElement | null)?.checked === true;
   if (dragMode) {
+    // Anchor points whose original positions follow the move by
+    // ``delta``: every selected part's terminal *and* every endpoint
+    // of a wire in ``effectiveIds``. The latter is what lets
+    // partial-segment splits auto-reroute — when ``splitPartialWires``
+    // detaches a selected sub-wire from its parent, the unselected
+    // remainder still has an endpoint at the split boundary, and we
+    // need that boundary point to register as a moving anchor so the
+    // spanning detection captures the unselected piece.
     const selectedTerminalKeys = new Set<string>();
-    for (const id of ids) {
+    for (const id of effectiveIds) {
       const p = state.parts.find(pp => pp.id === id);
-      if (!p) continue;
-      for (const t of partTerminals(p)) {
-        selectedTerminalKeys.add(`${t.pos[0]},${t.pos[1]}`);
+      if (p) {
+        for (const t of partTerminals(p)) {
+          selectedTerminalKeys.add(`${t.pos[0]},${t.pos[1]}`);
+        }
+        continue;
+      }
+      const w = state.wires.find(ww => ww.id === id);
+      if (w && w.points.length >= 2) {
+        const first = w.points[0];
+        const last = w.points[w.points.length - 1];
+        selectedTerminalKeys.add(`${first[0]},${first[1]}`);
+        selectedTerminalKeys.add(`${last[0]},${last[1]}`);
       }
     }
     if (selectedTerminalKeys.size > 0) {
@@ -2539,7 +2850,7 @@ function startMove(ids: string[], pickup: Point,
   const paritySig = (dragMode && parityOn) ? netSignature() : null;
 
   state.moveDraft = {
-    ids: [...ids],
+    ids: [...effectiveIds],
     origs,
     pickup: [pickup[0], pickup[1]],
     delta: [0, 0],
@@ -2548,6 +2859,7 @@ function startMove(ids: string[], pickup: Point,
     dragMode,
     parityCheck: parityOn,
     paritySig,
+    preDragSnapshot,
   };
   wrap.classList.add('moving');
   refreshHint();
@@ -2691,6 +3003,23 @@ function commitMove(): void {
   if (!state.moveDraft) return;
   const md = state.moveDraft;
 
+  // Zero-delta no-op: a click-without-drag (mousedown immediately
+  // followed by mouseup with no movement) still routes through
+  // startMove → commitMove. If startMove physically split any
+  // partially-selected wires, we undo the split here so the click
+  // doesn't leave phantom sub-wires the user never asked for. No
+  // pushHistory either — there's nothing structural to record.
+  if (md.delta[0] === 0 && md.delta[1] === 0 && md.preDragSnapshot
+      && !md.freshlyPasted) {
+    restorePreDragSnapshot(md);
+    state.moveDraft = null;
+    wrap.classList.remove('moving');
+    refreshProps();
+    refreshHint();
+    render();
+    return;
+  }
+
   // Parity check (drag-mode only). If the drag changed the
   // connectivity partition — typically because a re-routed
   // spanning wire now passes through another terminal, or a
@@ -2701,15 +3030,20 @@ function commitMove(): void {
       && (md.delta[0] !== 0 || md.delta[1] !== 0)) {
     const post = netSignature();
     if (post !== md.paritySig) {
-      // Restore originals (same code path as cancelMove for
-      // non-freshly-pasted drafts).
-      for (const [id, orig] of md.origs) {
-        if (orig.kind === 'part') {
-          const part = state.parts.find(p => p.id === id);
-          if (part) { part.x = orig.x; part.y = orig.y; }
-        } else {
-          const wire = state.wires.find(w => w.id === id);
-          if (wire) wire.points = orig.points;
+      // Restore from the pre-drag snapshot — startMove may have
+      // physically split partially-selected wires, so the origs
+      // map alone can't undo all of it.
+      if (md.preDragSnapshot) {
+        restorePreDragSnapshot(md);
+      } else {
+        for (const [id, orig] of md.origs) {
+          if (orig.kind === 'part') {
+            const part = state.parts.find(p => p.id === id);
+            if (part) { part.x = orig.x; part.y = orig.y; }
+          } else {
+            const wire = state.wires.find(w => w.id === id);
+            if (wire) wire.points = orig.points;
+          }
         }
       }
       state.moveDraft = null;
@@ -2749,9 +3083,15 @@ function cancelMove(): void {
     state.parts = state.parts.filter(p => !idSet.has(p.id));
     state.wires = state.wires.filter(w => !idSet.has(w.id));
     state.selectedIds.clear();
+    state.selectedSegments.clear();
     flashHint('Paste cancelled');
+  } else if (md.preDragSnapshot) {
+    // Restore from the pre-drag snapshot — partial-segment splits
+    // create new wires and rewire the selection, none of which the
+    // origs map can undo on its own.
+    restorePreDragSnapshot(md);
+    flashHint('Move cancelled');
   } else {
-    // Restore originals from the snapshot.
     for (const [id, orig] of md.origs) {
       if (orig.kind === 'part') {
         const part = state.parts.find(p => p.id === id);

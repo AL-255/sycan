@@ -43,30 +43,35 @@ async function click(wx, wy) {
   }, { wx, wy });
 }
 
-// (1) Click W1 segment 0 and then segment 2; segIdx should track.
+// (1) Click W1 segment 0 and then segment 2; the singular click
+// always sets exactly one entry in `selectedSegments`.
 await click(80, 0);
 let s = await page.evaluate(() => ({
-  seg: state.selectedSegment, ids: [...state.selectedIds],
+  segs: [...state.selectedSegments], ids: [...state.selectedIds],
 }));
-assert(s.seg && s.seg.wireId === 'W1' && s.seg.segIdx === 0,
-       'click in W1 segment 0 sets segIdx=0');
+assert(JSON.stringify(s.segs) === '["W1|0"]',
+       'click in W1 segment 0 sets selectedSegments to ["W1|0"]');
 assert(JSON.stringify(s.ids) === '["W1"]', 'wire id is in selectedIds');
 
 await click(160, -40);
-s = await page.evaluate(() => state.selectedSegment);
-assert(s && s.segIdx === 2, 'click in W1 segment 2 updates segIdx');
+s = await page.evaluate(() => [...state.selectedSegments]);
+assert(JSON.stringify(s) === '["W1|2"]',
+       'click in W1 segment 2 replaces the marker with W1|2');
 
-// (2) `u` expands to wires only — parts NOT included.
+// (2) `u` expands to wires only — parts NOT included. The
+// segment Set is repopulated with one entry per segment of every
+// extended wire (the editor has no whole-wire selection state).
 await page.evaluate(() => {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', bubbles: true }));
 });
 const ext = await page.evaluate(() => ({
   ids: [...state.selectedIds].sort(),
-  seg: state.selectedSegment,
+  segs: [...state.selectedSegments].sort(),
 }));
 assert(JSON.stringify(ext.ids) === '["W1"]',
        `'u' extend includes wires only (got ${JSON.stringify(ext.ids)})`);
-assert(ext.seg === null, "'u' clears the segment marker");
+assert(JSON.stringify(ext.segs) === '["W1|0","W1|1","W1|2","W1|3"]',
+       `'u' marks every segment of the promoted wire (got ${JSON.stringify(ext.segs)})`);
 
 // (3) Click W2 and extend — that net is just W2.
 await click(360, 0);
@@ -81,10 +86,10 @@ await page.evaluate(() => {
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 });
 const cleared = await page.evaluate(() => ({
-  ids: [...state.selectedIds], seg: state.selectedSegment,
+  ids: [...state.selectedIds], segs: [...state.selectedSegments],
 }));
-assert(cleared.ids.length === 0 && cleared.seg === null,
-       'Esc clears both selectedIds and the segment marker');
+assert(cleared.ids.length === 0 && cleared.segs.length === 0,
+       'Esc clears both selectedIds and selectedSegments');
 
 await browser.close();
 process.exit(summary(errors));
