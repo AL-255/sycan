@@ -43,6 +43,8 @@ from sycan.components.blocks import (
 )
 from sycan.components.rf import TLINE
 from sycan.components.basic import (
+    BehavioralCurrent,
+    BehavioralVoltage,
     CCCS,
     CCVS,
     Capacitor,
@@ -54,6 +56,8 @@ from sycan.components.basic import (
     Resistor,
     VCCS,
     VCVS,
+    VSwitch,
+    Varactor,
     VoltageSource,
 )
 
@@ -247,6 +251,76 @@ class Circuit:
 
     def add_capacitor(self, name: str, n_plus: str, n_minus: str, value: Value) -> Capacitor:
         return self.add(Capacitor(name, n_plus, n_minus, value))  # type: ignore[return-value]
+
+    def add_varactor(
+        self,
+        name: str,
+        n_plus: str,
+        n_minus: str,
+        C0: Value,
+        V_J: Value = 0.7,
+        M: Value = 0.5,
+        V_op: Optional[Value] = None,
+    ) -> Varactor:
+        """Attach a junction-style voltage-controlled capacitor.
+
+        See :class:`~sycan.components.basic.varactor.Varactor`.
+        """
+        return self.add(
+            Varactor(name, n_plus, n_minus, C0, V_J, M, V_op=V_op)
+        )  # type: ignore[return-value]
+
+    def add_vswitch(
+        self,
+        name: str,
+        n_plus: str,
+        n_minus: str,
+        nc_plus: str,
+        nc_minus: str,
+        R_on: Value = 1,
+        R_off: Value = 1e9,
+        V_t: Value = 0,
+        V_h: Value = 0.1,
+        V_c_op: Optional[Value] = None,
+    ) -> VSwitch:
+        """Attach a smooth voltage-controlled switch (SPICE ``S``)."""
+        return self.add(
+            VSwitch(
+                name, n_plus, n_minus, nc_plus, nc_minus,
+                R_on, R_off, V_t, V_h, V_c_op=V_c_op,
+            )
+        )  # type: ignore[return-value]
+
+    def add_behavioral_current(
+        self,
+        name: str,
+        n_plus: str,
+        n_minus: str,
+        expr: Value,
+        V_op_subs: Optional[dict] = None,
+    ) -> BehavioralCurrent:
+        """Attach a behavioural current source ``I = expr``.
+
+        ``expr`` may reference ``Symbol("V(<node>)")`` to access node
+        voltages. ``V_op_subs`` is the operating-point map used for
+        AC small-signal linearisation.
+        """
+        return self.add(
+            BehavioralCurrent(name, n_plus, n_minus, expr, V_op_subs=V_op_subs)
+        )  # type: ignore[return-value]
+
+    def add_behavioral_voltage(
+        self,
+        name: str,
+        n_plus: str,
+        n_minus: str,
+        expr: Value,
+        V_op_subs: Optional[dict] = None,
+    ) -> BehavioralVoltage:
+        """Attach a behavioural voltage source ``V(+)-V(-) = expr``."""
+        return self.add(
+            BehavioralVoltage(name, n_plus, n_minus, expr, V_op_subs=V_op_subs)
+        )  # type: ignore[return-value]
 
     def add_vsource(
         self,

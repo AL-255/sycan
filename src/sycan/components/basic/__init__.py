@@ -8,11 +8,16 @@ from sycan.components.basic.inductor import Inductor
 from sycan.components.basic.mutual_coupling import MutualCoupling
 from sycan.components.basic.port import Port
 from sycan.components.basic.resistor import Resistor
+from sycan.components.basic.varactor import Varactor
 from sycan.components.basic.vccs import VCCS
 from sycan.components.basic.vcvs import VCVS
 from sycan.components.basic.voltage_source import VoltageSource
+from sycan.components.basic.vswitch import VSwitch
+from sycan.components.basic.behavioral import BehavioralVoltage, BehavioralCurrent
 
 __all__ = [
+    "BehavioralCurrent",
+    "BehavioralVoltage",
     "CCCS",
     "CCVS",
     "Capacitor",
@@ -24,5 +29,7 @@ __all__ = [
     "Resistor",
     "VCCS",
     "VCVS",
+    "VSwitch",
+    "Varactor",
     "VoltageSource",
 ]

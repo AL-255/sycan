@@ -717,3 +717,185 @@ def solve_pz(
         numerator=num,
         denominator=den,
     )
+
+
+def solve_dc_sweep(
+    circuit: "Circuit",
+    parameter: Union[str, cas.Symbol],
+    values: list,
+    simplify: bool = False,
+) -> list[dict[cas.Symbol, cas.Expr]]:
+    """Sweep one symbolic parameter across ``values`` and return per-point DC.
+
+    Solves the symbolic DC operating point *once* (with ``simplify``
+    deferred to the caller — keep it ``False`` to amortise the symbolic
+    cost) and substitutes ``parameter`` with each value in ``values``.
+    This is the closed-form analogue of SPICE's ``.DC vsweep`` and is
+    useful for plotting transfer characteristics, bias curves, or
+    swept-supply gain.
+
+    Parameters
+    ----------
+    circuit
+        Circuit under analysis.
+    parameter
+        Symbol (or its string name) to sweep. Must appear in the
+        symbolic DC solution.
+    values
+        Iterable of values (numeric or symbolic) to substitute.
+    simplify
+        If ``True``, simplify the substituted expressions per step.
+
+    Returns
+    -------
+    list[dict[Symbol, Expr]]
+        One dict per swept value, each with the same shape as
+        :func:`solve_dc`'s return value but with ``parameter`` replaced.
+    """
+    if isinstance(parameter, str):
+        parameter = cas.Symbol(parameter)
+
+    base = solve_dc(circuit, simplify=False)
+    out: list[dict[cas.Symbol, cas.Expr]] = []
+    for v in values:
+        v_sym = cas.sympify(v)
+        step = {sym: expr.subs(parameter, v_sym) for sym, expr in base.items()}
+        if simplify:
+            step = {sym: cas.simplify(expr) for sym, expr in step.items()}
+        out.append(step)
+    return out
+
+
+def solve_tf(
+    circuit: "Circuit",
+    output_node: str,
+    input_source: Optional[str] = None,
+    s: Optional[cas.Expr] = None,
+    simplify: bool = False,
+) -> dict[str, cas.Expr]:
+    """Symbolic small-signal transfer function and summary metrics.
+
+    Returns a dict with the closed-form Laplace-domain transfer function
+    ``H(s) = V(output_node) / source_value`` plus convenient summary
+    metrics extracted symbolically:
+
+    * ``H``           — full ``H(s)`` expression
+    * ``dc_gain``     — ``H(0)`` (i.e. ``H.subs(s, 0)``)
+    * ``hf_gain``     — ``lim s→∞ H(s)`` (via ``cas.limit``)
+    * ``numerator``   — numerator polynomial of ``H(s)`` (s-domain)
+    * ``denominator`` — denominator polynomial of ``H(s)`` (s-domain)
+
+    Source selection follows the same rule as :func:`solve_pz`: if
+    ``input_source`` is ``None``, the first source with a non-zero
+    ``ac_value`` is used.
+    """
+    if s is None:
+        s = cas.Symbol("s")
+
+    pz = solve_pz(
+        circuit,
+        output_node=output_node,
+        input_source=input_source,
+        s=s,
+        simplify=simplify,
+    )
+    H = pz.H
+
+    try:
+        dc_gain = cas.simplify(H.subs(s, 0))
+    except Exception:
+        dc_gain = H.subs(s, 0)
+
+    try:
+        hf_gain = cas.limit(H, s, cas.oo)
+    except Exception:
+        hf_gain = None
+
+    return {
+        "H": H,
+        "dc_gain": dc_gain,
+        "hf_gain": hf_gain,
+        "numerator": pz.numerator,
+        "denominator": pz.denominator,
+    }
+
+
+def solve_sensitivity(
+    circuit: "Circuit",
+    output: Union[str, cas.Symbol],
+    parameters: Optional[list] = None,
+    mode: str = "dc",
+    s: Optional[cas.Expr] = None,
+    normalized: bool = False,
+    simplify: bool = False,
+) -> dict[cas.Symbol, cas.Expr]:
+    """Symbolic small-signal sensitivity ``∂V(out)/∂p`` per parameter.
+
+    Solves the requested analysis (``"dc"`` or ``"ac"``) symbolically,
+    extracts the output expression for ``output`` (a node name or a
+    symbol such as ``Symbol("V(out)")``), and differentiates w.r.t.
+    each parameter.
+
+    Parameters
+    ----------
+    circuit
+        Circuit under analysis.
+    output
+        Node name (string) or unknown symbol (e.g. ``Symbol("I(V1)")``).
+    parameters
+        List of symbols (or names) to differentiate over. ``None`` means
+        every free symbol of the output expression that is not an
+        unknown of the MNA system.
+    mode
+        ``"dc"`` (default) or ``"ac"``.
+    s
+        Laplace variable for AC mode.
+    normalized
+        If ``True``, return the relative sensitivity
+        ``(p / V_out) · ∂V_out/∂p``, which is dimensionless and matches
+        the SPICE ``.SENS`` convention for "% per %".
+    simplify
+        Apply :func:`cas.simplify` to each sensitivity expression.
+
+    Returns
+    -------
+    dict[Symbol, Expr]
+        Mapping of each parameter symbol to its sensitivity expression.
+    """
+    if mode == "dc":
+        sol = solve_dc(circuit, simplify=False)
+    elif mode == "ac":
+        sol = solve_ac(circuit, s=s, simplify=False)
+    else:
+        raise ValueError(f"mode must be 'dc' or 'ac'; got {mode!r}")
+
+    if isinstance(output, str):
+        out_sym = cas.Symbol(f"V({output})")
+    else:
+        out_sym = output
+    if out_sym not in sol:
+        raise ValueError(
+            f"output {out_sym!r} not in solution; available: {list(sol)!r}"
+        )
+    expr = sol[out_sym]
+
+    if parameters is None:
+        unknowns = set(sol.keys())
+        params: list[cas.Symbol] = sorted(
+            (sym for sym in expr.free_symbols if sym not in unknowns),
+            key=lambda x: str(x),
+        )
+    else:
+        params = [
+            cas.Symbol(p) if isinstance(p, str) else p for p in parameters
+        ]
+
+    out: dict[cas.Symbol, cas.Expr] = {}
+    for p in params:
+        d = cas.diff(expr, p)
+        if normalized:
+            d = (p / expr) * d
+        if simplify:
+            d = cas.simplify(d)
+        out[p] = d
+    return out

@@ -43,6 +43,8 @@ from sycan.network_params import (
     z_to_y,
 )
 from sycan.components.basic import (
+    BehavioralCurrent,
+    BehavioralVoltage,
     CCCS,
     CCVS,
     Capacitor,
@@ -54,8 +56,11 @@ from sycan.components.basic import (
     Resistor,
     VCCS,
     VCVS,
+    VSwitch,
+    Varactor,
     VoltageSource,
 )
+from sycan.check import ERCFinding, ERCReport, check_circuit
 from sycan.headroom import HeadroomResult, solve_headroom
 from sycan.mna import (
     Component,
@@ -68,9 +73,12 @@ from sycan.mna import (
     q,
     solve_ac,
     solve_dc,
+    solve_dc_sweep,
     solve_impedance,
     solve_noise,
     solve_pz,
+    solve_sensitivity,
+    solve_tf,
 )
 from sycan.mna import T as T_kelvin  # avoid shadowing trans-line letter elsewhere
 from sycan.autodraw import autodraw
@@ -81,6 +89,8 @@ from sycan.svg_util import bode_svg
 
 __all__ = [
     "BJT",
+    "BehavioralCurrent",
+    "BehavioralVoltage",
     "CCCS",
     "CCVS",
     "Capacitor",
@@ -88,6 +98,8 @@ __all__ = [
     "Component",
     "CurrentSource",
     "Diode",
+    "ERCFinding",
+    "ERCReport",
     "GND",
     "Gain",
     "HeadroomResult",
@@ -136,9 +148,12 @@ __all__ = [
     "z_to_y",
     "VCCS",
     "VCVS",
+    "VSwitch",
+    "Varactor",
     "VoltageSource",
     "autodraw",
     "bessel",
+    "check_circuit",
     "bode_svg",
     "build_mna",
     "build_residuals",
@@ -150,8 +165,11 @@ __all__ = [
     "parse_value",
     "solve_ac",
     "solve_dc",
+    "solve_dc_sweep",
     "solve_headroom",
     "solve_impedance",
     "solve_noise",
     "solve_pz",
+    "solve_sensitivity",
+    "solve_tf",
 ]
