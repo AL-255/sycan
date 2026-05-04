@@ -370,6 +370,31 @@ def _build_circuit(
             N_val = parse_value(parts[4]) if len(parts) > 4 else None
             V_T = parse_value(parts[5]) if len(parts) > 5 else None
             circuit.add_diode(name, anode, cathode, IS_val, N_val, V_T)
+        elif head == "j":
+            _require(parts, 7, lineno, name)
+            drain, gate, source, mtype = parts[1], parts[2], parts[3], parts[4]
+            BETA = parse_value(parts[5])
+            VTO = parse_value(parts[6])
+            mtype_lc = mtype.lower()
+            kwargs: dict[str, cas.Expr] = {}
+            if len(parts) > 7:
+                kwargs["LAMBDA"] = parse_value(parts[7])
+            if len(parts) > 8:
+                kwargs["C_gs"] = parse_value(parts[8])
+            if len(parts) > 9:
+                kwargs["C_gd"] = parse_value(parts[9])
+            if len(parts) > 10:
+                kwargs["V_GS_op"] = parse_value(parts[10])
+            if len(parts) > 11:
+                kwargs["V_DS_op"] = parse_value(parts[11])
+            if mtype_lc == "njf":
+                circuit.add_njfet(name, drain, gate, source, BETA, VTO, **kwargs)
+            elif mtype_lc == "pjf":
+                circuit.add_pjfet(name, drain, gate, source, BETA, VTO, **kwargs)
+            else:
+                raise ValueError(
+                    f"line {lineno}: unknown JFET model {mtype!r}; expected NJF or PJF"
+                )
         elif head == "q":
             _require(parts, 8, lineno, name)
             collector, base, emitter, btype = (

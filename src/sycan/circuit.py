@@ -19,10 +19,12 @@ from sycan.mna import Component, Value
 from sycan.components.active import (
     BJT,
     Diode,
+    NJFET,
     NMOS_3T,
     NMOS_4T,
     NMOS_L1,
     NMOS_subthreshold,
+    PJFET,
     PMOS_3T,
     PMOS_4T,
     PMOS_L1,
@@ -440,6 +442,48 @@ class Circuit:
         if V_D_op is not None:
             kwargs["V_D_op"] = V_D_op
         return self.add(Diode(name, anode, cathode, IS, **kwargs))  # type: ignore[return-value]
+
+    def add_njfet(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        BETA: Value,
+        VTO: Value,
+        **kwargs: Value,
+    ) -> NJFET:
+        """Attach a Shichman-Hodges N-channel JFET (depletion-mode).
+
+        ``VTO`` is stored as a positive magnitude (pinch-off magnitude).
+        Optional keyword parameters: ``LAMBDA`` (channel-length modulation),
+        ``C_gs``, ``C_gd`` (intrinsic capacitances), and
+        ``V_GS_op`` / ``V_DS_op`` (AC linearisation point).
+        """
+        return self.add(
+            NJFET(name, drain, gate, source, BETA, VTO, **kwargs)
+        )  # type: ignore[return-value]
+
+    def add_pjfet(
+        self,
+        name: str,
+        drain: str,
+        gate: str,
+        source: str,
+        BETA: Value,
+        VTO: Value,
+        **kwargs: Value,
+    ) -> PJFET:
+        """Attach a Shichman-Hodges P-channel JFET (depletion-mode).
+
+        ``VTO`` is stored as a positive magnitude (pinch-off magnitude).
+        Optional keyword parameters: ``LAMBDA`` (channel-length modulation),
+        ``C_gs``, ``C_gd`` (intrinsic capacitances), and
+        ``V_GS_op`` / ``V_DS_op`` (AC linearisation point).
+        """
+        return self.add(
+            PJFET(name, drain, gate, source, BETA, VTO, **kwargs)
+        )  # type: ignore[return-value]
 
     def add_bjt(
         self,

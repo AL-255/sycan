@@ -49,10 +49,12 @@ from sycan.circuit import Circuit
 from sycan.components.active import (
     BJT,
     Diode,
+    NJFET,
     NMOS_3T,
     NMOS_4T,
     NMOS_L1,
     NMOS_subthreshold,
+    PJFET,
     PMOS_3T,
     PMOS_4T,
     PMOS_L1,
@@ -252,6 +254,14 @@ def _describe(c: Component) -> _CompDesc:
     if isinstance(c, Diode):
         return _CompDesc(c, c.name, "diode",
                          spine_top="anode", spine_bot="cathode")
+    if isinstance(c, NJFET):
+        return _CompDesc(c, c.name, "njf",
+                         spine_top="drain", spine_bot="source",
+                         side_ports=("gate",))
+    if isinstance(c, PJFET):
+        return _CompDesc(c, c.name, "pjf",
+                         spine_top="source", spine_bot="drain",
+                         side_ports=("gate",))
     if isinstance(c, VoltageSource):
         return _CompDesc(c, c.name, "vsrc",
                          spine_top="n_plus", spine_bot="n_minus")

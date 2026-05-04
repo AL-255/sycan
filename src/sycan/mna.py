@@ -568,3 +568,152 @@ def solve_noise(
         total = cas.simplify(total)
         contributions = {k: cas.simplify(v) for k, v in contributions.items()}
     return total, contributions
+
+
+@dataclass
+class PZResult:
+    """Result of a pole-zero analysis.
+
+    Attributes
+    ----------
+    H
+        Transfer function ``H(s) = V(out) / V(in)`` in the Laplace domain.
+    poles
+        List of pole locations (roots of the denominator of ``H(s)``).
+        Each pole is an expression in component parameters and ``s``.
+    zeros
+        List of zero locations (roots of the numerator of ``H(s)``).
+    numerator
+        The raw numerator polynomial / expression of ``H(s)``.
+    denominator
+        The raw denominator polynomial / expression of ``H(s)``.
+    """
+    H: cas.Expr
+    poles: list[cas.Expr]
+    zeros: list[cas.Expr]
+    numerator: cas.Expr
+    denominator: cas.Expr
+
+
+def solve_pz(
+    circuit: "Circuit",
+    output_node: str,
+    input_source: Optional[str] = None,
+    s: Optional[cas.Expr] = None,
+    simplify: bool = False,
+) -> PZResult:
+    """Pole-zero analysis of a transfer function in the Laplace domain.
+
+    Builds the AC MNA system, extracts the transfer function
+    ``H(s) = V(output_node) / source_value``, then factors it to find
+    poles (roots of denominator) and zeros (roots of numerator).
+
+    If ``input_source`` is ``None`` (default), the system poles are
+    extracted from the source-to-output transfer function using the
+    first AC source found in the circuit. If no AC source is present,
+    a :class:`ValueError` is raised.
+
+    Parameters
+    ----------
+    circuit
+        The circuit under analysis.
+    output_node
+        Name of the node whose voltage constitutes the output.
+    input_source
+        Name of the independent source that drives the input.  If
+        ``None``, the first source with a non-zero ``ac_value`` is used.
+    s
+        Laplace variable.  If ``None``, ``cas.Symbol("s")`` is created.
+    simplify
+        If ``True``, simplify the transfer function and pole/zero
+        expressions.
+
+    Returns
+    -------
+    PZResult
+        Dataclass holding the transfer function, poles, zeros, and
+        raw numerator / denominator.
+    """
+    if s is None:
+        s = cas.Symbol("s")
+
+    sol = solve_ac(circuit, s=s, simplify=False)
+
+    nodes = circuit.nodes
+    if output_node not in nodes:
+        raise ValueError(
+            f"output node {output_node!r} not in circuit nodes {nodes!r}"
+        )
+
+    v_out = sol[cas.Symbol(f"V({output_node})")]
+
+    # Determine the source value to divide out.
+    if input_source is not None:
+        src_symbol = cas.Symbol(f"Vin_{input_source}")
+        # The source's AC value is in the symbolic expression. We need
+        # to find it by looking at the source's ac_value.
+        found = None
+        for c in circuit.components:
+            if c.name == input_source:
+                from sycan.components.basic.voltage_source import VoltageSource
+                from sycan.components.basic.current_source import CurrentSource
+                if isinstance(c, (VoltageSource, CurrentSource)):
+                    found = c.ac_value
+                break
+        if found is None:
+            raise ValueError(
+                f"source {input_source!r} not found or has no ac_value"
+            )
+        src_val = cas.sympify(found)
+    else:
+        # Auto-detect: find the first source with a non-zero ac_value.
+        from sycan.components.basic.voltage_source import VoltageSource
+        from sycan.components.basic.current_source import CurrentSource
+        src_val = None
+        for c in circuit.components:
+            if isinstance(c, (VoltageSource, CurrentSource)):
+                ac = cas.sympify(c.ac_value) if c.ac_value is not None else None
+                if ac is not None and ac != 0:
+                    src_val = ac
+                    break
+        if src_val is None:
+            raise ValueError(
+                "no AC source found in circuit; specify input_source or "
+                "add a source with a non-zero ac_value"
+            )
+
+    # Transfer function H(s) = V(out) / source_value
+    H = v_out / src_val
+
+    if simplify:
+        H = cas.simplify(H)
+
+    # Combine into a single rational expression, then separate numerator
+    # and denominator.
+    H_together = cas.together(H)
+    num, den = cas.fraction(H_together)
+
+    if simplify:
+        num = cas.simplify(num)
+        den = cas.simplify(den)
+
+    # Find roots of numerator (zeros) and denominator (poles).
+    # For symbolic circuits, these will be expressions involving
+    # component parameters. For numeric circuits, they will be numbers.
+    try:
+        zero_solutions = cas.solve(num, s, dict=False)
+    except (NotImplementedError, Exception):
+        zero_solutions = []
+
+    try:
+        pole_solutions = cas.solve(den, s, dict=False)
+    except (NotImplementedError, Exception):
+        pole_solutions = []
+
+    return PZResult(
+        H=H,
+        poles=list(pole_solutions),
+        zeros=list(zero_solutions),
+        numerator=num,
+        denominator=den,
+    )

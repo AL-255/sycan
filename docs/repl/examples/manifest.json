@@ -20,5 +20,9 @@
   {"category": "CMOS digital",   "label": "NAND2 stacking",       "file": "nand2_stacking.py"},
 
   {"category": "Mixed-signal",   "label": "Σ-Δ modulator",      "file": "sigma_delta.py"},
-  {"category": "Mixed-signal",   "label": "Type-II PLL",          "file": "pll.py"}
+  {"category": "Mixed-signal",   "label": "Type-II PLL",          "file": "pll.py"},
+
+  {"category": "JFET",           "label": "JFET CS Amplifier",    "file": "jfet_amplifier.py"},
+
+  {"category": "Pole-Zero",      "label": "RC / Sallen-Key / RLC","file": "pole_zero.py"}
 ]

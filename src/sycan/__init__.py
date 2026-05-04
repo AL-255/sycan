@@ -3,10 +3,12 @@ from sycan.circuit import Circuit
 from sycan.components.active import (
     BJT,
     Diode,
+    NJFET,
     NMOS_3T,
     NMOS_4T,
     NMOS_L1,
     NMOS_subthreshold,
+    PJFET,
     PMOS_3T,
     PMOS_4T,
     PMOS_L1,
@@ -68,6 +70,7 @@ from sycan.mna import (
     solve_dc,
     solve_impedance,
     solve_noise,
+    solve_pz,
 )
 from sycan.mna import T as T_kelvin  # avoid shadowing trans-line letter elsewhere
 from sycan.autodraw import autodraw
@@ -91,6 +94,7 @@ __all__ = [
     "Inductor",
     "Integrator",
     "MutualCoupling",
+    "NJFET",
     "NMOS_3T",
     "NMOS_4T",
     "NMOS_L1",
@@ -99,6 +103,7 @@ __all__ = [
     "NoiseSpec",
     "OPAMP",
     "OPAMP1",
+    "PJFET",
     "PMOS_3T",
     "PMOS_4T",
     "PMOS_L1",
@@ -148,4 +153,5 @@ __all__ = [
     "solve_headroom",
     "solve_impedance",
     "solve_noise",
+    "solve_pz",
 ]

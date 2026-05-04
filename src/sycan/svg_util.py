@@ -27,6 +27,7 @@ BBox = Tuple[float, float, float, float]
 KIND_GLYPHS: tuple[str, ...] = (
     "nmos", "pmos", "nmos_4t", "pmos_4t",
     "npn", "pnp", "triode", "diode",
+    "njf", "pjf",
     "vsrc", "isrc", "res", "ind", "cap", "tline",
     "ccsrc", "port", "gnd",
 )
