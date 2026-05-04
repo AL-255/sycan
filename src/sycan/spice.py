@@ -554,6 +554,13 @@ def _build_circuit(
                     f"line {lineno}: unknown subcircuit type {subckt!r} for "
                     f"{name!r} (no .SUBCKT defined and not a built-in)"
                 )
+        elif head == "k":
+            # Mutual coupling: Kname L1 L2 ... k
+            # Last token is always the coupling coefficient.
+            _require(parts, 4, lineno, name)
+            ind_names: list[str] = parts[1:-1]
+            k_val = parse_value(parts[-1])
+            circuit.add_mutual_coupling(name, ind_names, k_val)
         else:
             raise ValueError(f"line {lineno}: unsupported element {name!r}")
 

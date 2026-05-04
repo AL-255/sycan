@@ -47,6 +47,7 @@ from sycan.components.basic import (
     CurrentSource,
     GND,
     Inductor,
+    MutualCoupling,
     Port,
     Resistor,
     VCCS,
@@ -351,6 +352,31 @@ class Circuit:
     def add_gnd(self, name: str, node: str) -> GND:
         """Tie ``node`` to the absolute zero reference."""
         return self.add(GND(name, node))  # type: ignore[return-value]
+
+    def add_mutual_coupling(
+        self,
+        name: str,
+        inductors: list[str],
+        k: Value = 1,
+    ) -> MutualCoupling:
+        """Add mutual inductance coupling between ``inductors``.
+
+        Parameters
+        ----------
+        name
+            Coupling designator (e.g. ``"K1"``).
+        inductors
+            List of inductor designators to couple.
+        k
+            Coupling coefficient (default 1 = perfect coupling).
+
+        Inductor values are resolved lazily at MNA-build time, so ``K``
+        may precede the ``L`` elements it references.
+        """
+        kc = MutualCoupling(name, k=k)
+        for ind_name in inductors:
+            kc.couple(ind_name)
+        return self.add(kc)  # type: ignore[return-value]
 
     def add_triode(
         self,

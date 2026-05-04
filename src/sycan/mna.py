@@ -215,6 +215,13 @@ def build_mna(
     node_rows = {name: idx - 1 for name, idx in circuit._nodes.items()}
     aux_rows = {c.name: n + k for k, c in enumerate(aux_owners)}
 
+    # Resolve mutual coupling: look up inductor values from the flat list
+    # so that MutualCoupling.stamp() can compute M_ij = k·sqrt(L_i·L_j).
+    for c in flat:
+        from sycan.components.basic.mutual_coupling import MutualCoupling
+        if isinstance(c, MutualCoupling):
+            c.resolve(flat)
+
     ctx = StampContext(
         A=A, b=b, node_rows=node_rows, aux_rows=aux_rows, mode=mode, s=s
     )

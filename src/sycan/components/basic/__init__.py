@@ -5,6 +5,7 @@ from sycan.components.basic.ccvs import CCVS
 from sycan.components.basic.current_source import CurrentSource
 from sycan.components.basic.gnd import GND
 from sycan.components.basic.inductor import Inductor
+from sycan.components.basic.mutual_coupling import MutualCoupling
 from sycan.components.basic.port import Port
 from sycan.components.basic.resistor import Resistor
 from sycan.components.basic.vccs import VCCS
@@ -18,6 +19,7 @@ __all__ = [
     "CurrentSource",
     "GND",
     "Inductor",
+    "MutualCoupling",
     "Port",
     "Resistor",
     "VCCS",
