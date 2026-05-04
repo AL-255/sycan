@@ -39,7 +39,7 @@ from typing import ClassVar, Optional
 
 from sycan import cas as cas
 
-from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B
+from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B, freq
 
 # Long-channel channel-thermal-noise excess factor (γ ≈ 2/3 in saturation).
 _NOISE_GAMMA = cas.Rational(2, 3)
@@ -61,12 +61,15 @@ class _MOSFET_L1(Component):
     C_gd: cas.Expr = field(default_factory=lambda: cas.Integer(0))
     V_GS_op: Optional[cas.Expr] = None
     V_DS_op: Optional[cas.Expr] = None
+    KF: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    AF: cas.Expr = field(default_factory=lambda: cas.Integer(1))
+    EF: cas.Expr = field(default_factory=lambda: cas.Integer(1))
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("drain", "gate", "source")
     has_nonlinear: ClassVar[bool] = True
     polarity: ClassVar[str] = ""  # overridden by concrete subclasses
-    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"thermal"})
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"thermal", "flicker"})
 
     def __post_init__(self) -> None:
         if self.polarity not in ("N", "P"):
@@ -81,6 +84,7 @@ class _MOSFET_L1(Component):
             "mu_n", "Cox", "W", "L", "V_TH",
             "lam", "C_gs", "C_gd",
             "V_GS_op", "V_DS_op",
+            "KF", "AF", "EF",
         ):
             setattr(self, attr, cas.sympify(getattr(self, attr)))
         self.include_noise = self._normalize_noise(self.include_noise)
@@ -96,6 +100,18 @@ class _MOSFET_L1(Component):
                     n_plus=self.drain,
                     n_minus=self.source,
                     psd=4 * k_B * T * _NOISE_GAMMA * g_m,
+                )
+            )
+        if "flicker" in self.include_noise and self.KF != 0:
+            _, g_ds = self._small_signal_params()
+            I_op = g_ds * self.V_DS_op if self.V_DS_op != 0 else g_ds
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.flicker",
+                    kind="flicker",
+                    n_plus=self.drain,
+                    n_minus=self.source,
+                    psd=self.KF * I_op ** self.AF / (freq ** self.EF),
                 )
             )
         return out

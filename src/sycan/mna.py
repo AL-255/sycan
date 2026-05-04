@@ -35,6 +35,7 @@ _NOISE_KINDS: frozenset[str] = frozenset({"thermal", "shot", "flicker"})
 k_B: cas.Symbol = cas.Symbol("k_B", positive=True)
 T: cas.Symbol = cas.Symbol("T", positive=True)
 q: cas.Symbol = cas.Symbol("q", positive=True)
+freq: cas.Symbol = cas.Symbol("freq", positive=True)  # frequency for flicker noise
 
 
 @dataclass

@@ -17,7 +17,7 @@ op-amp.
 """
 from sycan.components.blocks.gain import Gain
 from sycan.components.blocks.integrator import Integrator
-from sycan.components.blocks.opamp import OPAMP
+from sycan.components.blocks.opamp import OPAMP, OPAMP1
 from sycan.components.blocks.quantizer import Quantizer
 from sycan.components.blocks.subcircuit import SubCircuit
 from sycan.components.blocks.summer import Summer
@@ -27,6 +27,7 @@ __all__ = [
     "Gain",
     "Integrator",
     "OPAMP",
+    "OPAMP1",
     "Quantizer",
     "SubCircuit",
     "Summer",

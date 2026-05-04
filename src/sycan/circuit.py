@@ -33,6 +33,7 @@ from sycan.components.blocks import (
     Gain,
     Integrator,
     OPAMP,
+    OPAMP1,
     Quantizer,
     SubCircuit,
     Summer,
@@ -52,6 +53,17 @@ from sycan.components.basic import (
     VCVS,
     VoltageSource,
 )
+
+
+_WAVEFORM_KEYS = frozenset({
+    "waveform", "amplitude", "frequency", "phase",
+    "v1", "v2", "td", "pw", "td1", "tau1", "td2", "tau2",
+})
+
+
+def _waveform_kwargs(local_vars: dict) -> dict:
+    """Extract waveform-related kwargs from a locals() dict."""
+    return {k: local_vars[k] for k in _WAVEFORM_KEYS if local_vars.get(k) is not None}
 
 
 class Circuit:
@@ -208,6 +220,22 @@ class Circuit:
         """Add an ideal differential op-amp (:class:`OPAMP` subcircuit)."""
         return self.add(OPAMP(name, in_p, in_n, out, A))  # type: ignore[return-value]
 
+    def add_opamp1(
+        self,
+        name: str,
+        in_p: str,
+        in_n: str,
+        out: str,
+        A: Optional[Value] = None,
+        GBW: Optional[Value] = None,
+        Z_out: Optional[Value] = None,
+    ) -> OPAMP1:
+        """Add a first-order op-amp with finite GBW and output impedance.
+
+        See :class:`~sycan.components.blocks.opamp.OPAMP1`.
+        """
+        return self.add(OPAMP1(name, in_p, in_n, out, A, GBW, Z_out))  # type: ignore[return-value]
+
     def add_resistor(self, name: str, n_plus: str, n_minus: str, value: Value) -> Resistor:
         return self.add(Resistor(name, n_plus, n_minus, value))  # type: ignore[return-value]
 
@@ -224,8 +252,29 @@ class Circuit:
         n_minus: str,
         value: Value,
         ac_value: Optional[Value] = None,
+        waveform: Optional[str] = None,
+        amplitude: Optional[Value] = None,
+        frequency: Optional[Value] = None,
+        phase: Optional[Value] = None,
+        # pulse / exp waveform parameters
+        v1: Optional[Value] = None,
+        v2: Optional[Value] = None,
+        td: Optional[Value] = None,
+        pw: Optional[Value] = None,
+        td1: Optional[Value] = None,
+        tau1: Optional[Value] = None,
+        td2: Optional[Value] = None,
+        tau2: Optional[Value] = None,
     ) -> VoltageSource:
-        return self.add(VoltageSource(name, n_plus, n_minus, value, ac_value))  # type: ignore[return-value]
+        """Add an independent voltage source, optionally with a waveform mode.
+
+        Supported waveforms: ``"sine"``, ``"pulse"``, ``"exp"``.  See
+        :class:`~sycan.components.basic.voltage_source.VoltageSource`.
+        """
+        kwargs = _waveform_kwargs(locals())
+        return self.add(
+            VoltageSource(name, n_plus, n_minus, value, ac_value, **kwargs)
+        )  # type: ignore[return-value]
 
     def add_isource(
         self,
@@ -234,8 +283,28 @@ class Circuit:
         n_minus: str,
         value: Value,
         ac_value: Optional[Value] = None,
+        waveform: Optional[str] = None,
+        amplitude: Optional[Value] = None,
+        frequency: Optional[Value] = None,
+        phase: Optional[Value] = None,
+        v1: Optional[Value] = None,
+        v2: Optional[Value] = None,
+        td: Optional[Value] = None,
+        pw: Optional[Value] = None,
+        td1: Optional[Value] = None,
+        tau1: Optional[Value] = None,
+        td2: Optional[Value] = None,
+        tau2: Optional[Value] = None,
     ) -> CurrentSource:
-        return self.add(CurrentSource(name, n_plus, n_minus, value, ac_value))  # type: ignore[return-value]
+        """Add an independent current source, optionally with a waveform mode.
+
+        Supported waveforms: ``"sine"``, ``"pulse"``, ``"exp"``.  See
+        :class:`~sycan.components.basic.current_source.CurrentSource`.
+        """
+        kwargs = _waveform_kwargs(locals())
+        return self.add(
+            CurrentSource(name, n_plus, n_minus, value, ac_value, **kwargs)
+        )  # type: ignore[return-value]
 
     def add_vcvs(
         self,
@@ -311,10 +380,11 @@ class Circuit:
         n_out_m: str,
         Z0: Value,
         td: Value,
+        loss: Value = 0,
     ) -> TLINE:
-        """Attach a lossless 2-port transmission line (Z0, one-way delay td)."""
+        """Attach a transmission line (Z0, delay td, optional loss in nepers)."""
         return self.add(
-            TLINE(name, n_in_p, n_in_m, n_out_p, n_out_m, Z0, td)
+            TLINE(name, n_in_p, n_in_m, n_out_p, n_out_m, Z0, td, loss)
         )  # type: ignore[return-value]
 
     def add_diode(
@@ -325,13 +395,24 @@ class Circuit:
         IS: Value,
         N: Optional[Value] = None,
         V_T: Optional[Value] = None,
+        C_j: Optional[Value] = None,
+        V_D_op: Optional[Value] = None,
     ) -> Diode:
-        """Attach a Shockley diode: ``I_D = IS (exp(V_D/(N V_T)) - 1)``."""
+        """Attach a Shockley diode: ``I_D = IS (exp(V_D/(N V_T)) - 1)``.
+
+        Optional ``C_j`` adds junction capacitance in AC analysis.
+        Optional ``V_D_op`` pins the DC operating-point voltage for
+        small-signal linearisation.
+        """
         kwargs: dict[str, Value] = {}
         if N is not None:
             kwargs["N"] = N
         if V_T is not None:
             kwargs["V_T"] = V_T
+        if C_j is not None:
+            kwargs["C_j"] = C_j
+        if V_D_op is not None:
+            kwargs["V_D_op"] = V_D_op
         return self.add(Diode(name, anode, cathode, IS, **kwargs))  # type: ignore[return-value]
 
     def add_bjt(
@@ -346,11 +427,11 @@ class Circuit:
         BR: Value,
         **kwargs: Value,
     ) -> BJT:
-        """Attach a Gummel-Poon DC BJT (``polarity='NPN'`` or ``'PNP'``).
+        """Attach a Gummel-Poon BJT (``polarity='NPN'`` or ``'PNP'``).
 
-        Optional SPICE G-P parameters (``NF``, ``NR``, ``VAF``, ``VAR``,
-        ``IKF``, ``IKR``, ``ISE``, ``NE``, ``ISC``, ``NC``, ``V_T``)
-        can be supplied as keyword arguments.
+        Optional G-P parameters: ``NF``, ``NR``, ``VAF``, ``VAR``,
+        ``IKF``, ``IKR``, ``ISE``, ``NE``, ``ISC``, ``NC``, ``V_T``,
+        and AC model capacitances ``C_pi``, ``C_mu``.
         """
         return self.add(
             BJT(name, collector, base, emitter, polarity, IS, BF, BR, **kwargs)

@@ -1,16 +1,13 @@
-"""Analytical lossless transmission line.
+"""Analytical transmission line (lossless by default, lossy via ``loss``).
 
-A two-port device parameterised by characteristic impedance ``Z0`` and
-one-way time delay ``td``. The small-signal ABCD matrix in the Laplace
-domain is the classical
+A two-port device parameterised by characteristic impedance ``Z0``,
+one-way time delay ``td``, and optional total loss ``loss`` (nepers).
+The small-signal ABCD matrix in the Laplace domain is
 
-    [V1]   [cosh(s td)        Z0 sinh(s td)] [ V2]
-    [I1] = [sinh(s td) / Z0    cosh(s td)  ] [-I2]
+    γ l = loss + s·td
 
-which corresponds to the Y-parameter matrix
-
-    Y = (1 / Z0) * [[ coth(s td),  -csch(s td) ],
-                    [-csch(s td),   coth(s td) ]]
+    [V1]   [cosh(γ l)        Z0 sinh(γ l)] [ V2]
+    [I1] = [sinh(γ l) / Z0   cosh(γ l)  ] [-I2]
 
 Stamping strategy:
 
@@ -23,9 +20,6 @@ Stamping strategy:
   both are ground the short is harmless, otherwise a DC solve will
   treat them as separately floating — that case currently isn't
   modelled at DC.
-
-Only the lossless case (real ``Z0``, no attenuation) is covered here;
-a lossy version would replace ``s td`` with ``γ l = (α + s/v) l``.
 """
 from __future__ import annotations
 
@@ -39,10 +33,11 @@ from sycan.mna import Component, NoiseSpec, StampContext
 
 @dataclass
 class TLINE(Component):
-    """Lossless 2-port transmission line.
+    """Lossless or lossy 2-port transmission line.
 
-    Lossless transmission lines are noiseless; ``include_noise`` is
-    accepted for interface uniformity.
+    Set ``loss`` (total attenuation in nepers, default 0) for a lossy
+    line. Lossless lines are noiseless; ``include_noise`` is accepted
+    for interface uniformity.
     """
 
     name: str
@@ -52,6 +47,7 @@ class TLINE(Component):
     n_out_m: str
     Z0: cas.Expr
     td: cas.Expr
+    loss: cas.Expr = field(default_factory=lambda: cas.Integer(0))
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("n_in_p", "n_in_m", "n_out_p", "n_out_m")
@@ -60,6 +56,7 @@ class TLINE(Component):
     def __post_init__(self) -> None:
         self.Z0 = cas.sympify(self.Z0)
         self.td = cas.sympify(self.td)
+        self.loss = cas.sympify(self.loss)
         self.include_noise = self._normalize_noise(self.include_noise)
 
     # DC: short the inner conductor with an auxiliary branch current.
@@ -81,9 +78,9 @@ class TLINE(Component):
 
     def _stamp_ac(self, ctx: StampContext) -> None:
         s = ctx.s
-        theta = s * self.td
-        Y_self = cas.cosh(theta) / (self.Z0 * cas.sinh(theta))   # coth(sτ)/Z0
-        Y_mut = -1 / (self.Z0 * cas.sinh(theta))                # -csch(sτ)/Z0
+        theta = self.loss + s * self.td   # γ l = α + s·τ
+        Y_self = cas.cosh(theta) / (self.Z0 * cas.sinh(theta))   # coth(γl)/Z0
+        Y_mut = -1 / (self.Z0 * cas.sinh(theta))                # -csch(γl)/Z0
 
         p1 = ctx.n(self.n_in_p)
         m1 = ctx.n(self.n_in_m)

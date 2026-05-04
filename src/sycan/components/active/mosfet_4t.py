@@ -38,7 +38,7 @@ from typing import ClassVar, Optional
 
 from sycan import cas as cas
 
-from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B, q
+from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, T, k_B, q, freq
 
 
 # Reuse the same defaults as the standalone weak-inversion model so a
@@ -73,12 +73,15 @@ class _MOSFET_4T(Component):
     V_GS_op: Optional[cas.Expr] = None
     V_DS_op: Optional[cas.Expr] = None
     V_BS_op: Optional[cas.Expr] = None
+    KF: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    AF: cas.Expr = field(default_factory=lambda: cas.Integer(1))
+    EF: cas.Expr = field(default_factory=lambda: cas.Integer(1))
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("drain", "gate", "source", "bulk")
     has_nonlinear: ClassVar[bool] = True
     polarity: ClassVar[str] = ""  # overridden by concrete subclasses
-    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"thermal", "shot"})
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"thermal", "shot", "flicker"})
 
     def __post_init__(self) -> None:
         if self.polarity not in ("N", "P"):
@@ -96,6 +99,7 @@ class _MOSFET_4T(Component):
             "lam", "gamma", "phi", "m", "V_T",
             "C_gs", "C_gd",
             "V_GS_op", "V_DS_op", "V_BS_op",
+            "KF", "AF", "EF",
         ):
             setattr(self, attr, cas.sympify(getattr(self, attr)))
         self.include_noise = self._normalize_noise(self.include_noise)
@@ -266,8 +270,9 @@ class _MOSFET_4T(Component):
     # ------------------------------------------------------------------
     def noise_sources(self) -> list[NoiseSource]:
         out: list[NoiseSource] = []
+        g_m, g_ds, _ = self._small_signal_params()
+
         if "thermal" in self.include_noise:
-            g_m, _, _ = self._small_signal_params()
             out.append(
                 NoiseSource(
                     name=f"{self.name}.thermal",
@@ -285,6 +290,16 @@ class _MOSFET_4T(Component):
                     n_plus=self.drain,
                     n_minus=self.source,
                     psd=2 * q * self._I_off(),
+                )
+            )
+        if "flicker" in self.include_noise and self.KF != 0:
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.flicker",
+                    kind="flicker",
+                    n_plus=self.drain,
+                    n_minus=self.source,
+                    psd=self.KF * g_m ** self.AF / (freq ** self.EF),
                 )
             )
         return out

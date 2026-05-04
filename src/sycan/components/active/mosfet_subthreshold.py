@@ -24,7 +24,7 @@ from typing import ClassVar, Optional
 
 from sycan import cas as cas
 
-from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, q
+from sycan.mna import Component, NoiseSource, NoiseSpec, StampContext, q, freq
 
 # Thermal voltage kT/q at ~300 K, in volts.
 _DEFAULT_VT = cas.Rational(2585, 100000)
@@ -46,12 +46,15 @@ class _MOSFET_subthreshold(Component):
     m: cas.Expr = field(default_factory=lambda: _DEFAULT_M)
     V_T: cas.Expr = field(default_factory=lambda: _DEFAULT_VT)
     I_op: Optional[cas.Expr] = None
+    KF: cas.Expr = field(default_factory=lambda: cas.Integer(0))
+    AF: cas.Expr = field(default_factory=lambda: cas.Integer(1))
+    EF: cas.Expr = field(default_factory=lambda: cas.Integer(1))
     include_noise: NoiseSpec = field(default=None, kw_only=True)
 
     ports: ClassVar[tuple[str, ...]] = ("drain", "gate", "source")
     has_nonlinear: ClassVar[bool] = True
     polarity: ClassVar[str] = ""  # overridden by concrete subclasses
-    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"shot"})
+    SUPPORTED_NOISE: ClassVar[frozenset[str]] = frozenset({"shot", "flicker"})
 
     def __post_init__(self) -> None:
         if self.polarity not in ("N", "P"):
@@ -66,6 +69,9 @@ class _MOSFET_subthreshold(Component):
         self.V_TH = cas.sympify(self.V_TH)
         self.m = cas.sympify(self.m)
         self.V_T = cas.sympify(self.V_T)
+        self.KF = cas.sympify(self.KF)
+        self.AF = cas.sympify(self.AF)
+        self.EF = cas.sympify(self.EF)
         if self.I_op is None:
             self.I_op = cas.Symbol(f"I_op_{self.name}")
         else:
@@ -82,6 +88,16 @@ class _MOSFET_subthreshold(Component):
                     n_plus=self.drain,
                     n_minus=self.source,
                     psd=2 * q * self.I_op,
+                )
+            )
+        if "flicker" in self.include_noise and self.KF != 0:
+            out.append(
+                NoiseSource(
+                    name=f"{self.name}.flicker",
+                    kind="flicker",
+                    n_plus=self.drain,
+                    n_minus=self.source,
+                    psd=self.KF * self.I_op ** self.AF / (freq ** self.EF),
                 )
             )
         return out

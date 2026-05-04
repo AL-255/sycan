@@ -9,19 +9,23 @@ from sycan.components.basic import Resistor, VoltageSource
 def test_diode_shot_noise_into_load():
     """Diode anode at 0, cathode driven through ``R_L`` from a quiet bias.
 
-    The shot-noise current ``i_n`` flows between anode (gnd) and cathode;
-    the only path it sees is ``R_L`` to gnd, so ``V(cathode) = i_n·R_L``
-    and ``S_V_k = R_L²·2·q·I_op``.
+    The shot-noise current ``i_n`` flows between anode (gnd) and cathode.
+    The diode's small-signal conductance ``g_d`` appears in parallel with
+    the noise source, so ``V_k = i_n · (R_L || 1/g_d)``.
     """
-    R_L, I_op = cas.symbols("R_L I_op", positive=True)
+    R_L, I_op, IS = cas.symbols("R_L I_op IS", positive=True)
     c = Circuit()
     c.add(VoltageSource("V1", "vdd", "0", value=0, ac_value=0))
     c.add(Resistor("RL", "vdd", "k", R_L))
-    c.add(Diode("D1", "0", "k", cas.Symbol("IS", positive=True),
-                I_op=I_op, include_noise="shot"))
+    c.add(Diode("D1", "0", "k", IS, I_op=I_op, include_noise="shot"))
 
     total, contribs = solve_noise(c, "k", simplify=True)
-    expected = 2 * q * I_op * R_L ** 2
+    # g_d = IS * exp(V_D_op/(N*V_T)) / (N*V_T), N=1, V_T=517/20000
+    # V_k = i_n * R_L / (1 + g_d * R_L)
+    V_D_op = cas.Symbol("V_D_op_D1")
+    V_T = cas.Rational(517, 20000)
+    g_d = IS * cas.exp(V_D_op / V_T) / V_T
+    expected = 2 * q * I_op * R_L ** 2 / (1 + g_d * R_L) ** 2
 
     assert cas.simplify(total - expected) == 0
     assert set(contribs) == {"D1.shot"}
