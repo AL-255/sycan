@@ -44,8 +44,9 @@ for arg in "$@"; do
 done
 
 # Fast path: skip every uv/sphinx step and just serve the static
-# `docs/` tree. The editor lives at `/sedra/`; the REPL also works
-# (only the freshly-built wheel is missing — irrelevant for editor work).
+# `docs/` tree. The editor lives at `/sedra/`; the REPL works too once
+# the wheel under docs/repl/ is in sync with the current pyproject
+# version (handled below).
 #
 # SEDRA's TypeScript sources live at docs/sedra/src/{glyphs,editor}.ts
 # and compile to docs/sedra/{glyphs,editor}.js (the same paths
@@ -64,9 +65,30 @@ if [ "$SEDRA_ONLY" -eq 1 ]; then
             }
         fi
     fi
+
+    # Refresh the REPL wheel under docs/repl/ so it matches the current
+    # pyproject version. Without this, the REPL's micropip.install()
+    # call points at a stale (or missing) wheel filename whenever the
+    # version bumps. uv build is cached, so re-running on an unchanged
+    # source tree is fast. Skip silently if uv isn't installed — the
+    # editor still works on its own.
+    if [ "$REBUILD" -eq 1 ] && command -v uv >/dev/null 2>&1; then
+        version=$(awk -F'"' '/^version *=/{print $2; exit}' pyproject.toml)
+        target_wheel="sycan-${version}-py3-none-any.whl"
+        if [ ! -f "docs/repl/${target_wheel}" ]; then
+            echo "==> uv build (refreshing docs/repl/${target_wheel})"
+            uv build
+            rm -f docs/repl/sycan-*-py3-none-any.whl
+            cp "dist/${target_wheel}" docs/repl/
+            sed -i -E "s|sycan-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any\.whl|${target_wheel}|g" \
+                docs/repl/index.html
+        fi
+    fi
+
     echo "==> serving docs/ on http://localhost:${PORT}/"
     echo "    Editor: http://localhost:${PORT}/sedra/"
-    echo "    (--sedra: no uv build, no Sphinx build; tsc runs only when sources change)"
+    echo "    REPL:   http://localhost:${PORT}/repl/"
+    echo "    (--sedra: no Sphinx build; tsc and uv build run only when stale)"
     echo "    (Ctrl-C to stop)"
     exec python -m http.server --directory docs "$PORT"
 fi

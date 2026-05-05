@@ -456,6 +456,59 @@
     }
     #side-resizer { display: none; }
   }
+
+  /* Touch-friendly UI: enlarges tap targets on devices whose primary
+     pointer is a finger (phones, tablets, touch-only laptops). The
+     `pointer: coarse` query catches actual touch hardware regardless
+     of viewport width, so a tablet in landscape still gets fat
+     buttons even if the canvas-side layout looks desktop-ish. */
+  @media (pointer: coarse) {
+    #toolbar { gap: 6px; padding: 10px 10px; }
+    .group { gap: 4px; padding: 0 8px; }
+    .tool {
+      padding: 10px 12px; font-size: 14px; min-width: 48px; min-height: 44px;
+    }
+    .tool svg { transform: scale(1.15); }
+    .check {
+      padding: 10px 12px; font-size: 14px; min-height: 44px; gap: 8px;
+    }
+    .check input[type="checkbox"] { width: 20px; height: 20px; }
+    .picker {
+      padding: 10px 10px; font-size: 14px; min-width: 200px; min-height: 44px;
+    }
+    /* Inputs in the side panel — fatter to be reachable, and the
+       16px font-size suppresses iOS Safari's auto-zoom-on-focus. */
+    .pane label { font-size: 0.95rem; }
+    .pane input[type=text] {
+      padding: 10px 10px; font-size: 16px; min-height: 40px;
+    }
+    .netlist-actions { padding: 10px 10px; gap: 8px; }
+    .netlist-actions button {
+      padding: 12px 10px; font-size: 14px; min-height: 44px;
+    }
+    .calc-controls button {
+      padding: 10px 14px; font-size: 14px; min-height: 44px;
+    }
+    #netlist { font-size: 14px; padding: 10px 12px; }
+    /* Notification close X — 20px is too small for a fingertip. */
+    .notification { padding: 12px 44px 12px 14px; font-size: 0.95rem; }
+    .notification-close { width: 36px; height: 36px; font-size: 18px; }
+    #notifications-clear-all {
+      padding: 8px 14px; font-size: 0.85rem; min-height: 36px;
+    }
+    /* Coordinate readout: dim further on touch since it's purely
+       informational and competes with finger gestures. */
+    #coords { opacity: 0.6; font-size: 12px; }
+    /* The crosshair / move / grab cursors don't apply on touch, but
+       the "default" cursor still gets one. Override to none — there
+       is no pointer to display. */
+    #canvas-wrap { cursor: default; }
+  }
+  /* On a small touch viewport (phone), stack the side panel taller so
+     the netlist is actually readable, and let it scroll. */
+  @media (pointer: coarse) and (max-width: 800px) {
+    #side { height: 50vh; }
+  }
 </style>
 </head>
 <body>
@@ -573,6 +626,96 @@
         <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
       </svg>
       <span class="label">M</span>
+    </button>
+    <!-- TEMPLATE: PNP. Mirrors the NPN icon but with the emitter
+         arrow pointing INTO the base bar (PNP convention). -->
+    <button class="tool" data-tool="pnp" title="BJT — PNP (Q)">
+      <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
+        <circle cx="9" cy="0" r="8" fill="none" stroke="currentColor" stroke-width="1"/>
+        <path d="M3,-4 V4 M3,-2 L11,-7 M3,2 L11,7" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M5,1 L3,2 L5,4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      </svg>
+      <span class="label">Q</span>
+    </button>
+    <!-- TEMPLATE: PMOS. NMOS shape plus a small bubble between the
+         gate line and the channel to mark the inversion. -->
+    <button class="tool" data-tool="pmos" title="MOSFET — PMOS (M)">
+      <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
+        <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <circle cx="3.5" cy="0" r="1.2" fill="none" stroke="currentColor" stroke-width="1"/>
+      </svg>
+      <span class="label">M</span>
+    </button>
+  </div>
+  <!-- TEMPLATE GROUP: 4-terminal MOSFETs and the vacuum triode. The
+       4T variants reuse the standard MOSFET silhouette with an
+       extra bulk lead extending to the right. -->
+  <div class="group" data-group="active-extra">
+    <button class="tool" data-tool="nmos_4t" title="MOSFET — NMOS 4-T">
+      <svg width="22" height="20" viewBox="-2 -10 22 20" aria-hidden="true">
+        <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M5,0 H17" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M8,-1.2 L6,0 L8,1.2" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      </svg>
+      <span class="label">M4</span>
+    </button>
+    <button class="tool" data-tool="pmos_4t" title="MOSFET — PMOS 4-T">
+      <svg width="22" height="20" viewBox="-2 -10 22 20" aria-hidden="true">
+        <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <circle cx="3.5" cy="0" r="1.2" fill="none" stroke="currentColor" stroke-width="1"/>
+        <path d="M5,0 H17" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M14,-1.2 L16,0 L14,1.2" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      </svg>
+      <span class="label">M4</span>
+    </button>
+    <button class="tool" data-tool="triode" title="Triode">
+      <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
+        <circle cx="9" cy="0" r="8" fill="none" stroke="currentColor" stroke-width="1"/>
+        <path d="M5,-5 H13" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M5,0 H6.5 M7.5,0 H9 M10,0 H11.5 M12.5,0 H14" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <path d="M5,4 H8 M9,4 V6.5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      </svg>
+      <span class="label">T</span>
+    </button>
+  </div>
+  <!-- TEMPLATE GROUP: controlled sources. Diamond bodies follow the
+       SPICE convention; the inner glyph hints at output type
+       (V → +/−, I → arrow) and the SPICE prefix label disambiguates
+       what the controlling input is (E/G voltage-, F/H current-). -->
+  <div class="group" data-group="controlled">
+    <button class="tool" data-tool="vcvs" title="VCVS (E) — voltage-controlled V">
+      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
+        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M0,-6 L7,0 L0,6 L-7,0 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="-3" y="-1" font-size="6" fill="currentColor">+</text>
+        <text x="-3" y="5" font-size="7" fill="currentColor">−</text>
+      </svg>
+      <span class="label">E</span>
+    </button>
+    <button class="tool" data-tool="vccs" title="VCCS (G) — voltage-controlled I">
+      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
+        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M0,-6 L7,0 L0,6 L-7,0 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M-3.5,0 H3 M0.5,-2 L3.5,0 L0.5,2" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      </svg>
+      <span class="label">G</span>
+    </button>
+    <button class="tool" data-tool="cccs" title="CCCS (F) — current-controlled I">
+      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
+        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M0,-6 L7,0 L0,6 L-7,0 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M-3.5,0 H3 M0.5,-2 L3.5,0 L0.5,2" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      </svg>
+      <span class="label">F</span>
+    </button>
+    <button class="tool" data-tool="ccvs" title="CCVS (H) — current-controlled V">
+      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
+        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M0,-6 L7,0 L0,6 L-7,0 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <text x="-3" y="-1" font-size="6" fill="currentColor">+</text>
+        <text x="-3" y="5" font-size="7" fill="currentColor">−</text>
+      </svg>
+      <span class="label">H</span>
     </button>
   </div>
   <div class="group" data-group="connect-parts">

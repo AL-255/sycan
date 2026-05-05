@@ -2419,6 +2419,102 @@ wrap.addEventListener('wheel', (e) => {
     state.zoom = newZoom;
     render();
 }, { passive: false });
+// ------------------------------------------------------------------
+// Touch gestures (mobile / tablet)
+//
+// Single-finger touches deliberately fall through to the browser's
+// synthesized mouse events (mousedown / mousemove / mouseup), which the
+// existing handlers above already cover — so a single tap places a
+// part, single-finger drag draws a box-select / moves a selection, and
+// so on.
+//
+// Two-finger touches activate a pinch-zoom + pan gesture: we track the
+// two contact points' distance for zoom and their centroid for pan,
+// anchored so the world point under the centroid stays fixed (same
+// model as the wheel zoom anchor). preventDefault on multi-touch
+// keeps the browser from synthesising a phantom mouse event for the
+// second finger and from triggering its own pinch-zoom behaviour.
+// `touch-action: none` on #canvas-wrap also blocks browser-native
+// pan/zoom, which is required for the gesture to feel responsive
+// (otherwise the browser fights us for control).
+// ------------------------------------------------------------------
+let pinch = null;
+function touchCentroid(touches) {
+    const rect = wrap.getBoundingClientRect();
+    let x = 0, y = 0;
+    for (let i = 0; i < touches.length; i++) {
+        x += touches[i].clientX - rect.left;
+        y += touches[i].clientY - rect.top;
+    }
+    return { x: x / touches.length, y: y / touches.length };
+}
+function touchDistance(touches) {
+    // We only ever pinch with the first two contacts. Adding a third
+    // finger keeps the pinch alive against the original pair.
+    const t0 = touches[0], t1 = touches[1];
+    return Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+}
+wrap.addEventListener('touchstart', (e) => {
+    if (e.touches.length >= 2) {
+        // Cancel any in-flight single-finger interaction that the
+        // synthesized mouse events kicked off before the second finger
+        // landed. Without this the moveDraft / boxSelect / panning state
+        // would be left dangling because no mouseup is fired once we
+        // preventDefault below.
+        if (state.moveDraft)
+            cancelMove();
+        state.boxSelect = null;
+        if (panning) {
+            panning = false;
+            panStart = null;
+            wrap.classList.remove('panning');
+        }
+        const c = touchCentroid(e.touches);
+        pinch = {
+            startDist: touchDistance(e.touches),
+            startCx: c.x,
+            startCy: c.y,
+            startZoom: state.zoom,
+            startPanX: state.pan.x,
+            startPanY: state.pan.y,
+        };
+        e.preventDefault();
+    }
+}, { passive: false });
+wrap.addEventListener('touchmove', (e) => {
+    if (pinch && e.touches.length >= 2) {
+        const dist = touchDistance(e.touches);
+        if (pinch.startDist === 0)
+            return;
+        const rawZoom = pinch.startZoom * (dist / pinch.startDist);
+        const newZoom = Math.max(0.2, Math.min(4, rawZoom));
+        const c = touchCentroid(e.touches);
+        // Two contributions to the new pan:
+        //   1. zoom anchored at the gesture's *initial* centroid (keeps
+        //      the world point originally pinched fixed under that
+        //      screen position),
+        //   2. translation by how far the centroid has moved since
+        //      gesture start (two-finger pan).
+        const ratio = newZoom / pinch.startZoom;
+        state.pan.x = pinch.startCx - (pinch.startCx - pinch.startPanX) * ratio + (c.x - pinch.startCx);
+        state.pan.y = pinch.startCy - (pinch.startCy - pinch.startPanY) * ratio + (c.y - pinch.startCy);
+        state.zoom = newZoom;
+        render();
+        e.preventDefault();
+    }
+}, { passive: false });
+function endPinch(e) {
+    if (pinch && e.touches.length < 2) {
+        pinch = null;
+        // Don't try to "demote" the gesture into a single-finger drag —
+        // the browser won't synthesise a mousedown for the remaining
+        // contact (mouse-event synthesis only happens on the *first*
+        // touch of a new sequence). The user lifts and re-taps to start
+        // a new interaction.
+    }
+}
+wrap.addEventListener('touchend', endPinch);
+wrap.addEventListener('touchcancel', endPinch);
 function pickAt(world) {
     const [wx, wy] = world;
     // Parts: check rotated bbox, padded by HIT_PAD/zoom slack.
