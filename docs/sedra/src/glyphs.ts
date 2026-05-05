@@ -81,6 +81,13 @@ interface Part {
   rot: number;
   value?: string;
   ctrlSrc?: string;   // current-controlled sources only
+  // Free-form trailing-token string for devices whose SPICE syntax
+  // requires extra positional parameters after the model name (D, Q,
+  // M, triode). Whitespace-separated tokens are appended verbatim
+  // after `value` in the netlist line — empty / undefined falls back
+  // to a per-kind symbolic default keyed on the part id, so a freshly
+  // placed transistor still produces a sycan-parseable line.
+  params?: string;
 }
 
 interface Wire {
@@ -257,6 +264,7 @@ interface ClipboardData {
     rot: number;
     value?: string;
     ctrlSrc?: string;
+    params?: string;
   }>;
   wires: Array<{
     points: Point[];
@@ -397,15 +405,23 @@ const ELEM_TYPES: Record<ElemKind, ElemType> = {
   diode: {
     glyph: 'diode',   prefix: 'D',  label: 'Diode',
     ports: PORTS_2T('anode', 'cathode'),
-    netlist: (p, node) =>
-      `${p.id} ${node('anode')} ${node('cathode')} ${p.value || 'DMOD'}`,
+    // ``Dname anode cathode IS [N] [V_T]`` — we only need IS to satisfy
+    // the parser's _require(parts, 4); ``params`` carries the optional
+    // ``N`` and ``V_T`` if the user wants them.
+    netlist: (p, node) => {
+      const tail = paramsTail(p);
+      return `${p.id} ${node('anode')} ${node('cathode')} ${p.value || 'DMOD'}` +
+             (tail ? ` ${tail}` : '');
+    },
   },
   npn: {
     glyph: 'npn',     prefix: 'Q',  label: 'BJT (NPN)',
     ports: PORTS_3T('collector', 'base', 'emitter', -2 * STEP),
+    // ``Qname c b e <NPN|PNP> IS BF BR [V_T VAF]`` — the parser
+    // _require(parts, 8), so we MUST emit IS BF BR after the model.
     netlist: (p, node) =>
       `${p.id} ${node('collector')} ${node('base')} ${node('emitter')} ` +
-      `${p.value || 'NPN'}`,
+      `${p.value || 'NPN'} ${paramsTail(p)}`,
   },
   pnp: {
     glyph: 'pnp',     prefix: 'Q',  label: 'BJT (PNP)',
@@ -413,21 +429,23 @@ const ELEM_TYPES: Record<ElemKind, ElemType> = {
     ports: PORTS_3T('emitter', 'base', 'collector', -2 * STEP),
     netlist: (p, node) =>
       `${p.id} ${node('collector')} ${node('base')} ${node('emitter')} ` +
-      `${p.value || 'PNP'}`,
+      `${p.value || 'PNP'} ${paramsTail(p)}`,
   },
   nmos: {
     glyph: 'nmos',    prefix: 'M',  label: 'MOSFET (NMOS)',
     ports: PORTS_3T('drain', 'gate', 'source', -3 * STEP),
+    // ``Mname d g s <model> mu_n Cox W L V_TH [extras]`` — the parser
+    // _require(parts, 10), so ``params`` carries mu_n Cox W L V_TH.
     netlist: (p, node) =>
       `${p.id} ${node('drain')} ${node('gate')} ${node('source')} ` +
-      `${p.value || 'NMOS'}`,
+      `${p.value || 'NMOS_L1'} ${paramsTail(p)}`,
   },
   pmos: {
     glyph: 'pmos',    prefix: 'M',  label: 'MOSFET (PMOS)',
     ports: PORTS_3T('source', 'gate', 'drain', -3 * STEP),
     netlist: (p, node) =>
       `${p.id} ${node('drain')} ${node('gate')} ${node('source')} ` +
-      `${p.value || 'PMOS'}`,
+      `${p.value || 'PMOS_L1'} ${paramsTail(p)}`,
   },
   nmos_4t: {
     glyph: 'nmos_4t', prefix: 'M',  label: 'MOSFET 4-T (NMOS)',
@@ -437,9 +455,12 @@ const ELEM_TYPES: Record<ElemKind, ElemType> = {
       { name: 'bulk',   pos: [+STEP, 0] },
       { name: 'source', pos: [0, SPINE / 2] },
     ],
+    // 4T variant slots `bulk` between `source` and the model. The
+    // parser detects the 4T form by `parts[5]` ∈ {nmos_4t, pmos_4t},
+    // so we keep the model token capitalised consistently.
     netlist: (p, node) =>
       `${p.id} ${node('drain')} ${node('gate')} ${node('source')} ` +
-      `${node('bulk')} ${p.value || 'NMOS'}`,
+      `${node('bulk')} ${p.value || 'NMOS_4T'} ${paramsTail(p)}`,
   },
   pmos_4t: {
     glyph: 'pmos_4t', prefix: 'M',  label: 'MOSFET 4-T (PMOS)',
@@ -451,7 +472,7 @@ const ELEM_TYPES: Record<ElemKind, ElemType> = {
     ],
     netlist: (p, node) =>
       `${p.id} ${node('drain')} ${node('gate')} ${node('source')} ` +
-      `${node('bulk')} ${p.value || 'PMOS'}`,
+      `${node('bulk')} ${p.value || 'PMOS_4T'} ${paramsTail(p)}`,
   },
   triode: {
     glyph: 'triode',  prefix: 'X',  label: 'Triode',
@@ -460,9 +481,11 @@ const ELEM_TYPES: Record<ElemKind, ElemType> = {
       { name: 'grid',    pos: [-2 * STEP, 0] },
       { name: 'cathode', pos: [-STEP,     SPINE / 2] },
     ],
+    // ``Xname plate grid cathode TRIODE K mu [V_g_op V_p_op C_gk C_gp C_pk]``
+    // — _require(parts, 7). ``params`` carries K mu (and optional caps).
     netlist: (p, node) =>
       `${p.id} ${node('plate')} ${node('grid')} ${node('cathode')} ` +
-      `${p.value || 'TRIODE'}`,
+      `${p.value || 'TRIODE'} ${paramsTail(p)}`,
   },
 
   // ---- Controlled sources (basic/) ----
@@ -561,12 +584,79 @@ const DEFAULT_VALUES: Partial<Record<ElemKind, string>> = {
   diode:   'DMOD',
   npn:     'NPN',
   pnp:     'PNP',
-  nmos:    'NMOS',  pmos:    'PMOS',
-  nmos_4t: 'NMOS',  pmos_4t: 'PMOS',
+  // L1 long-channel and 4T are the two MOSFET variants that map
+  // cleanly onto the parser's positional layout (mu_n Cox W L V_TH
+  // [...]). The ``_3T`` and ``_subthreshold`` flavours need different
+  // params — users override the model name in the props pane.
+  nmos:    'NMOS_L1',  pmos:    'PMOS_L1',
+  nmos_4t: 'NMOS_4T',  pmos_4t: 'PMOS_4T',
   triode:  'TRIODE',
   vcvs: '1', vccs: '1', cccs: '1', ccvs: '1',
   gnd:  '',
 };
+
+// Minimum positional-parameter tail required for sycan's parser to
+// accept a freshly-placed device. Returned as a per-instance symbolic
+// placeholder string (e.g. ``Q1_IS Q1_BF Q1_BR``) so multiple of the
+// same device type don't accidentally share parameter symbols and so
+// the resulting symbolic solution names every parameter sensibly.
+//
+// Tokens are positional and follow the order documented in
+// ``src/sycan/spice.py``:
+//   D     → IS                    (parser optionally accepts N, V_T)
+//   Q     → IS BF BR              (V_T VAF optional)
+//   M     → mu_n Cox W L V_TH     (lam, V_GS_op, ... optional)
+//   M_4T  → mu_n Cox W L V_TH0    (lam gamma phi m V_T ... optional)
+//   X TRIODE → K mu               (op-point, capacitances optional)
+function defaultParams(p: Part): string {
+  const id = p.id || 'X';
+  switch (p.type) {
+    case 'diode':
+      return `${id}_IS`;
+    case 'npn':
+    case 'pnp':
+      return `${id}_IS ${id}_BF ${id}_BR`;
+    case 'nmos':
+    case 'pmos':
+    case 'nmos_4t':
+    case 'pmos_4t':
+      return `${id}_mu ${id}_Cox ${id}_W ${id}_L ${id}_VTH`;
+    case 'triode':
+      return `${id}_K ${id}_mu`;
+    default:
+      return '';
+  }
+}
+
+// Resolve the trailing-token string for a part: user-edited params if
+// non-empty, otherwise the symbolic default. Trimmed to drop the
+// extra space the kind's netlist template inserts when params is
+// empty (so two-terminal parts don't grow a stray trailing space when
+// they accidentally inherit this helper).
+function paramsTail(p: Part): string {
+  const raw = (p.params ?? '').trim();
+  if (raw) return raw;
+  return defaultParams(p);
+}
+
+// True for kinds whose SPICE syntax requires positional parameters
+// after the model name. The props pane uses this to decide whether
+// to expose the "Params" input row alongside "Model".
+function needsParamsField(kind: ElemKind): boolean {
+  switch (kind) {
+    case 'diode':
+    case 'npn':
+    case 'pnp':
+    case 'nmos':
+    case 'pmos':
+    case 'nmos_4t':
+    case 'pmos_4t':
+    case 'triode':
+      return true;
+    default:
+      return false;
+  }
+}
 
 
 // ------------------------------------------------------------------

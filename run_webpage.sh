@@ -21,6 +21,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Portable in-place sed.
+#
+# GNU sed (Linux) takes `-i` with no argument; BSD sed (macOS) takes
+# `-i <ext>` and creates `<file><ext>` as a backup. The form
+# `-i.bak` (extension attached to the flag, no space) is accepted by
+# both, so we use that and clean up the .bak files afterwards. The
+# `-E` flag for extended regex is also portable across modern GNU
+# and BSD sed.
+sed_inplace() {
+    local script="$1"; shift
+    sed -i.bak -E "$script" "$@"
+    for f in "$@"; do
+        rm -f "${f}.bak"
+    done
+}
+
 PORT=8000
 REBUILD=1
 SEDRA_ONLY=0
@@ -80,8 +96,11 @@ if [ "$SEDRA_ONLY" -eq 1 ]; then
             uv build
             rm -f docs/repl/sycan-*-py3-none-any.whl
             cp "dist/${target_wheel}" docs/repl/
-            sed -i -E "s|sycan-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any\.whl|${target_wheel}|g" \
-                docs/repl/index.html
+            sed_inplace \
+                "s|sycan-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any\.whl|${target_wheel}|g" \
+                docs/repl/index.html \
+                docs/sedra/src/editor.ts \
+                docs/sedra/editor.js
         fi
     fi
 
@@ -138,8 +157,10 @@ if [ "$REBUILD" -eq 1 ]; then
     rm -f _site/repl/sycan-*-py3-none-any.whl
     cp dist/sycan-*-py3-none-any.whl _site/repl/
     wheel=$(basename _site/repl/sycan-*-py3-none-any.whl)
-    sed -i -E "s|sycan-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any\.whl|${wheel}|g" \
-        _site/repl/index.html
+    sed_inplace \
+        "s|sycan-[0-9]+\.[0-9]+\.[0-9]+-py3-none-any\.whl|${wheel}|g" \
+        _site/repl/index.html \
+        _site/sedra/editor.js
     echo "    -> $wheel"
 
     echo "==> sphinx-build sphinx -> _site/"

@@ -447,6 +447,91 @@
   .hit { fill: transparent; pointer-events: stroke; stroke: transparent; stroke-width: 14; }
   .hit-rect { fill: transparent; pointer-events: all; }
 
+  /* MNA matrix viewer pop-up. A floating, resizable panel anchored
+     bottom-right by default. The header carries the title and a close
+     button; the body holds an inline SVG of the matrix. CSS `resize`
+     gives the user-grabbable corner. */
+  #matrix-viewer {
+    position: fixed;
+    right: 24px; bottom: 24px;
+    width: 380px; height: 380px;
+    min-width: 200px; min-height: 200px;
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+    display: flex; flex-direction: column;
+    overflow: hidden; resize: both;
+    z-index: 900;
+  }
+  #matrix-viewer.hidden { display: none; }
+  #matrix-viewer-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line);
+    background: var(--btn-bg);
+    cursor: move; user-select: none;
+    flex: none;
+  }
+  #matrix-viewer-title {
+    flex: 1; font-size: 0.78rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #matrix-viewer-header button {
+    background: var(--btn-bg); color: var(--btn-fg);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 2px 6px; font-size: 11px; cursor: pointer;
+    flex: none;
+  }
+  #matrix-viewer-header button:hover { background: var(--hover); }
+  #matrix-viewer-status {
+    padding: 4px 10px; font-size: 0.72rem; color: var(--muted);
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: none; min-height: 1.45em;
+  }
+  #matrix-viewer-body {
+    flex: 1; min-height: 0; min-width: 0;
+    background: var(--bg);
+    overflow: hidden;
+    position: relative;
+  }
+  #matrix-viewer-svg {
+    width: 100%; height: 100%; display: block;
+  }
+  /* Cell glyphs: a populated cell is a small filled circle whose
+     fill is `currentColor`; the hover/co-component highlight just
+     swaps the colour (no geometry change) so the dot doesn't jump. */
+  .matrix-dot { fill: var(--stroke); pointer-events: none; }
+  .matrix-cell-hit {
+    fill: transparent; pointer-events: all; cursor: pointer;
+  }
+  .matrix-dot.matrix-dot-related { fill: var(--highlight); }
+  .matrix-dot.matrix-dot-hover    { fill: var(--select); }
+  .matrix-grid-line {
+    stroke: var(--grid); stroke-width: 0.5; pointer-events: none;
+  }
+  .matrix-axis-text {
+    fill: var(--muted); font-size: 9px;
+    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    pointer-events: none; user-select: none;
+  }
+  .matrix-axis-text.matrix-axis-active { fill: var(--select); font-weight: 600; }
+  .matrix-divider {
+    stroke: var(--line); stroke-width: 1; pointer-events: none;
+    stroke-dasharray: 3 2;
+  }
+  /* Schematic-side overlay drawn while the user hovers a matrix cell.
+     Blue dashed wash similar to the calc-node treatment but a touch
+     punchier so the link reads at a glance. */
+  .matrix-part-highlight {
+    fill: none; stroke: var(--select); stroke-width: 3;
+    stroke-dasharray: 5 3; opacity: 0.9;
+    pointer-events: none;
+  }
+
   /* Responsive */
   @media (max-width: 800px) {
     main { flex-direction: column; }
@@ -797,6 +882,25 @@
     <button class="tool" id="btn-redo" title="Redo (Ctrl+Shift+Z)"><span class="label">Redo</span></button>
     <button class="tool" id="btn-clear" title="Clear all"><span class="label">Clear</span></button>
     <button class="tool" id="btn-fit" title="Fit / center view"><span class="label">Fit</span></button>
+    <button class="tool" id="btn-matrix"
+            title="Open MNA matrix viewer — dots show populated cells; hover a dot to highlight the originating component on the schematic and every other cell from that component">
+      <span class="label">Matrix</span>
+    </button>
+  </div>
+</div>
+
+<!-- MNA matrix viewer pop-up. Hidden until the user clicks the
+     Matrix toolbar button. Resizable via the CSS `resize: both`
+     handle at the bottom-right corner; draggable via the header. -->
+<div id="matrix-viewer" class="hidden" aria-hidden="true">
+  <div id="matrix-viewer-header">
+    <span id="matrix-viewer-title">MNA matrix</span>
+    <button id="matrix-viewer-refresh" title="Recompute from current schematic">Refresh</button>
+    <button id="matrix-viewer-close" title="Close">×</button>
+  </div>
+  <div id="matrix-viewer-status">Idle.</div>
+  <div id="matrix-viewer-body">
+    <svg id="matrix-viewer-svg" xmlns="http://www.w3.org/2000/svg"></svg>
   </div>
 </div>
 

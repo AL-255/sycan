@@ -519,6 +519,12 @@ function render(): void {
   // hits that share the same user label).
   drawNetHighlight();
 
+  // Layer 2.7: Matrix-viewer cross-link. While the user hovers a dot
+  // in the MNA matrix viewer, every part whose stamp() touched that
+  // cell gets a dashed blue outline so the schematic-side origin is
+  // obvious at a glance.
+  drawMatrixPartHighlight();
+
   // Layer 3: node dots at junctions where >=3 endpoints meet
   drawJunctions();
 
@@ -2902,11 +2908,36 @@ function refreshProps(): void {
     refreshProps();
   });
   if (p.type !== 'gnd') {
-    mk('Value', p.value || '', (v) => {
+    // For devices that take a model name + a positional parameter
+    // tail (D / Q / M / triode), the field is labelled "Model" so the
+    // accompanying "Params" field reads correctly. Plain passives
+    // and sources keep the historical "Value" label.
+    const valueLabel = needsParamsField(p.type) ? 'Model' : 'Value';
+    mk(valueLabel, p.value || '', (v) => {
       p.value = v;
       pushHistory();
       render();
     });
+  }
+  if (needsParamsField(p.type)) {
+    // Show the user the *resolved* tail (defaultParams when blank) so
+    // they can see what's actually emitted. If the user clears the
+    // field we wipe params back to undefined and fall through to the
+    // per-instance symbolic default.
+    const placeholder = defaultParams(p);
+    const cur = (p.params ?? '').trim();
+    mk('Params', cur, (v) => {
+      const next = v.trim();
+      p.params = next ? next : undefined;
+      pushHistory();
+      render();
+    });
+    if (!cur) {
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color: var(--muted); font-size: 0.72rem; margin: -4px 0 6px 68px;';
+      hint.textContent = `default: ${placeholder}`;
+      propPane.appendChild(hint);
+    }
   }
   // Current-controlled sources need a controlling-V-source name.
   if (p.type === 'cccs' || p.type === 'ccvs') {
@@ -3776,7 +3807,7 @@ function finalizeCopyAnchor(anchor: Point): void {
   clipboard = {
     parts: selParts.map(p => ({
       type: p.type, dx: p.x - anchor[0], dy: p.y - anchor[1],
-      rot: p.rot, value: p.value, ctrlSrc: p.ctrlSrc,
+      rot: p.rot, value: p.value, ctrlSrc: p.ctrlSrc, params: p.params,
     })),
     wires: selWires.map(w => ({
       points: w.points.map(([x, y]) => [x - anchor[0], y - anchor[1]] as Point),
@@ -3832,6 +3863,7 @@ function pasteClipboard(): void {
     const fresh = state.parts[state.parts.length - 1];
     if (c.value && c.type !== 'gnd') fresh.value = c.value;
     if (c.ctrlSrc) fresh.ctrlSrc = c.ctrlSrc;
+    if (c.params) fresh.params = c.params;
     newIds.add(fresh.id);
   }
   for (const c of clipboard.wires || []) {
@@ -4716,7 +4748,7 @@ function ensureSycan(onStatus: (msg: string) => void = () => {}): Promise<any> {
     onStatus('Installing sycan…');
     await py.runPythonAsync(`
 import micropip
-await micropip.install('../repl/sycan-0.1.6-py3-none-any.whl')
+await micropip.install('../repl/sycan-0.1.7-py3-none-any.whl')
 import sycan, sympy
 print('sycan ready (sympy', sympy.__version__, ')')
 `);
@@ -4875,6 +4907,571 @@ window.addEventListener('resize', render);
       document.addEventListener('mouseup', onUp);
       me.preventDefault();
     });
+  }
+}
+
+// ------------------------------------------------------------------
+// MNA matrix viewer
+//
+// A floating, resizable panel rendered as an SVG dot-matrix view of
+// the symbolic MNA matrix returned by sycan. Each populated cell is
+// drawn as a small filled circle; empty cells are transparent. The
+// dot grid auto-scales to the panel's body so the matrix stays
+// readable as the user resizes the window.
+//
+// Cross-linking: every cell carries the set of component IDs whose
+// stamp() touched it. Hovering a cell highlights (a) the originating
+// part(s) on the schematic and (b) every other matrix cell those
+// parts contributed to.
+// ------------------------------------------------------------------
+
+interface MatrixCellData {
+  /** zero-based row index (0..n+m-1) */
+  row: number;
+  /** zero-based column index (0..n+m for [A|b]) */
+  col: number;
+  /** part IDs whose stamp() landed in this cell */
+  parts: string[];
+}
+
+interface MatrixData {
+  /** size of A (n + m): rows == cols */
+  size: number;
+  /** A's row labels (V(node) for first n, then I(comp) for aux owners) */
+  labels: string[];
+  /** populated cells (A[row,col] != 0 or b[row] != 0; b sits in col == size) */
+  cells: MatrixCellData[];
+  /** map: part id → indices into `cells` (used for the related-cell highlight) */
+  partToCells: Record<string, number[]>;
+  /** number of non-ground node rows; the n/n+m split divider sits here */
+  nNodes: number;
+  /** netlist text used to compute the matrix; for the status bar */
+  netlistDigest: string;
+}
+
+// Set by the matrix-viewer's hover handler; read by render() →
+// drawMatrixPartHighlight() to paint the schematic-side outline.
+let matrixHighlightPartIds: Set<string> = new Set();
+
+function drawMatrixPartHighlight(): void {
+  if (matrixHighlightPartIds.size === 0) return;
+  for (const p of state.parts) {
+    if (!matrixHighlightPartIds.has(p.id)) continue;
+    const [x0, y0, x1, y1] = partBBox(p);
+    const pad = 2;
+    el('rect', {
+      x: x0 - pad, y: y0 - pad,
+      width: (x1 - x0) + 2 * pad,
+      height: (y1 - y0) + 2 * pad,
+      class: 'matrix-part-highlight',
+      rx: 3, ry: 3,
+    }, svg);
+  }
+}
+
+let _matrixData: MatrixData | null = null;
+let _matrixDataPromise: Promise<MatrixData> | null = null;
+
+// Run sycan in Pyodide and return per-component stamp coverage.
+//
+// Implementation: build the full MNA system once for shape and labels,
+// then for each component re-stamp it onto a fresh zero matrix and
+// snapshot which (i,j) entries became non-zero. This is the simplest
+// reliable per-component attribution that doesn't require monkey-
+// patching sympy's matrix; it costs O(N_components × stamp_time),
+// which is small for editor-sized circuits.
+async function computeMatrixData(py: any, netlistText: string): Promise<MatrixData> {
+  py.globals.set('SEDRA_NETLIST', netlistText);
+  const json: string = await py.runPythonAsync(`
+import json
+from sycan import parse
+from sycan.mna import build_mna, StampContext
+import sycan.cas as cas
+
+_result = None
+try:
+    circuit = parse(SEDRA_NETLIST)
+    A_full, x, b_full = build_mna(circuit, mode='dc')
+    size = A_full.shape[0]
+    nodes = list(circuit.nodes)
+    n = len(nodes)
+    flat = list(circuit.flat_components())
+    aux_owners = [c for c in flat if c.aux_count('dc') > 0]
+    node_rows = {name: idx - 1 for name, idx in circuit._nodes.items()}
+    aux_rows = {c.name: n + k for k, c in enumerate(aux_owners)}
+    labels = list(nodes) + [c.name for c in aux_owners]
+
+    # Per-component stamp coverage. We re-run each component's stamp()
+    # on a fresh zero (A,b) and snapshot which cells went non-zero.
+    cells = {}    # (row, col) -> list[component_id]
+    part_to_cells = {}
+    for c in flat:
+        A = cas.zeros(size, size)
+        b = cas.zeros(size, 1)
+        ctx = StampContext(
+            A=A, b=b, node_rows=node_rows, aux_rows=aux_rows, mode='dc',
+        )
+        try:
+            c.stamp(ctx)
+        except Exception:
+            continue
+        comp_cells = []
+        for i in range(size):
+            for j in range(size):
+                if A[i, j] != 0:
+                    key = (i, j)
+                    cells.setdefault(key, []).append(c.name)
+                    comp_cells.append(key)
+            if b[i] != 0:
+                key = (i, size)  # b lives in the column past A
+                cells.setdefault(key, []).append(c.name)
+                comp_cells.append(key)
+        if comp_cells:
+            part_to_cells.setdefault(c.name, []).extend(comp_cells)
+
+    # Pack as a list of cells with stable ordering (row-major).
+    cell_list = []
+    for (i, j) in sorted(cells.keys()):
+        cell_list.append({'row': i, 'col': j, 'parts': cells[(i, j)]})
+    # Re-index part_to_cells to point into cell_list rather than (i,j) tuples.
+    cell_index = {(c['row'], c['col']): k for k, c in enumerate(cell_list)}
+    part_to_cell_idx = {}
+    for cname, keys in part_to_cells.items():
+        seen = set()
+        out = []
+        for key in keys:
+            if key in cell_index:
+                k = cell_index[key]
+                if k not in seen:
+                    seen.add(k)
+                    out.append(k)
+        part_to_cell_idx[cname] = out
+
+    _result = {
+        'size': size,
+        'labels': labels,
+        'cells': cell_list,
+        'partToCells': part_to_cell_idx,
+        'nNodes': n,
+    }
+except Exception as e:
+    _result = {'error': f'{type(e).__name__}: {e}'}
+json.dumps(_result)
+`);
+  const parsed = JSON.parse(json);
+  if (parsed.error) {
+    throw new Error(parsed.error);
+  }
+  parsed.netlistDigest = netlistText;
+  return parsed as MatrixData;
+}
+
+interface MatrixViewerEls {
+  panel: HTMLElement;
+  body: HTMLElement;
+  svg: SVGSVGElement;
+  status: HTMLElement;
+  refreshBtn: HTMLElement;
+  closeBtn: HTMLElement;
+  header: HTMLElement;
+  title: HTMLElement;
+}
+
+let _matrixEls: MatrixViewerEls | null = null;
+
+function getMatrixEls(): MatrixViewerEls | null {
+  if (_matrixEls) return _matrixEls;
+  const panel = document.getElementById('matrix-viewer');
+  const body = document.getElementById('matrix-viewer-body');
+  const svgEl = document.getElementById('matrix-viewer-svg') as unknown as SVGSVGElement;
+  const status = document.getElementById('matrix-viewer-status');
+  const refreshBtn = document.getElementById('matrix-viewer-refresh');
+  const closeBtn = document.getElementById('matrix-viewer-close');
+  const header = document.getElementById('matrix-viewer-header');
+  const title = document.getElementById('matrix-viewer-title');
+  if (!panel || !body || !svgEl || !status || !refreshBtn ||
+      !closeBtn || !header || !title) return null;
+  _matrixEls = { panel, body, svg: svgEl, status, refreshBtn, closeBtn, header, title };
+  return _matrixEls;
+}
+
+function setMatrixStatus(msg: string): void {
+  const els = getMatrixEls();
+  if (els) els.status.textContent = msg;
+}
+
+// Layout the dot matrix into the SVG. Pure-DOM rendering; no React.
+// `data` is produced by computeMatrixData(); `viewerSize` is the
+// width/height of the panel body (we receive it explicitly so the
+// render path stays decoupled from the DOM-measurement timing).
+function renderMatrixDots(data: MatrixData, viewerSize: { w: number; h: number }): void {
+  const els = getMatrixEls();
+  if (!els) return;
+  const svgEl = els.svg;
+  while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+
+  const cols = data.size + 1;        // +1 for the b column
+  const rows = data.size;
+  if (rows === 0 || cols === 0) {
+    svgEl.setAttribute('viewBox', '0 0 1 1');
+    return;
+  }
+
+  // Layout constants. The label gutter on the left/top is sized in
+  // viewBox units so it scales with the rest of the matrix; we pick
+  // it as a fraction of the per-cell pitch so the labels stay legible
+  // even when the panel shrinks.
+  const labelGutter = 38;            // px reserved for row/col labels
+  const padding = 6;
+  const innerW = Math.max(1, viewerSize.w - labelGutter - 2 * padding);
+  const innerH = Math.max(1, viewerSize.h - labelGutter - 2 * padding);
+  const cellPitch = Math.min(innerW / cols, innerH / rows);
+  const dotR = Math.max(1.0, cellPitch * 0.32);
+
+  const gridW = cellPitch * cols;
+  const gridH = cellPitch * rows;
+  const x0 = padding + labelGutter;
+  const y0 = padding + labelGutter;
+
+  // viewBox spans the whole panel body so dots, labels, and dividers
+  // align with the visible window pixels.
+  svgEl.setAttribute('viewBox',
+    `0 0 ${viewerSize.w} ${viewerSize.h}`);
+
+  // Faint grid (rows + cols).
+  const gridLayer = el('g', { id: 'matrix-grid' }, svgEl);
+  for (let i = 0; i <= rows; i++) {
+    const y = y0 + i * cellPitch;
+    el('line', {
+      x1: x0, y1: y, x2: x0 + gridW, y2: y,
+      class: 'matrix-grid-line',
+    }, gridLayer);
+  }
+  for (let j = 0; j <= cols; j++) {
+    const x = x0 + j * cellPitch;
+    el('line', {
+      x1: x, y1: y0, x2: x, y2: y0 + gridH,
+      class: 'matrix-grid-line',
+    }, gridLayer);
+  }
+
+  // Divider between A's node block and aux block (rows + cols).
+  if (data.nNodes > 0 && data.nNodes < data.size) {
+    const xMid = x0 + data.nNodes * cellPitch;
+    const yMid = y0 + data.nNodes * cellPitch;
+    el('line', {
+      x1: x0, y1: yMid, x2: x0 + gridW, y2: yMid,
+      class: 'matrix-divider',
+    }, gridLayer);
+    el('line', {
+      x1: xMid, y1: y0, x2: xMid, y2: y0 + gridH,
+      class: 'matrix-divider',
+    }, gridLayer);
+  }
+  // Divider between A and the b column.
+  {
+    const xRhs = x0 + data.size * cellPitch;
+    el('line', {
+      x1: xRhs, y1: y0, x2: xRhs, y2: y0 + gridH,
+      class: 'matrix-divider',
+    }, gridLayer);
+  }
+
+  // Axis labels. Rows: V(node)/I(comp). Cols: same labels then "b".
+  // Drop the labels when the cell pitch is too small to host the text
+  // without overlap; we compare against a font-size cushion.
+  const labelLayer = el('g', { id: 'matrix-labels' }, svgEl);
+  const showLabels = cellPitch >= 9;
+  if (showLabels) {
+    for (let i = 0; i < rows; i++) {
+      const y = y0 + (i + 0.5) * cellPitch + 3;
+      el('text', {
+        x: x0 - 3, y,
+        class: 'matrix-axis-text',
+        'text-anchor': 'end',
+        'data-row-label': String(i),
+      }, labelLayer).textContent = data.labels[i] ?? '?';
+    }
+    for (let j = 0; j < cols; j++) {
+      const x = x0 + (j + 0.5) * cellPitch;
+      const lab = j < data.size ? (data.labels[j] ?? '?') : 'b';
+      const yLab = y0 - 4;
+      const t = el('text', {
+        x, y: yLab,
+        class: 'matrix-axis-text',
+        'text-anchor': 'start',
+        transform: `rotate(-60 ${x} ${yLab})`,
+        'data-col-label': String(j),
+      }, labelLayer);
+      t.textContent = lab;
+    }
+  }
+
+  // Dots layer (one circle per populated cell) plus an over-cell hit
+  // rect so hover events stay reliable even at tiny dotR.
+  const dotsLayer = el('g', { id: 'matrix-dots' }, svgEl);
+  const hitsLayer = el('g', { id: 'matrix-hits' }, svgEl);
+
+  for (let k = 0; k < data.cells.length; k++) {
+    const cell = data.cells[k];
+    const cx = x0 + (cell.col + 0.5) * cellPitch;
+    const cy = y0 + (cell.row + 0.5) * cellPitch;
+    el('circle', {
+      cx, cy, r: dotR,
+      class: 'matrix-dot',
+      'data-cell-idx': String(k),
+      'data-row': String(cell.row),
+      'data-col': String(cell.col),
+    }, dotsLayer);
+  }
+  // Hit rectangles cover *every* row × col cell (whether populated or
+  // not) so the user can hover an empty cell to see "this row is
+  // V(out), this col is I(V1)" via the axis-label highlight.
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < cols; j++) {
+      el('rect', {
+        x: x0 + j * cellPitch, y: y0 + i * cellPitch,
+        width: cellPitch, height: cellPitch,
+        class: 'matrix-cell-hit',
+        'data-row': String(i),
+        'data-col': String(j),
+      }, hitsLayer);
+    }
+  }
+}
+
+// Apply hover state across both the matrix viewer (highlight peer
+// cells, axis labels) and the schematic (outline originating parts).
+// Called from the cell hit-rect mouseenter/mouseleave handlers.
+function applyMatrixCellHover(data: MatrixData,
+                              row: number, col: number,
+                              entering: boolean): void {
+  const els = getMatrixEls();
+  if (!els) return;
+  const svgEl = els.svg;
+
+  // Reset transient classes.
+  svgEl.querySelectorAll('.matrix-dot-hover, .matrix-dot-related').forEach(n => {
+    n.classList.remove('matrix-dot-hover');
+    n.classList.remove('matrix-dot-related');
+  });
+  svgEl.querySelectorAll('.matrix-axis-active').forEach(n => {
+    n.classList.remove('matrix-axis-active');
+  });
+  matrixHighlightPartIds = new Set();
+
+  if (!entering) {
+    setMatrixStatus(`${data.size} × ${data.size + 1} (incl. b)`);
+    render();
+    return;
+  }
+
+  // Find the cell record under the cursor (if any).
+  let cellIdx = -1;
+  for (let k = 0; k < data.cells.length; k++) {
+    if (data.cells[k].row === row && data.cells[k].col === col) {
+      cellIdx = k;
+      break;
+    }
+  }
+
+  const rowLabel = data.labels[row] ?? '?';
+  const colLabel = col < data.size ? (data.labels[col] ?? '?') : 'b';
+
+  // Activate the row/col axis labels.
+  const rl = svgEl.querySelector(`text[data-row-label="${row}"]`);
+  if (rl) rl.classList.add('matrix-axis-active');
+  const cl = svgEl.querySelector(`text[data-col-label="${col}"]`);
+  if (cl) cl.classList.add('matrix-axis-active');
+
+  if (cellIdx >= 0) {
+    const cell = data.cells[cellIdx];
+    // Hovered dot itself.
+    const hovered = svgEl.querySelector(`circle[data-cell-idx="${cellIdx}"]`);
+    if (hovered) hovered.classList.add('matrix-dot-hover');
+    // Sibling dots from the same component(s).
+    const peers = new Set<number>();
+    for (const partId of cell.parts) {
+      const list = data.partToCells[partId];
+      if (!list) continue;
+      for (const k of list) peers.add(k);
+    }
+    peers.delete(cellIdx);
+    for (const k of peers) {
+      const c = svgEl.querySelector(`circle[data-cell-idx="${k}"]`);
+      if (c) c.classList.add('matrix-dot-related');
+    }
+    matrixHighlightPartIds = new Set(cell.parts);
+    const partList = cell.parts.join(', ');
+    setMatrixStatus(
+      `(${rowLabel}, ${colLabel})  ←  ${partList}`
+    );
+  } else {
+    setMatrixStatus(
+      `(${rowLabel}, ${colLabel})  ←  (empty)`
+    );
+  }
+
+  render();
+}
+
+// Wire the SVG hit rects to the hover machinery. Called once per
+// renderMatrixDots() pass — listeners are attached afresh on each
+// rebuild because the DOM nodes are recreated.
+function wireMatrixHover(data: MatrixData): void {
+  const els = getMatrixEls();
+  if (!els) return;
+  const svgEl = els.svg;
+  const hits = svgEl.querySelectorAll('.matrix-cell-hit');
+  hits.forEach(h => {
+    const row = Number((h as Element).getAttribute('data-row'));
+    const col = Number((h as Element).getAttribute('data-col'));
+    h.addEventListener('mouseenter', () => applyMatrixCellHover(data, row, col, true));
+    h.addEventListener('mouseleave', () => applyMatrixCellHover(data, row, col, false));
+  });
+}
+
+function rerenderMatrixViewer(): void {
+  if (!_matrixData) return;
+  const els = getMatrixEls();
+  if (!els) return;
+  const rect = els.body.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width));
+  const h = Math.max(1, Math.floor(rect.height));
+  renderMatrixDots(_matrixData, { w, h });
+  wireMatrixHover(_matrixData);
+}
+
+// Wrap computeMatrixData so concurrent button mashes don't spawn
+// duplicate Pyodide calls. The promise resolves with the freshest
+// data; if a second refresh fires while one is in flight, the second
+// request reuses the in-flight promise.
+async function refreshMatrixData(): Promise<void> {
+  const els = getMatrixEls();
+  if (!els) return;
+  const nl = buildNetlist();
+  if (_matrixDataPromise) {
+    // Already running — let the in-flight call finish first.
+    return;
+  }
+  setMatrixStatus('Loading sycan…');
+  _matrixDataPromise = (async () => {
+    const py = await ensureSycan(setMatrixStatus);
+    setMatrixStatus('Building matrix…');
+    return await computeMatrixData(py, nl.text);
+  })();
+  try {
+    const data = await _matrixDataPromise;
+    _matrixData = data;
+    setMatrixStatus(
+      `${data.size} × ${data.size + 1} (incl. b)`
+    );
+    rerenderMatrixViewer();
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setMatrixStatus(`Error: ${msg}`);
+  } finally {
+    _matrixDataPromise = null;
+  }
+}
+
+function openMatrixViewer(): void {
+  const els = getMatrixEls();
+  if (!els) return;
+  els.panel.classList.remove('hidden');
+  els.panel.setAttribute('aria-hidden', 'false');
+  refreshMatrixData();
+}
+
+function closeMatrixViewer(): void {
+  const els = getMatrixEls();
+  if (!els) return;
+  els.panel.classList.add('hidden');
+  els.panel.setAttribute('aria-hidden', 'true');
+  matrixHighlightPartIds = new Set();
+  render();
+}
+
+// Toolbar / panel button wiring. Header drag uses the same pattern as
+// the side-panel resizer above (mousedown → document mousemove/up).
+{
+  const btn = document.getElementById('btn-matrix');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      const els = getMatrixEls();
+      if (!els) return;
+      if (els.panel.classList.contains('hidden')) openMatrixViewer();
+      else closeMatrixViewer();
+    });
+  }
+  const els = getMatrixEls();
+  if (els) {
+    els.closeBtn.addEventListener('click', closeMatrixViewer);
+    els.refreshBtn.addEventListener('click', () => {
+      // Force a recompute even if the netlist hasn't changed — useful
+      // after toggling Drag/Parity options or when the user just
+      // wants to re-run sycan.
+      _matrixData = null;
+      refreshMatrixData();
+    });
+
+    // Drag the panel by its header. We pin via top/left so the panel
+    // can leave its bottom-right anchor; CSS `resize: both` keeps the
+    // size-handle in the bottom-right corner regardless.
+    let dragging = false;
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    const onMove = (e: MouseEvent) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const w = els.panel.offsetWidth;
+      const h = els.panel.offsetHeight;
+      let nx = startLeft + dx;
+      let ny = startTop + dy;
+      // Clamp to viewport so the header is always grabbable.
+      nx = Math.max(8, Math.min(window.innerWidth - 40, nx));
+      ny = Math.max(8, Math.min(window.innerHeight - 30, ny));
+      els.panel.style.left = `${nx}px`;
+      els.panel.style.top = `${ny}px`;
+      els.panel.style.right = 'auto';
+      els.panel.style.bottom = 'auto';
+      // Keep the matrix scaled to the panel during drag (size doesn't
+      // change but a rerender is cheap).
+      e.preventDefault();
+    };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    els.header.addEventListener('mousedown', (e: Event) => {
+      const me = e as MouseEvent;
+      // Don't drag-start on header-button clicks.
+      if (me.target instanceof Element &&
+          (me.target.tagName === 'BUTTON' ||
+           me.target.closest('button'))) return;
+      if (me.button !== 0) return;
+      const rect = els.panel.getBoundingClientRect();
+      startX = me.clientX; startY = me.clientY;
+      startLeft = rect.left; startTop = rect.top;
+      dragging = true;
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      me.preventDefault();
+    });
+
+    // Watch the panel's body for size changes (CSS `resize: both`
+    // doesn't fire any DOM event by itself) and re-layout the dot
+    // grid each time. ResizeObserver fires synchronously with layout
+    // so the grid always tracks the user's drag.
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        if (els.panel.classList.contains('hidden')) return;
+        rerenderMatrixViewer();
+      });
+      ro.observe(els.body);
+    }
   }
 }
 
