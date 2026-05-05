@@ -3,8 +3,8 @@
    viewBox="0 0 70 40"
    version="1.1"
    id="svg3"
-   sodipodi:docname="ccsrc.svg"
-   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   sodipodi:docname="xccs.svg"
+   inkscape:version="1.4.3 (1:1.4.3+202512261035+0d15f75042)"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -20,12 +20,12 @@
      inkscape:pageopacity="0.0"
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
-     inkscape:zoom="10.926971"
-     inkscape:cx="25.761944"
-     inkscape:cy="23.840093"
-     inkscape:window-width="2560"
+     inkscape:zoom="18.901556"
+     inkscape:cx="41.372255"
+     inkscape:cy="22.722997"
+     inkscape:window-width="2494"
      inkscape:window-height="1403"
-     inkscape:window-x="0"
+     inkscape:window-x="1986"
      inkscape:window-y="0"
      inkscape:window-maximized="1"
      inkscape:current-layer="svg3"
@@ -57,23 +57,6 @@
      id="polygon1"
      style="fill:#ffffff;stroke:#000000;stroke-width:1.4;stroke-dasharray:none"
      d="M 40,5.9240778 53.924386,20 40,34.075922 26.075613,20 Z" />
-  <text
-     x="40"
-     y="17"
-     font-size="9"
-     font-family="sans-serif"
-     text-anchor="middle"
-     fill="#222"
-     font-weight="bold"
-     id="text1">+</text>
-  <text
-     x="40"
-     y="29"
-     font-size="11"
-     font-family="sans-serif"
-     text-anchor="middle"
-     fill="#222"
-     id="text2">−</text>
   <circle
      id="port-n_plus"
      cx="40"
@@ -135,4 +118,15 @@
      d="m 20,10 h 10 l 3.037807,2.962039"
      id="path4-6"
      sodipodi:nodetypes="ccc" />
+  <path
+     id="line1"
+     style="stroke:#000000;stroke-width:1.6"
+     d="M 40,12.576754 V 24.988042"
+     sodipodi:nodetypes="cc" />
+  <polygon
+     points="35,32 31,26 39,26 "
+     fill="#222"
+     id="polygon1-6"
+     style="fill:#000000;stroke:none;stroke-width:1.18079"
+     transform="matrix(0.84689038,0,0,0.84689038,10.358837,0.72028912)" />
 </svg>

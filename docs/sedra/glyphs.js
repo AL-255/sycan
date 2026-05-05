@@ -159,9 +159,19 @@ const ELEM_TYPES = {
         netlist: (p, node) => `${p.id} ${node('plate')} ${node('grid')} ${node('cathode')} ` +
             `${p.value || 'TRIODE'}`,
     },
-    // ---- Controlled sources (basic/) — share ccsrc.svg ----
+    // ---- Controlled sources (basic/) ----
+    // Glyphs are split by *output* type so V- and I-output variants can
+    // each carry a distinct schematic symbol:
+    //   xcvs.svg  ->  VCVS (E), CCVS (H)   — voltage output (diamond + +/-)
+    //   xccs.svg  ->  VCCS (G), CCCS (F)   — current output (diamond + arrow)
+    // All four are drawn with a 4-port footprint: spine carries the
+    // output pair (n_plus / n_minus); the side carries the controlling
+    // pair (nc_plus / nc_minus). For CCxS, nc_plus / nc_minus are the
+    // visual terminals the user wires to the controlling-V-source's
+    // pins — the netlist still emits the SPICE F/H form referencing
+    // ``p.ctrlSrc`` by name.
     vcvs: {
-        glyph: 'ccsrc', prefix: 'E', label: 'VCVS (E)',
+        glyph: 'xcvs', prefix: 'E', label: 'VCVS (E)',
         ports: [
             { name: 'n_plus', pos: [0, -SPINE / 2] },
             { name: 'nc_plus', pos: [-2 * STEP, -STEP] },
@@ -172,7 +182,7 @@ const ELEM_TYPES = {
             `${node('nc_plus')} ${node('nc_minus')} ${p.value || '1'}`,
     },
     vccs: {
-        glyph: 'ccsrc', prefix: 'G', label: 'VCCS (G)',
+        glyph: 'xccs', prefix: 'G', label: 'VCCS (G)',
         ports: [
             { name: 'n_plus', pos: [0, -SPINE / 2] },
             { name: 'nc_plus', pos: [-2 * STEP, -STEP] },
@@ -183,21 +193,22 @@ const ELEM_TYPES = {
             `${node('nc_plus')} ${node('nc_minus')} ${p.value || '1'}`,
     },
     cccs: {
-        glyph: 'ccsrc', prefix: 'F', label: 'CCCS (F)',
-        // Current-controlled: only `ctrl` side port (the controlling V).
+        glyph: 'xccs', prefix: 'F', label: 'CCCS (F)',
         ports: [
             { name: 'n_plus', pos: [0, -SPINE / 2] },
-            { name: 'ctrl', pos: [-2 * STEP, 0] },
+            { name: 'nc_plus', pos: [-2 * STEP, -STEP] },
+            { name: 'nc_minus', pos: [-2 * STEP, STEP] },
             { name: 'n_minus', pos: [0, SPINE / 2] },
         ],
         netlist: (p, node) => `${p.id} ${node('n_plus')} ${node('n_minus')} ` +
             `${p.ctrlSrc || 'V?'} ${p.value || '1'}`,
     },
     ccvs: {
-        glyph: 'ccsrc', prefix: 'H', label: 'CCVS (H)',
+        glyph: 'xcvs', prefix: 'H', label: 'CCVS (H)',
         ports: [
             { name: 'n_plus', pos: [0, -SPINE / 2] },
-            { name: 'ctrl', pos: [-2 * STEP, 0] },
+            { name: 'nc_plus', pos: [-2 * STEP, -STEP] },
+            { name: 'nc_minus', pos: [-2 * STEP, STEP] },
             { name: 'n_minus', pos: [0, SPINE / 2] },
         ],
         netlist: (p, node) => `${p.id} ${node('n_plus')} ${node('n_minus')} ` +

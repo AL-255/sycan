@@ -81,7 +81,7 @@ R1 VDD mid 1k
 R2 mid 0 1k
 .end
 """,
-        {"power_nets": ("VDD",)},
+        {},
     ),
     (
         "cs_amp",

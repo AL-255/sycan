@@ -11,3 +11,13 @@ article h1 {
   font-family: "Michroma", system-ui, sans-serif;
   letter-spacing: 0.02em;
 }
+
+/* Glyph SVGs are drawn with hard black strokes that vanish on Furo's
+   dark theme. Wrap each preview cell in a white pad so the symbol is
+   readable regardless of the user's colour-scheme preference. */
+.glyph-table img {
+  background: #ffffff;
+  padding: 6px;
+  border-radius: 4px;
+  box-sizing: content-box;
+}

@@ -199,7 +199,7 @@ R2 mid 0 1k
 
 
 def test_voltage_divider():
-    svg = autodraw(NETLIST_DIVIDER, power_nets=("VDD",))
+    svg = autodraw(NETLIST_DIVIDER)
     _save("01_voltage_divider", svg)
     _common_assertions(svg, {"V1", "R1", "R2"})
 
@@ -708,6 +708,118 @@ def test_all_mosfet_variants():
         assert by_name[nm] == "pmos", f"{nm} → {by_name[nm]}"
 
 
+# ---------------------------------------------------------------------------
+# Test — Kitchen-sink showcase: every glyph kind on one canvas.
+#
+# Doubles as a visual reference for the docs page (see ``sphinx/glyphs.rst``)
+# — the saved SVG under ``tests/drawing/diagrams/17_all_glyphs.svg`` is a
+# quick eyeball check that every shipped glyph still draws cleanly. The
+# topology is intentionally synthetic: each device is wired into the
+# VDD / 0 rails so autodraw has columns to fill, but the operating point
+# is meaningless. The structural assertions only verify that every
+# expected component appears AND that each glyph kind that should resolve
+# to a bundled SVG actually does.
+# ---------------------------------------------------------------------------
+NETLIST_ALL_GLYPHS = """all glyph showcase
+V1   VDD  0       5
+GND1 0
+* Passives ------------------------------------------------------
+R1   VDD  ra      1k
+L1   ra   rb      1m
+C1   rb   0       1u
+* Independent current source + diode ---------------------------
+I1   0    ic      1m
+D1   ic   0       1e-15
+* MOSFETs (3T glyphs) ------------------------------------------
+M1   m1d  g1   0     NMOS_L1  mu_n Cox W L V_TH
+M2   VDD  g2   m2s   PMOS_L1  mu_p Cox W L V_TH
+* MOSFETs (4T glyphs) ------------------------------------------
+M3   m3d  g3   0   0     NMOS_4T  mu_n Cox W L V_TH 0
+M4   VDD  g4   m4s VDD   PMOS_4T  mu_p Cox W L V_TH 0
+* BJTs ----------------------------------------------------------
+Q1   q1c  g5   0    NPN  1e-15 100 1
+Q2   VDD  g6   q2e  PNP  1e-15 100 1
+* JFETs ---------------------------------------------------------
+J1   j1d  g7   0    NJF  1m  0.5
+J2   VDD  g8   j2s  PJF  1m -0.5
+* Vacuum triode -------------------------------------------------
+X1   VDD  g9   xk   TRIODE  1 100
+* Controlled sources (xcvs / xccs glyph dispatch) --------------
+E1   ep   0    m1d  g1   2.0
+G1   gp   0    m1d  g1   1m
+F1   fp   0    V1   1.0
+H1   hp   0    V1   100
+* Transmission line (no bundled glyph — labelled rect) ---------
+T1   tip  0    top  0    50  1n
+* Port marker ---------------------------------------------------
+P1   pp   0    input
+.end
+"""
+
+
+# Every kind we expect autodraw's _describe() to return for the
+# components above. Two intentional absences:
+#   * ``tline`` — no bundled glyph; autodraw falls back to the
+#     labelled-rect placeholder, which emits a plain
+#     ``<rect class="comp" ...>`` rather than a glyphed
+#     ``<g data-comp=...>`` block.
+#   * ``gnd`` — explicit GND ties exist only to merge nets in the
+#     union-find pass; the layout/render pass skips them and the
+#     bottom rail is drawn implicitly via the rail line, not via
+#     the glyph.
+_EXPECTED_GLYPH_KINDS = {
+    "vsrc", "isrc",
+    "res", "ind", "cap",
+    "diode",
+    "nmos", "pmos", "nmos_4t", "pmos_4t",
+    "npn", "pnp",
+    "njf", "pjf",
+    "triode",
+    "xcvs", "xccs",
+    "port",
+}
+
+
+def test_all_glyphs_showcase():
+    svg = autodraw(NETLIST_ALL_GLYPHS, seed=0)
+    _save("17_all_glyphs", svg)
+
+    # GND1 is parsed and used to merge nets but is intentionally not
+    # rendered as a component box (autodraw skips GND markers in the
+    # layout pass), so it's omitted from the expected-name set.
+    expected_names = {
+        "V1",
+        "R1", "L1", "C1",
+        "I1", "D1",
+        "M1", "M2", "M3", "M4",
+        "Q1", "Q2",
+        "J1", "J2",
+        "X1",
+        "E1", "G1", "F1", "H1",
+        "T1",
+        "P1",
+    }
+    _common_assertions(svg, expected_names)
+
+    # Glyph-kind coverage: every kind in _EXPECTED_GLYPH_KINDS should
+    # show up at least once. CCxS / xCxS variants split by *output*
+    # type: VCVS+CCVS share xcvs, VCCS+CCCS share xccs.
+    seen_kinds = {kind for kind, *_ in _components(svg)}
+    missing = _EXPECTED_GLYPH_KINDS - seen_kinds
+    assert not missing, (
+        f"missing glyph kinds in showcase: {sorted(missing)}; "
+        f"got {sorted(seen_kinds)}"
+    )
+
+    # Spot-check controlled-source dispatch — these were the recent
+    # split, so they're worth pinning explicitly.
+    by_name = {name: kind for kind, name, *_ in _components(svg)}
+    assert by_name["E1"] == "xcvs", f"E1 (VCVS) should use xcvs: got {by_name['E1']}"
+    assert by_name["H1"] == "xcvs", f"H1 (CCVS) should use xcvs: got {by_name['H1']}"
+    assert by_name["G1"] == "xccs", f"G1 (VCCS) should use xccs: got {by_name['G1']}"
+    assert by_name["F1"] == "xccs", f"F1 (CCCS) should use xccs: got {by_name['F1']}"
+
+
 def test_2t_vref_no_wire_crosses_components_across_seeds():
     """The wire-no-cross-component invariant must hold for every SA
     seed on the 2T VR — M2's gate ties back to its own drain, so the
@@ -749,8 +861,6 @@ def _compute_layout_cost_for_netlist(netlist: str, *, optimize: bool) -> float:
         _route_total_wirelength,
         _sa_optimize,
         _UF,
-        _TOP_RAIL_DEFAULT,
-        _BOT_RAIL_DEFAULT,
         BOX_H,
         PAD,
         COL_W,
@@ -768,8 +878,8 @@ def _compute_layout_cost_for_netlist(netlist: str, *, optimize: bool) -> float:
         elif isinstance(c, GND):
             uf.union(c.node, "0")
 
-    top_set = set(_TOP_RAIL_DEFAULT)
-    bot_set = set(_BOT_RAIL_DEFAULT)
+    top_set = {"VDD", "VCC", "VPP"}
+    bot_set = {"VSS", "VEE", "GND", "0"}
     canonical_top = {uf.find(n) for n in top_set}
     canonical_bot = {uf.find(n) for n in bot_set}
 

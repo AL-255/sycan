@@ -133,14 +133,47 @@ with the REPL) to inspect its raw SVG.
      - n_plus / n_minus
      - ``res/cap.svg``
 
-   * - ``ccsrc``
-     - .. image:: ../res/ccsrc.svg
-          :alt: Controlled-source glyph
+   * - ``njf``
+     - .. image:: ../res/njf.svg
+          :alt: N-channel JFET glyph
           :height: 64
-     - :class:`~sycan.VCVS`, :class:`~sycan.VCCS`,
-       :class:`~sycan.CCCS`, :class:`~sycan.CCVS`
+     - :class:`~sycan.NJFET`
+     - drain / source · gate
+     - ``res/njf.svg``
+
+   * - ``pjf``
+     - .. image:: ../res/pjf.svg
+          :alt: P-channel JFET glyph
+          :height: 64
+     - :class:`~sycan.PJFET`
+     - source / drain · gate
+     - ``res/pjf.svg``
+
+   * - ``xcvs``
+     - .. image:: ../res/xcvs.svg
+          :alt: Voltage-output controlled source glyph
+          :height: 64
+     - :class:`~sycan.VCVS`, :class:`~sycan.CCVS` *(voltage-output
+       variants share this body)*
      - n_plus / n_minus · nc_plus, nc_minus *(or)* ctrl
-     - ``res/ccsrc.svg``
+     - ``res/xcvs.svg``
+
+   * - ``xccs``
+     - .. image:: ../res/xccs.svg
+          :alt: Current-output controlled source glyph
+          :height: 64
+     - :class:`~sycan.VCCS`, :class:`~sycan.CCCS` *(current-output
+       variants share this body)*
+     - n_plus / n_minus · nc_plus, nc_minus *(or)* ctrl
+     - ``res/xccs.svg``
+
+   * - ``port``
+     - .. image:: ../res/port.svg
+          :alt: Port marker glyph
+          :height: 64
+     - :class:`~sycan.Port`
+     - n_plus / n_minus
+     - ``res/port.svg``
 
    * - ``gnd``
      - .. image:: ../res/gnd.svg
@@ -150,10 +183,15 @@ with the REPL) to inspect its raw SVG.
      - node (drawn as a single rail-tie pin)
      - ``res/gnd.svg``
 
-The two kinds that do not ship a bundled SVG are ``port`` (input/output
-markers, drawn directly by the SVG emitter rather than as a glyph) and
-``tline`` (transmission line — falls back to the labelled rect, which
-lets the box size scale with the line's length symbol).
+Controlled sources are split by *output* type: ``xcvs`` is shared by
+the V-output variants (E, H), ``xccs`` by the I-output variants (G, F).
+The merged ``ccsrc`` glyph that used to back all four classes is
+retired — drop a custom ``ccsrc.svg`` into your ``res_dir`` if you
+need the legacy single-symbol rendering.
+
+The one remaining kind that does not ship a bundled SVG is ``tline``
+(transmission line — falls back to the labelled rect, which lets the
+box size scale with the line's length symbol).
 
 Adding a custom glyph
 ---------------------

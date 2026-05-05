@@ -29,7 +29,13 @@ KIND_GLYPHS: tuple[str, ...] = (
     "npn", "pnp", "triode", "diode",
     "njf", "pjf",
     "vsrc", "isrc", "res", "ind", "cap", "tline",
-    "ccsrc", "port", "gnd",
+    # Controlled sources are split by *output* type so V- and I-output
+    # variants can carry distinct schematic symbols. ``xcvs`` covers
+    # VCVS + CCVS (voltage out); ``xccs`` covers VCCS + CCCS (current
+    # out). ``ccsrc`` is kept for backward compatibility — older
+    # callers that still ask for the merged glyph fall through to it.
+    "xcvs", "xccs", "ccsrc",
+    "port", "gnd",
 )
 
 
@@ -917,6 +923,8 @@ def emit_svg(
     short_port: Optional[callable] = None,
     solder_dots: Optional[Sequence[tuple[float, float]]] = None,
     back_annotation: Optional[dict[str, Sequence[str]]] = None,
+    top_rail: Optional[str] = None,
+    bot_rail: Optional[str] = None,
 ) -> str:
     """Serialise a routed schematic to SVG.
 
@@ -993,12 +1001,20 @@ def emit_svg(
             )
 
     # Rail labels.
-    parts.append(
-        f'<text class="rlab" x="{8}" y="{rail_top_y - 6:.0f}">VDD</text>'
-    )
-    parts.append(
-        f'<text class="rlab" x="{8}" y="{rail_bot_y + 14:.0f}">VSS / GND</text>'
-    )
+    if top_rail is not None:
+        parts.append(
+            f'<text class="rlab" x="{8}" y="{rail_top_y - 6:.0f}">'
+            f'{html_escape(top_rail)}</text>'
+        )
+    if bot_rail is not None and bot_rail != "0":
+        parts.append(
+            f'<text class="rlab" x="{8}" y="{rail_bot_y + 14:.0f}">'
+            f'{html_escape(bot_rail)} / 0</text>'
+        )
+    else:
+        parts.append(
+            f'<text class="rlab" x="{8}" y="{rail_bot_y + 14:.0f}">0</text>'
+        )
 
     have_glyphs = glyphs or {}
     for p in placed:

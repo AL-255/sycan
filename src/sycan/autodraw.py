@@ -109,8 +109,7 @@ MIN_PITCH = BOX_H + MIN_GAP  # default center-to-center distance for two
                              # uses (h_a + h_b)/2 + MIN_GAP at evaluation time
 
 
-_TOP_RAIL_DEFAULT = ("VDD", "VCC", "VPP")
-_BOT_RAIL_DEFAULT = ("VSS", "VEE", "GND", "0")
+
 
 # Fallback SA seeds tried in order when the rendered layout has wires
 # laying on top of each other. The list is long enough to satisfy the
@@ -281,12 +280,26 @@ def _describe(c: Component) -> _CompDesc:
         return _CompDesc(c, c.name, "tline",
                          spine_top="n_in_p", spine_bot="n_out_p",
                          side_ports=("n_in_m", "n_out_m"))
-    if isinstance(c, (VCVS, VCCS)):
-        return _CompDesc(c, c.name, "ccsrc",
+    # Controlled sources: glyph picked by *output* type. xCVS variants
+    # (V output) share the ``xcvs`` glyph; xCCS variants (I output)
+    # share ``xccs``. CCxS instances now carry a 4-port visual layout
+    # so the controlling-current path is drawn alongside the output
+    # pair, even though the netlist still references the controlling
+    # source by name (``ctrl``) at MNA-stamp time.
+    if isinstance(c, VCVS):
+        return _CompDesc(c, c.name, "xcvs",
                          spine_top="n_plus", spine_bot="n_minus",
                          side_ports=("nc_plus", "nc_minus"))
-    if isinstance(c, (CCCS, CCVS)):
-        return _CompDesc(c, c.name, "ccsrc",
+    if isinstance(c, VCCS):
+        return _CompDesc(c, c.name, "xccs",
+                         spine_top="n_plus", spine_bot="n_minus",
+                         side_ports=("nc_plus", "nc_minus"))
+    if isinstance(c, CCVS):
+        return _CompDesc(c, c.name, "xcvs",
+                         spine_top="n_plus", spine_bot="n_minus",
+                         side_ports=("ctrl",))
+    if isinstance(c, CCCS):
+        return _CompDesc(c, c.name, "xccs",
                          spine_top="n_plus", spine_bot="n_minus",
                          side_ports=("ctrl",))
     if isinstance(c, Port):
@@ -2148,8 +2161,9 @@ _DEFAULT_RES_DIR = Path(__file__).resolve().parent.parent.parent / "res"
 
 def autodraw(
     circuit: Union[Circuit, str],
-    power_nets: Sequence[str] = ("VDD", "VSS", "VEE"),
     *,
+    top_rail: Optional[str] = "VDD",
+    bot_rail: Optional[str] = "VSS",
     filename: Optional[Union[str, Path]] = None,
     optimize: bool = True,
     iterations: Optional[int] = None,
@@ -2159,7 +2173,7 @@ def autodraw(
     reverse_isolated_branches: bool = False,
     back_annotation: Optional[dict[str, Sequence[str]]] = None,
     max_retries: int = 5,
-    router: str = "dijkstra",
+    router: str = "astar",
 ) -> str:
     """Render ``circuit`` to an SVG schematic and return the SVG string.
 
@@ -2167,11 +2181,15 @@ def autodraw(
     ----------
     circuit:
         Either a :class:`~sycan.Circuit` or a SPICE netlist string.
-    power_nets:
-        Power-rail nets. Names matching ``VDD`` / ``VCC`` / ``VPP``
-        anchor the top rail; ``VSS`` / ``VEE`` / ``GND`` and the SPICE
-        ground node ``"0"`` anchor the bottom rail. Anything else
-        passed in is treated as a top-rail node by default.
+    top_rail:
+        Net name for the top power rail. Components whose spine touches
+        this net are anchored to the top of the canvas. Pass ``None`` to
+        omit the top rail (default: ``"VDD"``).
+    bot_rail:
+        Net name for the bottom power rail. Components whose spine
+        touches this net are anchored to the bottom of the canvas. The
+        SPICE ground node ``"0"`` is always included as a bottom rail.
+        Pass ``None`` to omit the bottom rail (default: ``"VSS"``).
     filename:
         Optional path to write the SVG to.
     optimize:
@@ -2249,20 +2267,13 @@ def autodraw(
         from sycan.spice import parse
         circuit = parse(circuit)
 
-    # Classify rails. User-supplied names override defaults but do NOT
-    # remove the conventional ones — circuits routinely mix VDD with
-    # GND/0, so we always keep "0" on the bottom.
-    top_set: set[str] = {n for n in _TOP_RAIL_DEFAULT}
-    bot_set: set[str] = {n for n in _BOT_RAIL_DEFAULT}
-    for n in power_nets:
-        u = n.upper()
-        if u in {"VDD", "VCC", "VPP"} or u.startswith("VDD") or u.startswith("VCC"):
-            top_set.add(n)
-        elif u in {"VSS", "VEE", "GND"} or u.startswith("VSS") or u.startswith("VEE"):
-            bot_set.add(n)
-        else:
-            # Unknown rails default to the top.
-            top_set.add(n)
+    # Classify rails. "0" (SPICE ground) is always a bottom rail.
+    top_set: set[str] = set()
+    bot_set: set[str] = {"0"}
+    if top_rail is not None:
+        top_set.add(top_rail)
+    if bot_rail is not None:
+        bot_set.add(bot_rail)
 
     # Wire-shorts: SPICE ``W`` parses as a 0-V VoltageSource. Fold those
     # plus explicit GND ties into a union-find on net names.
@@ -2817,7 +2828,7 @@ def autodraw(
 
         # ---- SVG emission ----
         svg = _emit_svg(placed, polylines, canvas_w, canvas_h,
-                        rail_top_y, rail_bot_y, top_set, bot_set, uf,
+                        rail_top_y, rail_bot_y, top_rail, bot_rail,
                         glyphs=glyphs, solder_dots=solder_dots,
                         back_annotation=back_annotation)
 
@@ -2945,9 +2956,8 @@ def _emit_svg(
     canvas_h: float,
     rail_top_y: float,
     rail_bot_y: float,
-    top_set: set[str],
-    bot_set: set[str],
-    uf: _UF,
+    top_rail: Optional[str],
+    bot_rail: Optional[str],
     glyphs: Optional[dict[str, dict]] = None,
     solder_dots: Optional[Sequence[tuple[float, float]]] = None,
     back_annotation: Optional[dict[str, Sequence[str]]] = None,
@@ -2958,5 +2968,7 @@ def _emit_svg(
         glyphs=glyphs, short_port=_short,
         solder_dots=solder_dots,
         back_annotation=back_annotation,
+        top_rail=top_rail,
+        bot_rail=bot_rail,
     )
 
