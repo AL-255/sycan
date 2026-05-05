@@ -1,4 +1,6 @@
 """sycan: symbolic circuit analysis."""
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
 from sycan.circuit import Circuit
 from sycan.components.active import (
     BJT,
@@ -172,4 +174,43 @@ __all__ = [
     "solve_pz",
     "solve_sensitivity",
     "solve_tf",
+    "main",
 ]
+
+
+try:
+    __version__ = _pkg_version("sycan")
+except PackageNotFoundError:
+    __version__ = "0.0.0+unknown"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for the ``sycan`` console script."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="sycan",
+        description="SYmbolic Circuit ANalysis",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"sycan {__version__}",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    parse_cmd = sub.add_parser(
+        "parse",
+        help="Parse a SPICE netlist and print the resulting Circuit",
+    )
+    parse_cmd.add_argument("netlist", help="Path to a SPICE netlist file")
+
+    args = parser.parse_args(argv)
+
+    if args.command == "parse":
+        circuit = parse_file(args.netlist)
+        print(circuit)
+        return 0
+
+    parser.print_help()
+    return 0

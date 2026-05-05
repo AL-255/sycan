@@ -24,10 +24,13 @@ With `uv <https://docs.astral.sh/uv/>`_:
 
 The only hard runtime dependency is ``sympy`` — sycan reaches the CAS
 through its own :mod:`sycan.cas` wrapper, so the underlying library can
-be swapped via :func:`sycan.cas.select_backend` (sympy is the default
-and currently the only implemented backend). The schematic glyphs that
-:func:`~sycan.autodraw` uses are bundled inside the wheel, so no
-post-install configuration is needed.
+be swapped via :func:`sycan.cas.select_backend`. SymPy is the default;
+the optional **symengine** backend (``pip install "sycan[symengine]"``,
+then ``export SYCAN_CAS_BACKEND=symengine`` before importing) is roughly
+7–8× faster on AC and noise solves. See ``docs/BE_PORT_STATUS.md`` for
+backend coverage and ``docs/BE_BENCHMARK.md`` for the full benchmark.
+The schematic glyphs that :func:`~sycan.autodraw` uses are bundled
+inside the wheel, so no post-install configuration is needed.
 
 Try it without installing
 ~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -30,6 +30,21 @@ import symengine as _se
 import sympy as _sp
 
 
+# Failure modes raised by the symengine C++ wrapper when an expression
+# is outside what the native code path can handle. Used by every
+# bridge wrapper below as the fallback trigger — narrower than ``Exception``
+# so that programmer errors (KeyboardInterrupt, MemoryError, internal
+# AssertionError, etc.) propagate instead of being silently retried on sympy.
+_SE_BRIDGE_ERRORS = (
+    TypeError,
+    ValueError,
+    RuntimeError,
+    NotImplementedError,
+    AttributeError,
+    ArithmeticError,
+)
+
+
 def _emit_fallback(fn_name: str, reason: str) -> None:
     """Warn that a native symengine call failed and we're going to sympy.
 
@@ -83,7 +98,7 @@ def _to_se(obj: Any) -> Any:
         return {_to_se(x) for x in obj}
     try:
         return _se.sympify(obj)
-    except Exception:
+    except (TypeError, ValueError, RuntimeError, NotImplementedError, AttributeError):
         # Booleans, exception classes and Python primitives fall through
         # unchanged — symengine can't sympify them but they are fine as-is.
         return obj
@@ -112,7 +127,7 @@ def simplify(expr, *args, **kwargs):
     # combination — covers every shape sycan asks ``simplify`` for.
     try:
         return _to_basic(expr).simplify()
-    except Exception as exc:
+    except _SE_BRIDGE_ERRORS as exc:
         _emit_fallback("simplify", f"{type(exc).__name__}: {exc}")
         return _to_se(_sp.simplify(_to_sp(expr), *args, **kwargs))
 
@@ -122,7 +137,7 @@ def cancel(expr, *args, **kwargs):
     # cancellation we need.
     try:
         return _to_basic(expr).simplify()
-    except Exception as exc:
+    except _SE_BRIDGE_ERRORS as exc:
         _emit_fallback("cancel", f"{type(exc).__name__}: {exc}")
         return _to_se(_sp.cancel(_to_sp(expr), *args, **kwargs))
 
@@ -133,7 +148,7 @@ def together(expr, *args, **kwargs):
     try:
         n, d = _to_basic(expr).as_numer_denom()
         return n / d
-    except Exception as exc:
+    except _SE_BRIDGE_ERRORS as exc:
         _emit_fallback("together", f"{type(exc).__name__}: {exc}")
         return _to_se(_sp.together(_to_sp(expr), *args, **kwargs))
 
@@ -141,7 +156,7 @@ def together(expr, *args, **kwargs):
 def fraction(expr, *args, **kwargs):
     try:
         return _to_basic(expr).as_numer_denom()
-    except Exception as exc:
+    except _SE_BRIDGE_ERRORS as exc:
         _emit_fallback("fraction", f"{type(exc).__name__}: {exc}")
         return tuple(_to_se(p) for p in _sp.fraction(_to_sp(expr), *args, **kwargs))
 
@@ -152,7 +167,7 @@ def trigsimp(expr, *args, **kwargs):
     # but sycan only ever uses the identity form.
     try:
         return _to_basic(expr).simplify()
-    except Exception as exc:
+    except _SE_BRIDGE_ERRORS as exc:
         _emit_fallback("trigsimp", f"{type(exc).__name__}: {exc}")
         return _to_se(_sp.trigsimp(_to_sp(expr), *args, **kwargs))
 
@@ -208,7 +223,7 @@ def _try_se_solve(eq, var):
         expr = a - b
     try:
         expr = _se.sympify(expr)
-    except Exception as exc:
+    except _SE_BRIDGE_ERRORS as exc:
         raise _SENativeUnsupported(f"sympify of equation failed: {exc}") from exc
     try:
         result = _se_solve(expr, var)

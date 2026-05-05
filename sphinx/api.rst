@@ -30,13 +30,18 @@ Full module reference
 
    sycan.circuit
    sycan.mna
+   sycan.check
+   sycan.headroom
    sycan.network_params
    sycan.polynomials
    sycan.schematic
    sycan.autodraw
    sycan.autodraw_hacks
    sycan.svg_util
+   sycan.plot_util
    sycan.spice
+   sycan.cas
    sycan.components.basic
    sycan.components.active
+   sycan.components.blocks
    sycan.components.rf

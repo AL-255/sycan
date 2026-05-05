@@ -3,13 +3,34 @@ name = "sycan"
 version = "0.1.7"
 description = "SYmbolic Circuit ANalysis"
 readme = "README.md"
+license = { file = "LICENSE" }
 authors = [
     { name = "AL-255", email = "thelithcore@gmail.com" }
 ]
 requires-python = ">=3.11"
+keywords = ["circuit", "simulation", "symbolic", "spice", "sympy", "mna"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = [
     "sympy>=1.12",
 ]
+
+[project.optional-dependencies]
+symengine = ["symengine>=0.11"]
 
 [project.scripts]
 sycan = "sycan:main"

@@ -62,5 +62,8 @@ sphinx/_build/
 sphinx/_autosummary/
 _site/
 
+# REPL wheel — built fresh by run_webpage.sh / CI
+docs/repl/sycan-*-py3-none-any.whl
+
 .codex
 .claude/
