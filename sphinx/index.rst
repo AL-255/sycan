@@ -24,6 +24,7 @@ small-signal impedance, and noise spectral densities.
 
    getting_started
    examples
+   assumptions
    autodraw
    glyphs
    terminology

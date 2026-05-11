@@ -73,6 +73,7 @@ from sycan.mna import (
     build_residuals,
     k_B,
     q,
+    solve,
     solve_ac,
     solve_dc,
     solve_dc_sweep,
@@ -81,6 +82,19 @@ from sycan.mna import (
     solve_pz,
     solve_sensitivity,
     solve_tf,
+)
+from sycan.assumptions import (
+    Approximate,
+    Assumption,
+    CheckResult,
+    Limit,
+    MuchGreater,
+    MuchLess,
+    Region,
+    apply_assumptions,
+    check_assumptions,
+    format_check_report,
+    violations,
 )
 from sycan.mna import T as T_kelvin  # avoid shadowing trans-line letter elsewhere
 from sycan.autodraw import autodraw
@@ -174,10 +188,23 @@ __all__ = [
     "solve_pz",
     "solve_sensitivity",
     "solve_tf",
+    "solve",
     "main",
     "print_hierarchy",
     "to_spice",
     "write_file",
+    # Assumption engine.
+    "Approximate",
+    "Assumption",
+    "CheckResult",
+    "Limit",
+    "MuchGreater",
+    "MuchLess",
+    "Region",
+    "apply_assumptions",
+    "check_assumptions",
+    "format_check_report",
+    "violations",
 ]
 
 

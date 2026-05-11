@@ -90,6 +90,11 @@ class Circuit:
         self.name = name
         self.components: list[Component] = []
         self._nodes: dict[str, int] = {"0": 0}
+        # Assumptions attached to the circuit are applied (and checked)
+        # by the unified solver. Imported lazily inside ``assume`` /
+        # ``check_assumptions`` to avoid a top-level import cycle with
+        # the assumptions module (which references Circuit for typing).
+        self.assumptions: list = []
 
     def _touch(self, node: str) -> None:
         if node not in self._nodes:
@@ -897,6 +902,61 @@ class Circuit:
             for name, i in sorted(self._nodes.items(), key=lambda kv: kv[1])
             if name != "0"
         ]
+
+    # ------------------------------------------------------------------
+    # Assumption attachment
+    # ------------------------------------------------------------------
+
+    def assume(self, *assumptions) -> None:
+        """Attach one or more :class:`~sycan.assumptions.Assumption`
+        objects to this circuit.
+
+        Attached assumptions are picked up automatically by the unified
+        :func:`~sycan.solve` entry point — they're applied to the
+        solution after the matrix solve, and (for region-style
+        assumptions) verified by :meth:`check_assumptions` against the
+        resulting operating point.
+        """
+        from sycan.assumptions import Assumption
+        for a in assumptions:
+            if not isinstance(a, Assumption):
+                raise TypeError(
+                    f"Circuit.assume: expected Assumption, got "
+                    f"{type(a).__name__}"
+                )
+            self.assumptions.append(a)
+
+    def assume_limit(self, symbol: "cas.Symbol", target: "cas.Expr") -> None:
+        """Sugar for ``self.assume(Limit(symbol, target))``."""
+        from sycan.assumptions import Limit
+        self.assume(Limit(symbol=symbol, target=target))
+
+    def assume_much_greater(self, big, small) -> None:
+        """Sugar for ``self.assume(MuchGreater(big, small))`` — ``big >> small``."""
+        from sycan.assumptions import MuchGreater
+        self.assume(MuchGreater(big=big, small=small))
+
+    def assume_much_less(self, small, big) -> None:
+        """Sugar for ``self.assume(MuchLess(small, big))`` — ``small << big``."""
+        from sycan.assumptions import MuchLess
+        self.assume(MuchLess(small=small, big=big))
+
+    def assume_region(self, component_name: str, region_name: str) -> None:
+        """Sugar for ``self.assume(Region(component_name, region_name))``."""
+        from sycan.assumptions import Region
+        self.assume(Region(component=component_name, region=region_name))
+
+    def check_assumptions(self, solution, extra: Optional[list] = None):
+        """Verify every attached :class:`Assumption` against ``solution``.
+
+        ``extra`` is an optional list of additional assumptions to
+        verify in the same pass — useful for one-off checks that
+        weren't attached to the circuit. Returns a list of
+        :class:`~sycan.assumptions.CheckResult`.
+        """
+        from sycan.assumptions import check_assumptions as _check
+        merged = list(self.assumptions) + list(extra or [])
+        return _check(self, solution, merged)
 
     def group(
         self,

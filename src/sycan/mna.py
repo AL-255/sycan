@@ -266,12 +266,22 @@ def build_residuals(
     return x, residuals
 
 
-def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[cas.Symbol, cas.Expr]:
+def solve_dc(
+    circuit: "Circuit",
+    simplify: bool = True,
+    *,
+    assume: Optional[list] = None,
+) -> dict[cas.Symbol, cas.Expr]:
     """Solve the DC operating point symbolically.
 
     If any component reports ``has_nonlinear``, the solver builds
     ``residuals = A·x − b`` plus nonlinear contributions and calls
     :func:`sympy.solve`. Otherwise, LU on the linear system.
+
+    ``assume`` is an optional list of
+    :class:`~sycan.assumptions.Assumption` objects applied to the
+    solution dict after the solve (in addition to any attached to
+    the circuit via :meth:`~sycan.Circuit.assume`).
     """
     A, x, b = build_mna(circuit, mode="dc")
     flat = circuit.flat_components()
@@ -403,7 +413,7 @@ def solve_dc(circuit: "Circuit", simplify: bool = True) -> dict[cas.Symbol, cas.
 
     if simplify:
         result = {sym: cas.simplify(expr) for sym, expr in result.items()}
-    return result
+    return _apply_circuit_assumptions(result, circuit, assume)
 
 
 def solve_impedance(
@@ -488,11 +498,18 @@ def solve_ac(
     circuit: "Circuit",
     s: Optional[cas.Expr] = None,
     simplify: bool = False,
+    *,
+    assume: Optional[list] = None,
 ) -> dict[cas.Symbol, cas.Expr]:
     """Solve the small-signal AC response in the Laplace domain.
 
     Nonlinear components (e.g. MOSFETs) contribute no small-signal model
     yet and are treated as zero-current elements.
+
+    ``assume`` is an optional list of
+    :class:`~sycan.assumptions.Assumption` objects applied to the
+    solution after the matrix solve (in addition to any attached to
+    the circuit via :meth:`~sycan.Circuit.assume`).
     """
     if s is None:
         s = cas.Symbol("s")
@@ -501,7 +518,95 @@ def solve_ac(
     result = {sym: expr for sym, expr in zip(x, sol)}
     if simplify:
         result = {sym: cas.simplify(expr) for sym, expr in result.items()}
-    return result
+    return _apply_circuit_assumptions(result, circuit, assume)
+
+
+def _apply_circuit_assumptions(
+    result: dict,
+    circuit: "Circuit",
+    extra: Optional[list],
+) -> dict:
+    """Combine circuit-attached assumptions with caller-supplied ones
+    and run their :meth:`apply` over the solution dict.
+
+    Imported lazily to avoid a top-level cycle between :mod:`sycan.mna`
+    and :mod:`sycan.assumptions`. Returns the solution unchanged when
+    no assumptions are in play.
+    """
+    attached = getattr(circuit, "assumptions", None) or []
+    extra_list = list(extra or [])
+    if not attached and not extra_list:
+        return result
+    from sycan.assumptions import apply_assumptions
+    return apply_assumptions(result, [*attached, *extra_list])
+
+
+def solve(
+    circuit: "Circuit",
+    *,
+    mode: str = "dc",
+    s: Optional[cas.Expr] = None,
+    simplify: bool = False,
+    assume: Optional[list] = None,
+) -> dict[cas.Symbol, cas.Expr]:
+    """Unified DC / AC entry point with assumption support.
+
+    ``mode="ac"`` returns the Laplace-domain small-signal solution
+    (delegating to :func:`solve_ac`).
+
+    ``mode="dc"`` collapses the s-domain solution at ``s=0`` for
+    purely-linear circuits — this is the formal "DC is AC with
+    ω → 0" unification. Circuits containing nonlinear devices fall
+    back to :func:`solve_dc` (the Newton-Raphson / closed-form
+    nonlinear path) because their stamps don't carry an LTI
+    small-signal model that can be evaluated at ``s=0``.
+
+    Assumptions attached to the circuit (via
+    :meth:`~sycan.Circuit.assume`) and any passed in ``assume`` are
+    applied to the resulting solution dict in order. For
+    region-style assumptions, use
+    :meth:`~sycan.Circuit.check_assumptions` separately on the
+    returned solution to verify the claim.
+    """
+    if mode not in ("dc", "ac"):
+        raise ValueError(
+            f"solve: mode must be 'dc' or 'ac', got {mode!r}"
+        )
+    if mode == "ac":
+        return solve_ac(circuit, s=s, simplify=simplify, assume=assume)
+
+    # DC mode.
+    flat = circuit.flat_components()
+    has_nonlinear = any(getattr(c, "has_nonlinear", False) for c in flat)
+    if has_nonlinear:
+        # Existing nonlinear DC path; ``solve_dc`` doesn't accept the
+        # assumption kwarg yet, so apply them here after it returns.
+        sol = solve_dc(circuit, simplify=simplify)
+        return _apply_circuit_assumptions(sol, circuit, assume)
+
+    # LTI: build the s-domain matrix and substitute s=0 in the solution.
+    s_sym = s if s is not None else cas.Symbol("s")
+    A, x, b = build_mna(circuit, mode="ac", s=s_sym)
+    ac_sol = A.LUsolve(b)
+    result: dict[cas.Symbol, cas.Expr] = {}
+    for sym, expr in zip(x, ac_sol):
+        # Try a substitution first — it's much faster than ``limit``
+        # and works when the expression is regular at s=0. Fall back
+        # to a true limit when substitution yields an indeterminate
+        # form (a denominator that vanishes at s=0).
+        try:
+            val = expr.subs(s_sym, 0)
+            if val.has(cas.zoo) or val.has(cas.nan) or val == cas.oo or val == -cas.oo:
+                raise ValueError("indeterminate at s=0")
+            result[sym] = val
+        except (ValueError, ZeroDivisionError, TypeError):
+            try:
+                result[sym] = cas.limit(expr, s_sym, 0)
+            except (NotImplementedError, ValueError, RecursionError):
+                result[sym] = expr
+    if simplify:
+        result = {sym: cas.simplify(expr) for sym, expr in result.items()}
+    return _apply_circuit_assumptions(result, circuit, assume)
 
 
 def solve_noise(

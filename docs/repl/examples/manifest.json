@@ -24,5 +24,9 @@
 
   {"category": "JFET",           "label": "JFET CS Amplifier",    "file": "jfet_amplifier.py"},
 
-  {"category": "Pole-Zero",      "label": "RC / Sallen-Key / RLC","file": "pole_zero.py"}
+  {"category": "Pole-Zero",      "label": "RC / Sallen-Key / RLC","file": "pole_zero.py"},
+
+  {"category": "Assumptions",    "label": "Ideal op-amp limit",   "file": "assume_ideal_opamp.py"},
+  {"category": "Assumptions",    "label": "Divider asymptotes",   "file": "assume_divider_asymptote.py"},
+  {"category": "Assumptions",    "label": "MOSFET region check",  "file": "assume_mosfet_region.py"}
 ]

@@ -4748,7 +4748,7 @@ function ensureSycan(onStatus: (msg: string) => void = () => {}): Promise<any> {
     onStatus('Installing sycan…');
     await py.runPythonAsync(`
 import micropip
-await micropip.install('../repl/sycan-0.1.7-py3-none-any.whl')
+await micropip.install('../repl/sycan-0.1.8-py3-none-any.whl')
 import sycan, sympy
 print('sycan ready (sympy', sympy.__version__, ')')
 `);

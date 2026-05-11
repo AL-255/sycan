@@ -1,6 +1,6 @@
 [project]
 name = "sycan"
-version = "0.1.7"
+version = "0.1.8"
 description = "SYmbolic Circuit ANalysis"
 readme = "README.md"
 license = { file = "LICENSE" }
