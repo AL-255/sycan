@@ -925,6 +925,9 @@ def emit_svg(
     back_annotation: Optional[dict[str, Sequence[str]]] = None,
     top_rail: Optional[str] = None,
     bot_rail: Optional[str] = None,
+    group_boxes: Optional[
+        Sequence[tuple[str, float, float, float, float]]
+    ] = None,
 ) -> str:
     """Serialise a routed schematic to SVG.
 
@@ -973,8 +976,28 @@ def emit_svg(
         ".plab{fill:#444;font-size:%dpx}"
         ".rlab{fill:#a00;font-weight:bold}"
         ".bann{fill:#e07b00;font-weight:300;font-size:%dpx}"
-        "</style>" % (port_fs, max(8, port_fs))
+        ".grpbox{fill:none;stroke:#88a;stroke-width:1.0;stroke-dasharray:6,4}"
+        ".grplab{fill:#557;font-style:italic;font-size:%dpx}"
+        ".collapsed{fill:#f6f0fb;stroke:#7a36a6;stroke-width:1.8}"
+        "</style>" % (port_fs, max(8, port_fs), max(8, port_fs))
     )
+
+    # Group boxes: drawn first so they sit behind every other primitive.
+    # Outer groups appear first in ``group_boxes``, so nested groups
+    # paint on top of the rectangles they live inside.
+    if group_boxes:
+        for label, x0, y0, x1, y1 in group_boxes:
+            w = max(0.0, x1 - x0)
+            h = max(0.0, y1 - y0)
+            parts.append(
+                f'<rect class="grpbox" x="{x0:.1f}" y="{y0:.1f}" '
+                f'width="{w:.1f}" height="{h:.1f}" rx="4" ry="4"/>'
+            )
+            if label:
+                parts.append(
+                    f'<text class="grplab" x="{x0 + 4:.1f}" '
+                    f'y="{y0 + max(8, port_fs) + 2:.1f}">{label}</text>'
+                )
 
     # Glyph defs are intentionally inlined per-instance below (as <g>
     # transforms wrapping the glyph's inner content). The pure <use>
@@ -1061,8 +1084,9 @@ def emit_svg(
                 f'transform="{transform}">{info["inner"]}</g>'
             )
         else:
+            css_class = "comp collapsed" if d.kind == "collapsed" else "comp"
             parts.append(
-                f'<rect class="comp" data-comp="{d.kind}" '
+                f'<rect class="{css_class}" data-comp="{d.kind}" '
                 f'data-name="{d.label}" '
                 f'x="{x:.1f}" y="{y:.1f}" width="{bw}" height="{bh}" rx="3" />'
             )

@@ -162,6 +162,10 @@ class _CompDesc:
     bbox_w: float = 0.0  # populated by _apply_glyphs (defaults to BOX_W)
     bbox_h: float = 0.0  # populated by _apply_glyphs (defaults to BOX_H)
     port_offsets: dict[str, tuple[float, float]] = field(default_factory=dict)
+    # Hierarchy chain of enclosing SubCircuit instance names — set by
+    # ``SubCircuit.expand_leaves``. Empty tuple for top-level components.
+    # Used for group-cohesion in SA and for drawing the bounding box.
+    group_path: tuple[str, ...] = ()
 
     def port_net(self, port: str) -> str:
         return getattr(self.component, port)
@@ -218,8 +222,27 @@ def _short(port: str) -> str:
     return port[:2]
 
 
-def _describe(c: Component) -> _CompDesc:
+def _describe(c) -> _CompDesc:
     """Return the spine + sides for any supported component type."""
+    # Collapsed-group placeholder: a generic multi-port box. Pin order
+    # is whatever ``port_map`` carries; first pin becomes the spine top,
+    # last pin the spine bottom, and anything in between rides on the
+    # side. One-pin groups degenerate to spine_top == spine_bot.
+    from sycan.components.blocks.subcircuit import _CollapsedGroup
+    if isinstance(c, _CollapsedGroup):
+        pins = list(c.ports)
+        if not pins:
+            raise ValueError(
+                f"autodraw: collapsed group {c.name!r} has no pins; "
+                "cannot place it without at least one connection"
+            )
+        if len(pins) == 1:
+            top, bot, sides = pins[0], pins[0], ()
+        else:
+            top, bot, sides = pins[0], pins[-1], tuple(pins[1:-1])
+        return _CompDesc(c, c.name, "collapsed",
+                         spine_top=top, spine_bot=bot,
+                         side_ports=sides)
     if isinstance(c, NMOS_4T) and not isinstance(c, NMOS_3T):
         # 4T body-aware NMOS gets its own glyph (extra bulk pin); the
         # 3T wrapper falls through to the plain ``nmos`` glyph below.
@@ -648,6 +671,11 @@ def _column_widths(branches: Sequence[_Branch]) -> list[float]:
     centres themselves end up on the routing grid (otherwise different
     anchor offsets in the same column round through banker's rules to
     inconsistent cells).
+
+    For columns whose components belong to a hierarchical group, the
+    width is inflated on both sides by the group bounding-box margin
+    so the dashed group rectangle has clearance and never visually
+    overlaps a neighbouring column's component.
     """
     import math
 
@@ -659,6 +687,10 @@ def _column_widths(branches: Sequence[_Branch]) -> list[float]:
         else:
             widest = max(d.bbox_w for d in branch.descs)
             w = max(float(COL_W), widest + 56.0)
+            # Reserve room for the group-box padding on both sides so
+            # nested rectangles can grow outwards without colliding
+            # with the adjacent column's component bbox.
+            w += 2.0 * _branch_group_margin(branch)
             w = math.ceil(w / step) * step
             out.append(w)
     return out
@@ -1241,7 +1273,15 @@ def _compact_blanks(
     occupied: list[tuple[float, float]] = []
     for p in placed:
         bw = p.desc.bbox_w
-        occupied.append((p.cx - bw / 2.0, p.cx + bw / 2.0))
+        # Grouped components reserve extra horizontal space equal to
+        # the group bounding-rect margin so compaction doesn't squeeze
+        # the gap that the rectangle (drawn later) needs to occupy.
+        gp = getattr(p.desc, "group_path", ())
+        if gp:
+            extra = _GROUP_BASE_MARGIN + (len(gp) - 1) * _GROUP_DEPTH_STEP
+        else:
+            extra = 0.0
+        occupied.append((p.cx - bw / 2.0 - extra, p.cx + bw / 2.0 + extra))
     for cls, pts in polylines:
         if cls.startswith("rail-"):
             continue
@@ -1883,6 +1923,39 @@ def _sa_optimize(
 
     cost_fn = _route_total_hpwl if cost_model == "hpwl" else _route_total_wirelength
 
+    # Group-cohesion bookkeeping. Each group key (the dotted hierarchy
+    # path of an enclosing SubCircuit) maps to the list of desc IDs
+    # belonging to it. We add a small penalty proportional to the
+    # current column-span of each group, which biases SA toward
+    # placing same-group members in adjacent columns without dominating
+    # the wirelength cost.
+    groups_by_key: dict[tuple[str, ...], list[int]] = {}
+    for d in descs:
+        if not d.group_path:
+            continue
+        groups_by_key.setdefault(d.group_path, []).append(id(d))
+
+    def _group_cohesion_cost(co: list[int]) -> float:
+        if not groups_by_key:
+            return 0.0
+        # Build {desc_id: column_index} from the current order so we can
+        # compute per-group column spans.
+        col_of_desc: dict[int, int] = {}
+        for col_idx, branch_idx in enumerate(co):
+            for d in branches[branch_idx].descs:
+                col_of_desc[id(d)] = col_idx
+        penalty = 0.0
+        for member_ids in groups_by_key.values():
+            cols = [col_of_desc[m] for m in member_ids if m in col_of_desc]
+            if len(cols) < 2:
+                continue
+            span = max(cols) - min(cols)
+            # Pull-together: weight by member count so larger groups
+            # have proportionally stronger pull. The MIN_PITCH scaling
+            # keeps the term in the same numeric ballpark as wirelength.
+            penalty += span * len(member_ids) * MIN_PITCH * 0.25
+        return penalty
+
     def evaluate(co, yp, mi, fl):
         centers, total_w = _column_centers(branches, co, col_widths, PAD)
         pins, boxes = _pin_positions_for_state(
@@ -1891,11 +1964,12 @@ def _sa_optimize(
         kw: dict = {}
         if cost_model != "hpwl":
             kw["cross_coupled_xnets"] = x_pairs_for_cost
-        return cost_fn(
+        base = cost_fn(
             pins, boxes, mid_nets, rail_nets,
             total_w, canvas_h, rail_top_y, rail_bot_y, canonical_top,
             **kw,
         )
+        return base + _group_cohesion_cost(co)
 
     cost = evaluate(col_order, y_pos, mirrors, flips)
     initial_cost = cost
@@ -2174,6 +2248,7 @@ def autodraw(
     back_annotation: Optional[dict[str, Sequence[str]]] = None,
     max_retries: int = 5,
     router: str = "astar",
+    collapse: Union[str, Sequence[str], None] = None,
 ) -> str:
     """Render ``circuit`` to an SVG schematic and return the SVG string.
 
@@ -2245,6 +2320,15 @@ def autodraw(
         :data:`_OVERLAP_TOL` is accepted. If every attempt has overlap
         the lowest-overlap render is returned. Default is 5; pass 0 to
         disable the loop.
+    collapse:
+        Optional group path (or sequence of paths) to render as a
+        single placeholder rectangle instead of expanding into its
+        constituent leaves. Each path is the dotted instance chain
+        of a :class:`~sycan.SubCircuit` — e.g. ``"X1"`` to hide a
+        top-level group, ``"X1.U1"`` to hide a nested one. Collapsed
+        groups get a distinctive purple outline and expose one pin
+        per external connection. Unknown paths raise
+        :class:`ValueError` so callers catch typos early.
     router:
         Grid-routing algorithm used at the final routing pass.
         ``"dijkstra"`` (default, historical) is a uniform-cost search
@@ -2275,10 +2359,47 @@ def autodraw(
     if bot_rail is not None:
         bot_set.add(bot_rail)
 
+    # Normalise the ``collapse`` selector into a frozenset of group
+    # path tuples (split on ``.``) and validate that every requested
+    # path exists somewhere in the hierarchy — typos should surface
+    # immediately rather than producing a silently-unchanged drawing.
+    collapse_paths: frozenset[tuple[str, ...]] = frozenset()
+    if collapse is not None:
+        if isinstance(collapse, str):
+            collapse = [collapse]
+        raw_paths = [tuple(p.split(".")) for p in collapse]
+        collapse_paths = frozenset(raw_paths)
+        from sycan.components.blocks.subcircuit import SubCircuit
+        existing: set[tuple[str, ...]] = set()
+
+        def _collect(parent_list, prefix):
+            for cc in parent_list:
+                if isinstance(cc, SubCircuit):
+                    p = prefix + (cc.name,)
+                    existing.add(p)
+                    _collect(cc.body.components, p)
+        _collect(circuit.components, ())
+        missing = collapse_paths - existing
+        if missing:
+            missing_names = sorted(".".join(m) for m in missing)
+            raise ValueError(
+                f"autodraw: collapse target(s) not found in hierarchy: "
+                f"{missing_names!r}. Known SubCircuit paths: "
+                f"{sorted('.'.join(p) for p in existing)!r}"
+            )
+
+    # Drawing operates on the leaf component list — any SubCircuit is
+    # flattened into prefixed clones whose ``_group_path`` tag survives
+    # for cohesion bias and bounding-box drawing further down. Paths
+    # listed in ``collapse`` become single placeholder boxes instead.
+    leaf_components = circuit.flat_components(
+        collapse_paths=collapse_paths or None
+    )
+
     # Wire-shorts: SPICE ``W`` parses as a 0-V VoltageSource. Fold those
     # plus explicit GND ties into a union-find on net names.
     uf = _UF()
-    for c in circuit.components:
+    for c in leaf_components:
         if isinstance(c, VoltageSource) and c.name.upper().startswith("W"):
             uf.union(c.n_plus, c.n_minus)
         elif isinstance(c, GND):
@@ -2291,12 +2412,14 @@ def autodraw(
     # Visible components: skip wires and GND markers (they exist only
     # to merge nets).
     descs: list[_CompDesc] = []
-    for c in circuit.components:
+    for c in leaf_components:
         if isinstance(c, VoltageSource) and c.name.upper().startswith("W"):
             continue
         if isinstance(c, GND):
             continue
-        descs.append(_describe(c))
+        d = _describe(c)
+        d.group_path = tuple(getattr(c, "_group_path", ()))
+        descs.append(d)
 
     # ---- Branch finding ----
     branches, spine_index = _build_branches(
@@ -2826,11 +2949,15 @@ def autodraw(
         # independently.
         canvas_w = _compact_blanks(placed, polylines, solder_dots, canvas_w)
 
+        # ---- Group bounding boxes ----
+        group_boxes = _compute_group_boxes(placed)
+
         # ---- SVG emission ----
         svg = _emit_svg(placed, polylines, canvas_w, canvas_h,
                         rail_top_y, rail_bot_y, top_rail, bot_rail,
                         glyphs=glyphs, solder_dots=solder_dots,
-                        back_annotation=back_annotation)
+                        back_annotation=back_annotation,
+                        group_boxes=group_boxes)
 
         _retry_overlap = _segment_overlap_length(polylines)
         if _retry_best_overlap is None or _retry_overlap < _retry_best_overlap:
@@ -2911,6 +3038,15 @@ def _apply_glyphs(
     """
     for d in descs:
         glyph = glyphs.get(d.kind)
+        if d.kind == "collapsed":
+            # Size the placeholder rectangle so side-port pins have
+            # comfortable vertical spacing — grow height with the
+            # number of side ports.
+            d.bbox_w = float(BOX_W) + 20.0
+            n_sides = max(1, (len(d.side_ports) + 1) // 2)
+            d.bbox_h = max(float(BOX_H), 30.0 + n_sides * 24.0)
+            d.port_offsets = _default_port_offsets(d, d.bbox_w, d.bbox_h)
+            continue
         if glyph is None:
             d.bbox_w = float(BOX_W)
             d.bbox_h = float(BOX_H)
@@ -2949,6 +3085,81 @@ def _apply_glyphs(
 from sycan.svg_util import emit_svg as _svg_util_emit
 
 
+_GROUP_BASE_MARGIN = max(MIN_GAP / 2.0, 12.0)
+# Extra padding added per level of nesting below the current group, so
+# an outer rectangle always extends visibly past every inner one even
+# when both share the same outermost member component.
+_GROUP_DEPTH_STEP = 6.0
+
+
+def _branch_group_margin(branch: "_Branch") -> float:
+    """Worst-case group-rect padding the branch's columns will need.
+
+    Picks the deepest hierarchy among the branch's descs and converts
+    it to the same margin formula used in :func:`_compute_group_boxes`
+    — so column widths reserve enough room for the bounding rectangle
+    of every enclosing group without spilling into a neighbouring
+    column's component."""
+    if not branch.descs:
+        return 0.0
+    deepest = 0
+    for d in branch.descs:
+        gp = getattr(d, "group_path", ())
+        if gp:
+            deepest = max(deepest, len(gp))
+    if deepest == 0:
+        return 0.0
+    return _GROUP_BASE_MARGIN + (deepest - 1) * _GROUP_DEPTH_STEP
+
+
+def _compute_group_boxes(
+    placed: Sequence[_Placed],
+) -> list[tuple[str, float, float, float, float]]:
+    """Return ``(label, x0, y0, x1, y1)`` rects for each enclosing group.
+
+    Walks every placed component's ``group_path`` and computes the
+    axis-aligned bounding box of the components belonging to each
+    prefix of that path. Padding grows with the depth of nesting
+    *inside* this group — innermost groups get the base margin and
+    every enclosing level adds :data:`_GROUP_DEPTH_STEP` so outer
+    rectangles always stand out from the inner ones. Ordered
+    outer-first so callers can stack the rectangles back-to-front in
+    the SVG.
+    """
+    members: dict[tuple[str, ...], list[_Placed]] = {}
+    # Track the deepest descendant depth seen for each group key so we
+    # can grow outer rectangles in proportion to how much hierarchy
+    # they enclose.
+    max_descendant_depth: dict[tuple[str, ...], int] = {}
+    for p in placed:
+        gp = p.desc.group_path
+        if not gp:
+            continue
+        full_depth = len(gp)
+        for depth in range(1, full_depth + 1):
+            key = gp[:depth]
+            members.setdefault(key, []).append(p)
+            # ``full_depth - depth`` = number of nested levels strictly
+            # below this group along this member's path.
+            below = full_depth - depth
+            if below > max_descendant_depth.get(key, -1):
+                max_descendant_depth[key] = below
+    if not members:
+        return []
+    out: list[tuple[str, float, float, float, float]] = []
+    # Outer groups first (shorter prefixes) so they appear behind nested
+    # ones in the rendered SVG.
+    for key in sorted(members, key=lambda k: (len(k), k)):
+        ps = members[key]
+        margin = _GROUP_BASE_MARGIN + max_descendant_depth[key] * _GROUP_DEPTH_STEP
+        x0 = min(p.cx - p.desc.bbox_w / 2.0 for p in ps) - margin
+        y0 = min(p.cy - p.desc.bbox_h / 2.0 for p in ps) - margin
+        x1 = max(p.cx + p.desc.bbox_w / 2.0 for p in ps) + margin
+        y1 = max(p.cy + p.desc.bbox_h / 2.0 for p in ps) + margin
+        out.append((".".join(key), x0, y0, x1, y1))
+    return out
+
+
 def _emit_svg(
     placed: Sequence[_Placed],
     polylines: Sequence[tuple[str, list[tuple[float, float]]]],
@@ -2961,6 +3172,9 @@ def _emit_svg(
     glyphs: Optional[dict[str, dict]] = None,
     solder_dots: Optional[Sequence[tuple[float, float]]] = None,
     back_annotation: Optional[dict[str, Sequence[str]]] = None,
+    group_boxes: Optional[
+        Sequence[tuple[str, float, float, float, float]]
+    ] = None,
 ) -> str:
     return _svg_util_emit(
         placed, polylines, canvas_w, canvas_h, rail_top_y, rail_bot_y,
@@ -2970,5 +3184,6 @@ def _emit_svg(
         back_annotation=back_annotation,
         top_rail=top_rail,
         bot_rail=bot_rail,
+        group_boxes=group_boxes,
     )
 

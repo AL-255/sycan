@@ -1,4 +1,4 @@
-"""Minimal SPICE netlist parser for DC circuits.
+"""Minimal SPICE netlist parser (and writer) for DC / AC circuits.
 
 Supported syntax:
 
@@ -6,11 +6,15 @@ Supported syntax:
 * lines starting with ``*`` are comments; text after ``;`` is trimmed
 * lines starting with ``+`` are continuations of the previous element
 * ``.end`` stops parsing; other dot-directives are ignored
-* ``.subckt name pin1 pin2 ...`` / ``.ends [name]`` defines a reusable
-  subcircuit. The body may itself contain ``X`` references to other
-  user subcircuits or to the built-in ``OPAMP`` / ``TRIODE`` blocks.
-  Nested ``.subckt`` *in source* is rejected; nest semantically by
-  having one subckt instantiate another via its ``X`` element.
+* ``.subckt name pin1 pin2 ... [PARAMS: k=v ...]`` /
+  ``.ends [name]`` defines a reusable subcircuit. ``PARAMS:``
+  declares default parameter values that body components may
+  reference via plain symbols (``R1 in out R``). Instances override
+  defaults via ``Xinst pin1 ... name PARAMS: k=v ...``. The body may
+  itself contain ``X`` references to other user subcircuits or to
+  the built-in ``OPAMP`` / ``TRIODE`` blocks. Nested ``.subckt`` *in
+  source* is rejected; nest semantically by having one subckt
+  instantiate another via its ``X`` element.
 * elements::
 
       Rxxx  N+ N- value
@@ -99,13 +103,56 @@ class _SubcktDef:
     """A parsed ``.SUBCKT`` block awaiting instantiation.
 
     ``pins`` are the positional pin names declared on the ``.SUBCKT``
-    line, in order. ``lines`` are the body lines (already
-    preprocessed) — they get re-parsed into a body :class:`Circuit`
-    the first time the subckt is referenced via an ``X`` element.
+    line, in order. ``defaults`` carries the parameter defaults declared
+    via ``PARAMS: k=v ...`` (if any). ``lines`` are the body lines
+    (already preprocessed) — they get re-parsed into a body
+    :class:`Circuit` the first time the subckt is referenced via an
+    ``X`` element.
     """
     name: str
     pins: list[str]
+    defaults: dict[str, cas.Expr] = field(default_factory=dict)
     lines: list[tuple[int, str]] = field(default_factory=list)
+
+
+def _parse_param_assignments(tokens: list[str]) -> dict[str, cas.Expr]:
+    """Parse a sequence of ``key=value`` tokens into a sympy-valued dict.
+
+    Tokens may be glued (``R=1k``) or split across whitespace
+    (``R = 1k`` → three tokens). Trailing ``params:`` keyword is
+    consumed as a no-op for compatibility with SPICE source that
+    emits the keyword separately from the assignments.
+    """
+    out: dict[str, cas.Expr] = {}
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok.lower() == "params:":
+            i += 1
+            continue
+        if "=" in tok:
+            key, _, val = tok.partition("=")
+            if val == "":
+                # ``key = value`` split across two tokens.
+                if i + 1 >= n:
+                    raise ValueError(
+                        f"parameter {key!r} missing value after '='"
+                    )
+                val = tokens[i + 1]
+                i += 2
+            else:
+                i += 1
+            out[key] = parse_value(val)
+        elif i + 2 < n and tokens[i + 1] == "=":
+            # ``key = value`` with three separate tokens.
+            key = tok
+            val = tokens[i + 2]
+            out[key] = parse_value(val)
+            i += 3
+        else:
+            raise ValueError(f"expected key=value parameter, got {tok!r}")
+    return out
 
 
 def _slice_subckts(
@@ -134,14 +181,30 @@ def _slice_subckts(
             if len(parts) < 2:
                 raise ValueError(f"line {lineno}: .SUBCKT needs a name")
             sub_name = parts[1]
-            # Pin names are positional tokens; ignore any trailing
-            # ``params:`` keyword or ``key=val`` parameter declarations.
+            # Pin names are positional tokens; ``PARAMS:`` (or the first
+            # ``key=val`` token) marks the start of the optional default
+            # parameter block.
             pins: list[str] = []
+            param_tokens: list[str] = []
+            in_params = False
             for tok in parts[2:]:
-                if tok.lower() == "params:" or "=" in tok:
-                    break
-                pins.append(tok)
-            cur = _SubcktDef(name=sub_name, pins=pins, lines=[])
+                if not in_params and (
+                    tok.lower() == "params:" or "=" in tok
+                ):
+                    in_params = True
+                if in_params:
+                    param_tokens.append(tok)
+                else:
+                    pins.append(tok)
+            try:
+                defaults = _parse_param_assignments(param_tokens)
+            except ValueError as e:
+                raise ValueError(
+                    f"line {lineno}: .SUBCKT {sub_name!r}: {e}"
+                ) from None
+            cur = _SubcktDef(
+                name=sub_name, pins=pins, defaults=defaults, lines=[]
+            )
             continue
 
         if head_lc == ".ends":
@@ -524,16 +587,30 @@ def _build_circuit(
                 )
         elif head == "x":
             _require(parts, 3, lineno, name)
+            # Split off any ``PARAMS: k=v ...`` instance overrides;
+            # everything before that is the standard ``Xinst node1
+            # ... nodeN subckt_name`` form (or a built-in keyword).
+            head_tokens = parts[1:]
+            param_tokens: list[str] = []
+            for i, tok in enumerate(head_tokens):
+                if tok.lower() == "params:" or "=" in tok:
+                    head_tokens, param_tokens = (
+                        head_tokens[:i], head_tokens[i:]
+                    )
+                    break
+            try:
+                instance_params = _parse_param_assignments(param_tokens)
+            except ValueError as e:
+                raise ValueError(f"line {lineno}: X{name!r}: {e}") from None
+
             # User-defined subckts win when the LAST positional token
-            # matches a ``.SUBCKT`` name (standard SPICE convention:
-            # ``Xinst node1 ... nodeN subckt_name``). Otherwise fall
-            # back to the built-in TRIODE / OPAMP dispatch keyed at
-            # parts[4] (which preserves their positional model
-            # parameters trailing the keyword).
-            last_lc = parts[-1].lower()
+            # before any PARAMS block matches a ``.SUBCKT`` name.
+            # Otherwise fall back to the built-in TRIODE / OPAMP
+            # dispatch keyed at parts[4].
+            last_lc = head_tokens[-1].lower() if head_tokens else ""
             if last_lc in subckt_defs:
                 sub_def = subckt_defs[last_lc]
-                pins = parts[1:-1]
+                pins = head_tokens[:-1]
                 if len(pins) != len(sub_def.pins):
                     raise ValueError(
                         f"line {lineno}: X{name!r} provides {len(pins)} pin "
@@ -547,8 +624,18 @@ def _build_circuit(
                     in_progress=in_progress,
                 )
                 port_map = dict(zip(sub_def.pins, pins))
-                circuit.add_subcircuit(name, body, port_map)
+                merged_params = dict(sub_def.defaults)
+                merged_params.update(instance_params)
+                circuit.add_subcircuit(name, body, port_map, merged_params)
                 continue
+            if param_tokens:
+                raise ValueError(
+                    f"line {lineno}: X{name!r}: PARAMS: only supported "
+                    f"on user-defined .SUBCKT instances, not on built-in "
+                    f"OPAMP/TRIODE dispatch"
+                )
+            # Restore parts to the legacy view for the built-in branch.
+            parts = [name] + head_tokens
 
             _require(parts, 5, lineno, name)
             subckt = parts[4].upper()
@@ -630,3 +717,372 @@ def _resolve_subckt_body(
 def parse_file(path: str | Path) -> Circuit:
     """Parse a SPICE netlist from a file path."""
     return parse(Path(path).read_text())
+
+
+# ---------------------------------------------------------------------------
+# SPICE writer
+# ---------------------------------------------------------------------------
+
+
+def _format_value(v: object) -> str:
+    """Render a component value as a SPICE token.
+
+    Numeric expressions become decimal literals; symbolic expressions
+    fall back to ``str(expr)``. Compound symbolic expressions (anything
+    containing whitespace) cannot round-trip through :func:`parse_value`
+    — emitted as-is so the caller can review.
+    """
+    if isinstance(v, str):
+        return v
+    expr = cas.sympify(v)
+    if expr.is_number:
+        try:
+            f = float(expr)
+        except (TypeError, ValueError):
+            return str(expr)
+        if f == int(f) and abs(f) < 1e16:
+            return str(int(f))
+        return f"{f:.12g}"
+    return str(expr)
+
+
+def _format_node(node: str) -> str:
+    """SPICE doesn't allow whitespace in node names; pass-through otherwise."""
+    if any(ch.isspace() for ch in node):
+        raise ValueError(f"node name {node!r} contains whitespace")
+    return node
+
+
+def _stable_subckt_name(
+    body: "Circuit", cls_name: str, used: set[str]
+) -> str:
+    """Pick a unique ``.SUBCKT`` identifier for ``body``.
+
+    Prefers ``body.name`` when it's set to something other than the
+    generic default (``"circuit"``); falls back to the SubCircuit
+    subclass name. Disambiguates collisions with a numeric suffix.
+    """
+    raw = body.name if body.name and body.name != "circuit" else cls_name
+    base = re.sub(r"[^A-Za-z0-9_]", "_", raw) or cls_name
+    candidate = base
+    i = 2
+    while candidate.lower() in used:
+        candidate = f"{base}_{i}"
+        i += 1
+    used.add(candidate.lower())
+    return candidate
+
+
+def _collect_templates(
+    circuit: "Circuit",
+) -> dict[int, tuple[str, "Circuit", list[str]]]:
+    """Walk the hierarchy and assign one ``.SUBCKT`` template per body.
+
+    Returns ``{id(body): (subckt_name, body, pin_order)}``. Bodies are
+    keyed by Python identity so multiple ``X`` instances that share a
+    body (the common SPICE-parsed case) collapse to one ``.SUBCKT``
+    block. Built-in OPAMP / OPAMP1 / Triode wrappers — which are emitted
+    via the legacy ``X ... OPAMP`` form — are skipped here.
+    """
+    from sycan.components.blocks.subcircuit import SubCircuit
+    from sycan.components.blocks.opamp import OPAMP, OPAMP1
+
+    templates: dict[int, tuple[str, "Circuit", list[str]]] = {}
+    used_names: set[str] = set()
+
+    def visit(comp_list: list) -> None:
+        for c in comp_list:
+            if not isinstance(c, SubCircuit):
+                continue
+            if isinstance(c, (OPAMP, OPAMP1)):
+                # Emitted inline via the built-in X-form; no template.
+                continue
+            key = id(c.body)
+            if key not in templates:
+                pins = list(c.port_map.keys())
+                name = _stable_subckt_name(c.body, type(c).__name__, used_names)
+                templates[key] = (name, c.body, pins)
+            visit(c.body.components)
+
+    visit(circuit.components)
+    return templates
+
+
+def _emit_subckt_block(
+    name: str,
+    body: "Circuit",
+    pins: list[str],
+    templates: dict[int, tuple[str, "Circuit", list[str]]],
+) -> list[str]:
+    """Render one ``.SUBCKT name pins ... .ENDS name`` block."""
+    header = ".SUBCKT " + " ".join([name, *pins])
+    lines = [header]
+    for comp in body.components:
+        lines.extend(_emit_component(comp, templates))
+    lines.append(f".ENDS {name}")
+    return lines
+
+
+def _emit_component(
+    comp,
+    templates: dict[int, tuple[str, "Circuit", list[str]]],
+) -> list[str]:
+    """Render a single component as one or more SPICE lines.
+
+    Dispatches on the concrete class name. Unknown classes raise
+    :class:`NotImplementedError` rather than producing silently-broken
+    output.
+    """
+    from sycan.components.blocks.subcircuit import SubCircuit
+    from sycan.components.blocks.opamp import OPAMP, OPAMP1
+    from sycan.components.active.triode import Triode
+
+    cls = type(comp).__name__
+
+    # SubCircuit (and the OPAMP/Triode special cases) come first because
+    # they're the polymorphic catch-all for hierarchy.
+    if isinstance(comp, OPAMP):
+        # Xname in_p in_n out OPAMP A
+        pm = comp.port_map
+        return [
+            " ".join([
+                comp.name, pm["in_p"], pm["in_n"], pm["out"],
+                "OPAMP", _format_value(comp.A),
+            ])
+        ]
+    if isinstance(comp, OPAMP1):
+        # OPAMP1 has no built-in SPICE letter form; emit as a generic
+        # subcircuit if a template exists, otherwise refuse.
+        raise NotImplementedError(
+            f"OPAMP1 {comp.name!r}: SPICE output not implemented "
+            "(use OPAMP for the ideal model or wire the first-order "
+            "block manually with R/C/E elements)"
+        )
+    if isinstance(comp, SubCircuit):
+        key = id(comp.body)
+        sub_name, _body, pins = templates[key]
+        nodes = [comp.port_map[p] for p in pins]
+        tokens = [comp.name, *nodes, sub_name]
+        if comp.params:
+            tokens.append("PARAMS:")
+            for k, v in comp.params.items():
+                tokens.append(f"{k}={_format_value(v)}")
+        return [" ".join(tokens)]
+
+    if cls in ("Resistor", "Capacitor", "Inductor"):
+        return [_emit_two_term(comp)]
+    if cls in ("VoltageSource", "CurrentSource"):
+        return [_emit_v_or_i_source(comp)]
+    if cls in ("VCVS", "VCCS"):
+        return [_emit_dep_voltage(comp)]
+    if cls in ("CCCS", "CCVS"):
+        return [_emit_dep_current(comp)]
+    if cls == "Diode":
+        return [_emit_diode(comp)]
+    if cls == "BJT":
+        return [_emit_bjt(comp)]
+    if cls in ("NMOS_L1", "PMOS_L1", "NMOS_3T", "PMOS_3T",
+               "NMOS_4T", "PMOS_4T",
+               "NMOS_subthreshold", "PMOS_subthreshold"):
+        return [_emit_mosfet(comp, cls)]
+    if cls in ("NJFET", "PJFET"):
+        return [_emit_jfet(comp, cls)]
+    if cls == "TLINE":
+        return [_emit_tline(comp)]
+    if cls == "Port":
+        return [_emit_port(comp)]
+    if cls == "GND":
+        return [f"{comp.name} {_format_node(comp.node)}"]
+    if cls == "MutualCoupling":
+        return [
+            " ".join([
+                comp.name,
+                *[str(n) for n in comp._inductor_names],
+                _format_value(comp.k),
+            ])
+        ]
+    if isinstance(comp, Triode):
+        return [
+            " ".join([
+                comp.name,
+                _format_node(comp.plate),
+                _format_node(comp.grid),
+                _format_node(comp.cathode),
+                "TRIODE",
+                _format_value(comp.K),
+                _format_value(comp.mu),
+            ])
+        ]
+
+    raise NotImplementedError(
+        f"to_spice: no SPICE-letter emitter for {cls!r} "
+        f"(component {getattr(comp, 'name', '?')!r})"
+    )
+
+
+def _emit_two_term(comp) -> str:
+    return " ".join([
+        comp.name,
+        _format_node(comp.n_plus),
+        _format_node(comp.n_minus),
+        _format_value(comp.value),
+    ])
+
+
+def _emit_v_or_i_source(comp) -> str:
+    """Emit V/I sources as ``DC <val> [AC <val>]`` (waveforms not supported)."""
+    if comp.waveform is not None:
+        raise NotImplementedError(
+            f"to_spice: waveform sources are not yet supported "
+            f"({comp.name!r}, waveform={comp.waveform!r})"
+        )
+    tokens = [
+        comp.name,
+        _format_node(comp.n_plus),
+        _format_node(comp.n_minus),
+    ]
+    if comp.ac_value is not None:
+        tokens += ["DC", _format_value(comp.value),
+                   "AC", _format_value(comp.ac_value)]
+    else:
+        tokens.append(_format_value(comp.value))
+    return " ".join(tokens)
+
+
+def _emit_dep_voltage(comp) -> str:
+    """E (VCVS) and G (VCCS) — voltage-controlled."""
+    return " ".join([
+        comp.name,
+        _format_node(comp.n_plus),
+        _format_node(comp.n_minus),
+        _format_node(comp.nc_plus),
+        _format_node(comp.nc_minus),
+        _format_value(comp.gain),
+    ])
+
+
+def _emit_dep_current(comp) -> str:
+    """F (CCCS) and H (CCVS) — current-controlled by another V source."""
+    return " ".join([
+        comp.name,
+        _format_node(comp.n_plus),
+        _format_node(comp.n_minus),
+        comp.ctrl,
+        _format_value(comp.gain),
+    ])
+
+
+def _emit_diode(comp) -> str:
+    tokens = [
+        comp.name,
+        _format_node(comp.anode),
+        _format_node(comp.cathode),
+        _format_value(comp.IS),
+    ]
+    if getattr(comp, "N", None) is not None:
+        tokens.append(_format_value(comp.N))
+    if getattr(comp, "V_T", None) is not None:
+        tokens.append(_format_value(comp.V_T))
+    return " ".join(tokens)
+
+
+def _emit_bjt(comp) -> str:
+    return " ".join([
+        comp.name,
+        _format_node(comp.collector),
+        _format_node(comp.base),
+        _format_node(comp.emitter),
+        comp.polarity,
+        _format_value(comp.IS),
+        _format_value(comp.BF),
+        _format_value(comp.BR),
+    ])
+
+
+def _emit_mosfet(comp, cls: str) -> str:
+    """All MOSFET flavours map to ``Mname ... TYPE mu Cox W L V_TH ...``."""
+    tokens = [comp.name, _format_node(comp.drain), _format_node(comp.gate),
+              _format_node(comp.source)]
+    if cls in ("NMOS_4T", "PMOS_4T"):
+        tokens.append(_format_node(comp.bulk))
+        type_attr = cls.upper()
+    else:
+        type_attr = cls.upper()
+    tokens.append(type_attr)
+    tokens += [
+        _format_value(comp.mu_n),
+        _format_value(comp.Cox),
+        _format_value(comp.W),
+        _format_value(comp.L),
+        _format_value(getattr(comp, "V_TH0", None) or comp.V_TH),
+    ]
+    return " ".join(tokens)
+
+
+def _emit_jfet(comp, cls: str) -> str:
+    return " ".join([
+        comp.name,
+        _format_node(comp.drain),
+        _format_node(comp.gate),
+        _format_node(comp.source),
+        "NJF" if cls == "NJFET" else "PJF",
+        _format_value(comp.BETA),
+        _format_value(comp.VTO),
+    ])
+
+
+def _emit_tline(comp) -> str:
+    return " ".join([
+        comp.name,
+        _format_node(comp.n_in_p),
+        _format_node(comp.n_in_m),
+        _format_node(comp.n_out_p),
+        _format_node(comp.n_out_m),
+        _format_value(comp.Z0),
+        _format_value(comp.td),
+    ])
+
+
+def _emit_port(comp) -> str:
+    tokens = [comp.name, _format_node(comp.n_plus), _format_node(comp.n_minus)]
+    if getattr(comp, "role", "generic") != "generic":
+        tokens.append(comp.role)
+    return " ".join(tokens)
+
+
+def to_spice(circuit: "Circuit", *, title: Optional[str] = None) -> str:
+    """Serialize ``circuit`` to a SPICE netlist string.
+
+    Hierarchical designs are emitted with one ``.SUBCKT`` block per
+    distinct body identity, followed by the top-level component list.
+    SubCircuit instances become ``X`` references that carry their
+    ``params`` dict via ``PARAMS:``. The first line is a SPICE title
+    (defaults to ``circuit.name``).
+
+    Components without a SPICE-letter representation (e.g. behavioural
+    sources, switches, varactors, transfer-function and signal-flow
+    blocks, ``OPAMP1``) raise :class:`NotImplementedError`.
+    """
+    title_line = title if title is not None else circuit.name
+    lines: list[str] = [title_line]
+
+    templates = _collect_templates(circuit)
+    for name, body, pins in templates.values():
+        lines.append("")
+        lines.extend(_emit_subckt_block(name, body, pins, templates))
+
+    if templates:
+        lines.append("")
+
+    for comp in circuit.components:
+        lines.extend(_emit_component(comp, templates))
+
+    lines.append(".end")
+    return "\n".join(lines) + "\n"
+
+
+def write_file(circuit: "Circuit", path: str | Path) -> Path:
+    """Write ``circuit`` to ``path`` as a SPICE netlist."""
+    p = Path(path)
+    p.write_text(to_spice(circuit))
+    return p

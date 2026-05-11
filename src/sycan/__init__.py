@@ -1,7 +1,7 @@
 """sycan: symbolic circuit analysis."""
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
-from sycan.circuit import Circuit
+from sycan.circuit import Circuit, print_hierarchy
 from sycan.components.active import (
     BJT,
     Diode,
@@ -86,7 +86,7 @@ from sycan.mna import T as T_kelvin  # avoid shadowing trans-line letter elsewhe
 from sycan.autodraw import autodraw
 from sycan.polynomials import bessel, butterworth, chebyshev1
 from sycan.schematic import draw
-from sycan.spice import parse, parse_file, parse_value
+from sycan.spice import parse, parse_file, parse_value, to_spice, write_file
 from sycan.svg_util import bode_svg
 
 __all__ = [
@@ -175,6 +175,9 @@ __all__ = [
     "solve_sensitivity",
     "solve_tf",
     "main",
+    "print_hierarchy",
+    "to_spice",
+    "write_file",
 ]
 
 

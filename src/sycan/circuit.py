@@ -62,6 +62,16 @@ from sycan.components.basic import (
 )
 
 
+def print_hierarchy(circuit: "Circuit", file=None) -> None:
+    """Print ``circuit``'s hierarchy tree to ``file`` (or stdout).
+
+    Convenience wrapper for :meth:`Circuit.print_hierarchy` so callers
+    can write ``sycan.print_hierarchy(c)`` symmetrically with the rest
+    of the top-level analysis API.
+    """
+    circuit.print_hierarchy(file=file)
+
+
 _WAVEFORM_KEYS = frozenset({
     "waveform", "amplitude", "frequency", "phase",
     "v1", "v2", "td", "pw", "td1", "tau1", "td2", "tau2",
@@ -102,7 +112,10 @@ class Circuit:
         """Return a name → class map of every registered component type."""
         return Component.available()
 
-    def flat_components(self) -> list[Component]:
+    def flat_components(
+        self,
+        collapse_paths: Optional[frozenset[tuple[str, ...]]] = None,
+    ) -> list:
         """All leaf components, recursively expanding any :class:`SubCircuit`.
 
         :class:`SubCircuit` instances are flattened into renamed,
@@ -110,11 +123,19 @@ class Circuit:
         :meth:`SubCircuit.expand_leaves`). Non-subcircuit components are
         passed through unchanged. Used by the MNA build / solve path so
         that hierarchical designs are stamped as if hand-inlined.
+
+        ``collapse_paths`` is an optional set of fully-qualified
+        :class:`SubCircuit` instance paths (tuples) that should be
+        replaced by a single ``_CollapsedGroup`` placeholder instead of
+        being expanded. Intended for use by visualisation code that
+        wants to hide implementation detail; the placeholders are not
+        valid MNA components, so callers passing ``collapse_paths``
+        must not feed the result back into the solver.
         """
-        out: list[Component] = []
+        out: list = []
         for c in self.components:
             if isinstance(c, SubCircuit):
-                out.extend(c.expand_leaves())
+                out.extend(c.expand_leaves(collapse_paths=collapse_paths))
             else:
                 out.append(c)
         return out
@@ -199,7 +220,13 @@ class Circuit:
             pins = ", ".join(
                 f"{pin}={node}" for pin, node in c.port_map.items()
             )
-            return f"{c.name} [{cls}]  ({pins})"
+            extra = ""
+            if getattr(c, "params", None):
+                params_str = ", ".join(
+                    f"{k}={v}" for k, v in c.params.items()
+                )
+                extra = f"  PARAMS: {params_str}"
+            return f"{c.name} [{cls}]  ({pins}){extra}"
         nodes = ", ".join(
             str(getattr(c, attr))
             for attr in c.ports
@@ -212,9 +239,21 @@ class Circuit:
         name: str,
         body: "Circuit",
         port_map: dict[str, str],
+        params: Optional[dict[str, Value]] = None,
     ) -> SubCircuit:
-        """Add a generic subcircuit instance wrapping ``body``."""
-        return self.add(SubCircuit(name=name, body=body, port_map=port_map))  # type: ignore[return-value]
+        """Add a generic subcircuit instance wrapping ``body``.
+
+        ``params`` (optional) maps parameter names to values that
+        substitute matching ``cas.Symbol(name)`` placeholders inside
+        the body when it is flattened. Outer params propagate into
+        nested :class:`SubCircuit` instances unless those instances
+        override the same key.
+        """
+        return self.add(
+            SubCircuit(
+                name=name, body=body, port_map=port_map, params=params or {}
+            )
+        )  # type: ignore[return-value]
 
     def add_opamp(
         self,
@@ -858,3 +897,106 @@ class Circuit:
             for name, i in sorted(self._nodes.items(), key=lambda kv: kv[1])
             if name != "0"
         ]
+
+    def group(
+        self,
+        components: list[Component],
+        name: str,
+        body_name: Optional[str] = None,
+        params: Optional[dict[str, Value]] = None,
+    ) -> SubCircuit:
+        """Wrap an existing slice of this circuit's components in a SubCircuit.
+
+        Replaces the listed components in place: they are removed from
+        ``self.components`` and reattached inside a freshly created
+        body :class:`Circuit`, with a new :class:`SubCircuit` instance
+        inserted at the position of the first removed component.
+
+        Pin selection is automatic: any node that the listed components
+        reference and that is *also* used by something outside the
+        group (or is the SPICE ground node ``"0"``) becomes an external
+        pin. Internal-only nodes stay namespaced inside the body.
+
+        Parameters
+        ----------
+        components
+            The components to absorb. Must all currently belong to
+            ``self.components``; order is preserved inside the body.
+        name
+            Designator for the new ``SubCircuit`` instance (e.g. ``"X1"``).
+        body_name
+            Optional name for the body :class:`Circuit`; defaults to
+            ``name``.
+        params
+            Optional ``{symbol: value}`` map propagated into the body
+            via the standard parameter mechanism.
+        """
+        if not components:
+            raise ValueError("group: components list is empty")
+
+        member_ids = {id(c) for c in components}
+        if len(member_ids) != len(components):
+            raise ValueError("group: components list contains duplicates")
+
+        # Confirm every requested component is currently in this circuit.
+        present_ids = {id(existing) for existing in self.components}
+        for c in components:
+            if id(c) not in present_ids:
+                raise ValueError(
+                    f"group: component {getattr(c, 'name', c)!r} is not in "
+                    f"this circuit"
+                )
+
+        # Inventory node usage on both sides of the group boundary.
+        inside_nodes: set[str] = set()
+        for c in components:
+            for node in c.iter_node_names():
+                inside_nodes.add(node)
+
+        outside_nodes: set[str] = set()
+        for c in self.components:
+            if id(c) in member_ids:
+                continue
+            for node in c.iter_node_names():
+                outside_nodes.add(node)
+
+        # External pins = nodes that cross the boundary or are ground.
+        external = sorted(
+            n for n in inside_nodes
+            if n == "0" or n in outside_nodes
+        )
+
+        # Build the body and rewrite each member's external-node attrs
+        # so the body sees pin-name nodes (we keep the same names — pin
+        # name == external node name — which keeps SubCircuit.expand_leaves
+        # happy and avoids touching internal-only nodes).
+        body = Circuit(name=body_name or name)
+        for c in components:
+            body.add(c)
+
+        port_map = {pin: pin for pin in external if pin != "0"}
+        # Ground may appear inside without needing a pin; SubCircuit
+        # treats "0" as universal across scopes.
+
+        # Splice: remove members from self.components, insert new SubCircuit
+        # at the position of the first removed one.
+        first_idx = next(
+            i for i, c in enumerate(self.components) if id(c) in member_ids
+        )
+        self.components = [
+            c for c in self.components if id(c) not in member_ids
+        ]
+        sub = SubCircuit(
+            name=name, body=body, port_map=port_map, params=params or {}
+        )
+        self.components.insert(first_idx, sub)
+        # Rebuild the parent's node table from scratch so any internal-
+        # only node that is now namespaced inside the body (e.g. ``inv``
+        # → ``X1.inv``) drops out and the new namespaced names land in.
+        # Otherwise stale entries in ``_nodes`` widen the MNA matrix
+        # with zero rows and make it singular at solve time.
+        self._nodes = {"0": 0}
+        for c in self.components:
+            for node in c.iter_node_names():
+                self._touch(node)
+        return sub
