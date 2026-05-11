@@ -7,21 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] — 2026-05-11
+
 ### Added
-- `main()` CLI entry point with `--version` and `parse` subcommand.
-- PyPI classifiers, license metadata, and `keywords` in `pyproject.toml`.
-- Optional `[symengine]` extra for the faster CAS backend.
-- `sycan.check`, `sycan.headroom`, `sycan.plot_util`, `sycan.cas`, and
-  `sycan.components.blocks` in the Sphinx API reference.
-- Python 3.11 / 3.12 / 3.13 matrix in CI.
+
+#### Assumption engine
+- New `sycan.assumptions` module with first-class symbolic constraints:
+  - `Limit(symbol, target)` — fold a free symbol via `cas.limit()`
+    (e.g. op-amp gain `A → ∞` collapses closed-loop expressions to
+    their ideal form).
+  - `MuchGreater(big, small)` and `MuchLess(small, big)` — relative-
+    magnitude assumptions; if either side is a bare symbol the engine
+    uses the simpler `→ ∞` / `→ 0` limit, otherwise an
+    ε-substitution `small = ε·big, ε → 0`.
+  - `Approximate(symbol, value)` — tracked substitution without taking
+    a limit.
+  - `Region(component, region)` — declare a device's operating region
+    (no equation change); the checker re-evaluates the claim against
+    the solved operating point. Recognised regions: MOSFET
+    saturation/triode/cutoff, BJT forward-active/reverse-active/
+    saturation/cutoff, diode forward/reverse. Polarity is handled
+    automatically (PMOS, PNP).
+- `CheckResult` carries pass/fail, the violating inequality, and a
+  `measured` dict of the computed quantities (`V_GS_eff`, `V_DS_eff`,
+  `V_TH`, `V_OV`, `V_BE_eff`, `V_BC_eff`, …).
+- Module helpers: `apply_assumptions`, `check_assumptions`,
+  `format_check_report`, `violations`.
+- `Circuit.assume(*assumptions)` plus four sugar methods —
+  `assume_limit`, `assume_much_greater`, `assume_much_less`,
+  `assume_region` — and `Circuit.check_assumptions(solution)`.
+
+#### Unified solver
+- New `sycan.solve(circuit, *, mode='dc'|'ac', s=None, simplify=False,
+  assume=None)` entry point. For LTI circuits, `mode='dc'` literally
+  builds the AC matrix and substitutes `s = 0` (the formal *DC = AC at
+  ω → 0* unification, with a `cas.limit` fallback for expressions
+  singular at zero). Circuits containing nonlinear devices fall back
+  to the existing `solve_dc` path.
+- `solve_dc` and `solve_ac` accept a new `assume=` kwarg that combines
+  with circuit-attached assumptions.
+
+#### Hierarchical design
+- Parameterised subcircuits: `SubCircuit.params: dict[str, Value]`
+  substitutes matching `cas.Symbol` placeholders on every cloned leaf
+  at expansion time. Outer params propagate into nested SubCircuits
+  unless the inner instance overrides the same key.
+- `Circuit.group(components, name, …)` wraps a slice of a circuit's
+  components into a new SubCircuit *in place* — derives external pins
+  from cross-boundary node usage, namespaces internal-only nodes, and
+  rebuilds the parent's node table so the MNA matrix stays well-formed.
+- `Circuit.print_hierarchy` (and a top-level `sycan.print_hierarchy`
+  helper) now displays each SubCircuit's `PARAMS:` inline.
+
+#### SPICE I/O
+- New `to_spice(circuit) -> str` writer (and `write_file(circuit,
+  path)`) emits one `.subckt` block per distinct body identity with
+  per-instance `PARAMS:` overrides on the `X` lines. Built-in `OPAMP`
+  round-trips through the existing `X … OPAMP A` form.
+- SPICE parser learns `.SUBCKT name pins… PARAMS: k=v …` (defaults)
+  and `Xinst pins… name PARAMS: k=v …` (per-instance overrides),
+  merging them into the SubCircuit's `params` dict.
+
+#### Autodraw
+- `autodraw(collapse=…)` parameter accepts a dotted group path (or a
+  list of them) and replaces matching SubCircuits with a single
+  purple-outlined placeholder rectangle. Unknown paths raise
+  `ValueError` listing the actual hierarchy paths.
+- Group-aware layout: every leaf carries its enclosing-SubCircuit
+  chain via a `_group_path` tag set by `SubCircuit.expand_leaves`.
+  The SA cost adds a column-span penalty proportional to group size
+  so members cluster into adjacent columns; column widths reserve
+  room for the group rectangle's margin (and `_compact_blanks`
+  honours it) so the dashed bounding box never overlaps a neighbour.
+- Nested groups render as concentric rectangles with a per-level
+  padding step (default 6 px) so outer rectangles always stand out
+  from the inner ones.
+
+#### Documentation
+- New `sphinx/assumptions.rst` page covering motivation, all four
+  assumption types, attached vs. inline styles, the unified solver,
+  and the post-solve checker — wired into the toctree.
+- Three new REPL presets under an "Assumptions" category in
+  `docs/repl/examples/manifest.json`: ideal op-amp limit, divider
+  asymptotes via `MuchGreater`, and a MOSFET region check that
+  catches a biasing mistake.
 
 ### Changed
+- Autodraw flattens via `circuit.flat_components()` rather than
+  walking `circuit.components` directly, so any hierarchy renders
+  correctly.
+
+### Tests
+- 27 new tests under `tests/assumptions/` (limit collapse,
+  much-greater simplification, MOSFET / BJT region checks, DC ≡ AC@s=0
+  unification).
+- 13 in `tests/blocks/test_subcircuit_params.py` (parameter
+  propagation, nested overrides, parser PARAMS handling, parse↔to_spice
+  round-trip).
+- 13 in `tests/blocks/test_group.py` (group plumbing and behaviour
+  preservation).
+- 23 in `tests/drawing/test_autodraw_groups.py` (group bounding boxes,
+  nested concentric rendering, depth-step padding, collapse rendering,
+  pin clearance against neighbours). Visual diagrams 20–31 land under
+  `tests/drawing/diagrams/` for spot-checking.
+- Suite total: 408 passing.
+
+### Pre-existing infrastructure (also shipped in 0.1.8)
+- `main()` CLI entry point with `--version` and `parse` subcommand.
+- PyPI classifiers, license metadata, and `keywords` in
+  `pyproject.toml`.
+- Optional `[symengine]` extra for the faster CAS backend.
+- `sycan.check`, `sycan.headroom`, `sycan.plot_util`, `sycan.cas`,
+  and `sycan.components.blocks` in the Sphinx API reference.
+- Python 3.11 / 3.12 / 3.13 matrix in CI.
 - Expanded `README.md` with installation, quick-start example, and an
   analysis-mode reference table.
-
-### Removed
-- Pre-built REPL wheel (`docs/repl/sycan-*.whl`) — built fresh by CI and
-  `run_webpage.sh`, no longer committed to the repo.
+- Pre-built REPL wheel removed from the repo (`docs/repl/sycan-*.whl`
+  is now built fresh by CI and `run_webpage.sh`).
 
 ## [0.1.7] — 2026
 
