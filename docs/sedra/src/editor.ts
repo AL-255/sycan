@@ -569,6 +569,26 @@ function render(): void {
     drawWirePreview();
   }
 
+  // Layer 4.2: connection snap indicator. While the WIRE tool is up,
+  // ring the snapped cursor point green when it lands on a valid
+  // connection target (part terminal or existing wire).
+  if (state.tool === 'WIRE' && state.cursorInside) {
+    const snapped = snapPt(state.cursorWorld);
+    if (isConnectionTarget(snapped)) {
+      el('circle', {
+        cx: snapped[0], cy: snapped[1], r: 5 / state.zoom,
+        class: 'snap-ring', 'pointer-events': 'none',
+      }, svg);
+    }
+    if (state.wireDraft && state.wireDraft.points.length) {
+      const start = state.wireDraft.points[0];
+      el('circle', {
+        cx: start[0], cy: start[1], r: 4 / state.zoom,
+        class: 'snap-ring snap-ring-start', 'pointer-events': 'none',
+      }, svg);
+    }
+  }
+
   // Layer 5: tool placement preview
   if (placementPreview) {
     const previewG = drawPart(placementPreview, { preview: true });
@@ -623,6 +643,7 @@ function render(): void {
   updateNetlist();
   updateCoords();
   updateStatusBar();
+  updateStarterCard();
   saveLocal();
 }
 
@@ -772,6 +793,9 @@ function drawNetLabels(): void {
         x: bb.x - pad, y: bb.y - pad,
         width: bb.width + 2 * pad,
         height: bb.height + 2 * pad,
+        // Presentation attributes (not CSS geometry props) so the
+        // rounding survives SVG export into any renderer.
+        rx: 3, ry: 3,
         class: 'net-label-bg',
       });
       // Insert behind the text so the text remains legible.
@@ -2993,6 +3017,68 @@ function recentParts(): ElemKind[] {
   return seed.filter(k => k in ELEM_TYPES) as ElemKind[];
 }
 
+function selectSimilar(partId: string): void {
+  const seed = state.parts.find(pp => pp.id === partId);
+  if (!seed) return;
+  state.selectedIds = new Set(
+    state.parts.filter(pp => pp.type === seed.type).map(pp => pp.id));
+  state.selectedSegments.clear();
+  refreshProps();
+  render();
+  flashHint(`Selected ${state.selectedIds.size} × ${ELEM_TYPES[seed.type].label ?? seed.type}`);
+}
+
+// Tab / Shift+Tab cycles the selection through parts in stable id
+// order (KiCad-style probe-next-part).
+function cycleSelection(dir: 1 | -1): void {
+  if (!state.parts.length) return;
+  const ordered = [...state.parts].sort((a, b) => a.id.localeCompare(b.id));
+  let idx = -1;
+  if (state.selectedIds.size === 1) {
+    const [cur] = state.selectedIds;
+    idx = ordered.findIndex(pp => pp.id === cur);
+  }
+  const next = ordered[((idx + dir) % ordered.length + ordered.length) % ordered.length];
+  state.selectedIds = new Set([next.id]);
+  state.selectedSegments.clear();
+  refreshProps();
+  render();
+}
+
+// Renumber every part by type prefix in reading order (top-left →
+// bottom-right), remapping control references. One undo step.
+function renumberParts(): void {
+  if (!state.parts.length) return;
+  const ordered = [...state.parts].sort((a, b) =>
+    a.y - b.y || a.x - b.x || a.id.localeCompare(b.id));
+  const counters: Record<string, number> = {};
+  const idMap = new Map<string, string>();
+  for (const pp of ordered) {
+    const prefix = ELEM_TYPES[pp.type]?.prefix ?? 'U';
+    counters[prefix] = (counters[prefix] || 0) + 1;
+    idMap.set(pp.id, `${prefix}${counters[prefix]}`);
+  }
+  let changed = 0;
+  for (const pp of state.parts) {
+    const next = idMap.get(pp.id)!;
+    if (pp.id !== next) changed++;
+    // Default values track the id (e.g. R1's value "R1") — keep them
+    // in sync when they were never customised.
+    if (pp.value === pp.id) pp.value = next;
+    pp.id = next;
+  }
+  for (const pp of state.parts) {
+    if (pp.ctrlSrc && idMap.has(pp.ctrlSrc)) pp.ctrlSrc = idMap.get(pp.ctrlSrc);
+  }
+  state.selectedIds = new Set(
+    [...state.selectedIds].map(id => idMap.get(id) ?? id));
+  state.nameCounters = counters;
+  pushHistory();
+  refreshProps();
+  render();
+  notify(`Renumbered ${state.parts.length} parts (${changed} changed)`, 'info');
+}
+
 // ---- registry ----
 const hasSel = () => state.selectedIds.size > 0 || state.selectedSegments.size > 0;
 const clipboardFull = () =>
@@ -3032,6 +3118,16 @@ const COMMANDS: Command[] = [
         copySelection(false);
       }
     } },
+  { id: 'select.similar', title: ctx => {
+      const pp = ctx.hit ? state.parts.find(x => x.id === ctx.hit!.id) : null;
+      return `Select all ${pp ? (ELEM_TYPES[pp.type].label ?? pp.type) : 'similar'}`;
+    }, group: 'Selection',
+    menu: { section: 'part', order: 30 },
+    enabled: ctx => ctx.hit?.kind === 'part',
+    run: ctx => selectSimilar(ctx.hit!.id) },
+  { id: 'edit.renumber', title: 'Renumber parts', group: 'Edit',
+    enabled: () => state.parts.length > 0,
+    run: () => renumberParts() },
   { id: 'wire.expandNet', title: 'Select whole net', group: 'Selection', shortcut: 'U',
     cheat: true,
     menu: { section: 'wire', order: 10 },
@@ -3567,6 +3663,7 @@ const STATIC_SHORTCUT_ROWS: Record<string, Array<[string, string]>> = {
     ['Ctrl+click', 'Toggle'],
     ['Drag', 'Move (wires follow)'],
     ['Right-click', 'Context menu'],
+    ['Tab / Shift+Tab', 'Cycle through parts'],
     ['M', 'Move with cursor'],
   ],
   View: [
@@ -4261,6 +4358,31 @@ function toggleErc(): void {
   flashHint(ercVisible ? 'ERC markers shown' : 'ERC markers hidden');
 }
 
+// Is this grid point a valid wire-connection target — a part
+// terminal, a wire endpoint/vertex, or on a wire segment?
+function isConnectionTarget(pt: Point): boolean {
+  const [x, y] = pt;
+  for (const pp of state.parts) {
+    for (const term of partTerminals(pp)) {
+      if (term.pos[0] === x && term.pos[1] === y) return true;
+    }
+  }
+  for (const w of state.wires) {
+    if (w.bad || w.points.length < 2) continue;
+    for (const p2 of w.points) {
+      if (p2[0] === x && p2[1] === y) return true;
+    }
+    for (let i = 0; i < w.points.length - 1; i++) {
+      const a = w.points[i], b = w.points[i + 1];
+      if (a[0] === b[0] && x === a[0]
+          && y > Math.min(a[1], b[1]) && y < Math.max(a[1], b[1])) return true;
+      if (a[1] === b[1] && y === a[1]
+          && x > Math.min(a[0], b[0]) && x < Math.max(a[0], b[0])) return true;
+    }
+  }
+  return false;
+}
+
 function ercFindings(): ErcFinding[] {
   const out: ErcFinding[] = [];
   if (!state.parts.length && !state.wires.length) return out;
@@ -4338,7 +4460,20 @@ function ercFindings(): ErcFinding[] {
     }
   }
 
-  // 3. Missing ground reference.
+  // 3. Duplicate reference designators (possible after JSON import).
+  const seenIds = new Map<string, Part>();
+  for (const pp of state.parts) {
+    const prev = seenIds.get(pp.id);
+    if (prev) {
+      out.push({ level: 'error',
+                 msg: `Duplicate designator ${pp.id}`,
+                 at: [pp.x, pp.y], ids: [pp.id] });
+    } else {
+      seenIds.set(pp.id, pp);
+    }
+  }
+
+  // 4. Missing ground reference.
   if (state.parts.length && !state.parts.some(pp => pp.type === 'gnd')) {
     const first = state.parts[0];
     const [bx0, by0] = partBBox(first);
@@ -4390,7 +4525,6 @@ function drawErcMarkers(): void {
     // offset) so the underlying terminal / part stays clickable; a
     // hairline leader ties it back to the exact spot.
     const off = 14 / state.zoom;
-    const r = 7 / state.zoom;
     const bx = f.at[0] + off, by = f.at[1] - off;
     el('path', {
       d: `M${f.at[0]},${f.at[1]} L${bx},${by}`,
@@ -4398,8 +4532,14 @@ function drawErcMarkers(): void {
       'vector-effect': 'non-scaling-stroke', fill: 'none',
       'pointer-events': 'none',
     }, g);
-    el('circle', { cx: bx, cy: by, r }, g);
-    el('text', { x: bx, y: by + 0.5 }, g).textContent = '!';
+    // Counter-scaled inner group: circle AND text are authored in
+    // fixed screen pixels (CSS font-size stays 9px on screen at any
+    // zoom).
+    const badge = el('g', {
+      transform: `translate(${bx} ${by}) scale(${1 / state.zoom})`,
+    }, g) as SVGGElement;
+    el('circle', { cx: 0, cy: 0, r: 7 }, badge);
+    el('text', { x: 0, y: 0.5 }, badge).textContent = '!';
     g.addEventListener('mousedown', (ev: Event) => {
       ev.stopPropagation();
       focusErcFinding(f);
@@ -4439,17 +4579,31 @@ function exportSchematicSvg(): string | null {
   const bbox = schematicBBox();
   if (!bbox) return null;
 
-  // Re-render with interaction layers suppressed.
+  // Re-render with every interaction/overlay layer suppressed — the
+  // export style block has no rules for them, so any leak renders as
+  // solid black default fills.
   const savedSel = state.selectedIds;
   const savedSegs = state.selectedSegments;
   const savedCursor = state.cursorInside;
   const savedHover = hoverTarget;
   const savedBox = state.boxSelect;
+  const savedCalcHl = state.calcNodeHighlight;
+  const savedNetHl = state.netHighlightOverlay;
+  const savedDraft = state.wireDraft;
+  const savedPreview = placementPreview;
+  const savedMatrixHl = matrixHighlightPartIds;
+  const savedErc = ercCache;
   state.selectedIds = new Set();
   state.selectedSegments = new Set();
   state.cursorInside = false;
   hoverTarget = null;
   state.boxSelect = null;
+  state.calcNodeHighlight = null;
+  state.netHighlightOverlay = null;
+  state.wireDraft = null;
+  placementPreview = null;
+  matrixHighlightPartIds = new Set();
+  ercCache = [];
   render();
   const clone = svg.cloneNode(true) as SVGSVGElement;
   state.selectedIds = savedSel;
@@ -4457,11 +4611,21 @@ function exportSchematicSvg(): string | null {
   state.cursorInside = savedCursor;
   hoverTarget = savedHover;
   state.boxSelect = savedBox;
+  state.calcNodeHighlight = savedCalcHl;
+  state.netHighlightOverlay = savedNetHl;
+  state.wireDraft = savedDraft;
+  placementPreview = savedPreview;
+  matrixHighlightPartIds = savedMatrixHl;
+  ercCache = savedErc;
   render();
 
-  // Strip editor-only layers.
+  // Strip editor-only layers (belt-and-braces for future layers).
   clone.querySelector('#hit-layer')?.remove();
   clone.querySelectorAll('[data-layer="grid"]').forEach(n => n.remove());
+  clone.querySelectorAll(
+    '.erc-marker, .net-highlight, .net-highlight-term, ' +
+    '.calc-node-highlight, .matrix-part-highlight, .preview, .snap-ring'
+  ).forEach(n => n.remove());
 
   const [x0, y0, x1, y1] = bbox;
   clone.setAttribute('viewBox', `${x0} ${y0} ${x1 - x0} ${y1 - y0}`);
@@ -4789,14 +4953,40 @@ document.getElementById('btn-fit')!.addEventListener('click', fitView);
 
 document.getElementById('sb-grid')!.textContent = `Grid ${GRID}`;
 
+// Suppress the inter-group divider on groups that lead a wrapped
+// toolbar line (CSS alone can't detect flex wrap).
+function markToolbarRowStarts(): void {
+  for (const row of document.querySelectorAll<HTMLElement>('.toolbar-row')) {
+    let prevTop: number | null = null;
+    for (const g of row.querySelectorAll<HTMLElement>(':scope > .group')) {
+      g.classList.toggle('row-start',
+        prevTop !== null && g.offsetTop !== prevTop);
+      prevTop = g.offsetTop;
+    }
+  }
+}
+markToolbarRowStarts();
+window.addEventListener('resize', markToolbarRowStarts);
+
 // Drag-options gear popover.
 {
   const gear = document.getElementById('btn-drag-options') as HTMLButtonElement;
   const pop = document.getElementById('drag-options-pop') as HTMLElement;
+  const onPopKey = (ev: KeyboardEvent) => {
+    if (ev.key === 'Escape') {
+      closePop();
+      gear.focus();
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+  };
   const closePop = () => {
     pop.hidden = true;
     gear.setAttribute('aria-expanded', 'false');
     gear.classList.remove('active');
+    document.removeEventListener('keydown', onPopKey, true);
+    window.removeEventListener('resize', closePop);
+    window.removeEventListener('blur', closePop);
   };
   gear.addEventListener('click', () => {
     if (!pop.hidden) { closePop(); return; }
@@ -4806,6 +4996,9 @@ document.getElementById('sb-grid')!.textContent = `Grid ${GRID}`;
     pop.hidden = false;
     gear.setAttribute('aria-expanded', 'true');
     gear.classList.add('active');
+    document.addEventListener('keydown', onPopKey, true);
+    window.addEventListener('resize', closePop);
+    window.addEventListener('blur', closePop);
   });
   document.addEventListener('mousedown', (e: MouseEvent) => {
     if (!pop.hidden && !pop.contains(e.target as Node)
@@ -4848,6 +5041,63 @@ document.getElementById('sb-erc')!.addEventListener('click', () => {
   ercCycle++;
   focusErcFinding(f);
 });
+
+// Empty-canvas starter card: quick orientation for first-time users,
+// dismissed once and remembered.
+const WELCOME_KEY = 'sycan.sedra.welcome.v1';
+let starterCardEl: HTMLElement | null = null;
+
+function loadExampleCircuit(): void {
+  state.parts = []; state.wires = [];
+  state.nameCounters = {}; state.nextId = 1;
+  state.selectedIds.clear(); state.selectedSegments.clear();
+  addPart('vsrc', 0, 80, 0);
+  addPart('res', 160, 0, 0);
+  addPart('res', 320, 80, 0);
+  addPart('gnd', 0, 240, 0);
+  addPart('gnd', 320, 240, 0);
+  state.wires.push({ id: `W${state.nextId++}`, points: [[0, 40], [0, -40], [160, -40]] });
+  state.wires.push({ id: `W${state.nextId++}`, points: [[160, 40], [160, 60], [320, 60], [320, 40]] });
+  state.wires.push({ id: `W${state.nextId++}`, points: [[0, 120], [0, 240]] });
+  state.wires.push({ id: `W${state.nextId++}`, points: [[320, 120], [320, 240]] });
+  pushHistory();
+  setTool('select');
+  fitView();
+  refreshProps();
+  flashHint('Example loaded — try Calc Node on the middle net');
+}
+
+function updateStarterCard(): void {
+  const empty = !state.parts.length && !state.wires.length;
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(WELCOME_KEY) === '1'; } catch (_) { /* ok */ }
+  const want = empty && !dismissed;
+  if (!want) {
+    if (starterCardEl) { starterCardEl.remove(); starterCardEl = null; }
+    return;
+  }
+  if (starterCardEl) return;
+  const card = document.createElement('div');
+  card.className = 'starter-card';
+  card.innerHTML =
+    '<button class="starter-close" type="button" aria-label="Dismiss">×</button>' +
+    '<h2>Start a schematic</h2>' +
+    '<ul>' +
+    '<li><kbd>R</kbd> <kbd>L</kbd> <kbd>C</kbd> <kbd>V</kbd>… then click the grid to place</li>' +
+    '<li><kbd>W</kbd> draws wires &middot; corners snap to Manhattan</li>' +
+    '<li><kbd>Ctrl+K</kbd> command palette &middot; <kbd>?</kbd> all shortcuts</li>' +
+    '</ul>' +
+    '<button class="starter-example" type="button">Load an example circuit</button>';
+  card.querySelector('.starter-close')!.addEventListener('click', () => {
+    try { localStorage.setItem(WELCOME_KEY, '1'); } catch (_) { /* ok */ }
+    updateStarterCard();
+  });
+  card.querySelector('.starter-example')!.addEventListener('click', () => {
+    loadExampleCircuit();
+  });
+  wrap.appendChild(card);
+  starterCardEl = card;
+}
 
 // Toolbar Calc-arm button mirrors the side-panel Calc Node button.
 document.getElementById('btn-calc-arm')!.addEventListener('click', () => {
@@ -5076,6 +5326,14 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
       e.preventDefault();
       return;
     }
+  }
+
+  // Tab / Shift+Tab cycles the selection through parts.
+  if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey
+      && state.tool === 'select' && !state.moveDraft && state.parts.length) {
+    cycleSelection(e.shiftKey ? -1 : 1);
+    e.preventDefault();
+    return;
   }
 
   // 'Y' flips (mirrors) the selected parts about their own axis.

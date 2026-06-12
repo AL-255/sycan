@@ -584,6 +584,14 @@
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
+  /* The toggle chips hide their real checkbox — surface its focus. */
+  .check:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  /* Groups that lead a wrapped toolbar line drop their divider
+     (markToolbarRowStarts sets the class). */
+  .group.row-start::before { content: none; }
 
   /* Themed scrollbars (chrome wells + panels). */
   * { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
@@ -760,6 +768,47 @@
     pointer-events: none; user-select: none;
   }
   .erc-marker.erc-error text { fill: var(--error); }
+
+  /* Wire-tool connection snap ring. */
+  .snap-ring {
+    fill: none; stroke: var(--ok); stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+  .snap-ring-start { opacity: 0.6; }
+
+  /* Empty-canvas starter card. */
+  .starter-card {
+    position: absolute; left: 50%; top: 38%;
+    transform: translate(-50%, -50%);
+    width: min(380px, calc(100% - 48px));
+    background: var(--surface-1); color: var(--fg);
+    border: 1px solid var(--overlay-line); border-radius: 8px;
+    box-shadow: var(--shadow-2);
+    padding: var(--sp-4);
+    font-size: var(--text-md);
+  }
+  .starter-card h2 {
+    margin: 0 0 var(--sp-2); font-size: var(--text-md); font-weight: 600;
+  }
+  .starter-card ul {
+    margin: 0 0 var(--sp-3); padding-left: 18px;
+    color: var(--muted); line-height: 1.8;
+  }
+  .starter-close {
+    position: absolute; top: 6px; right: 6px;
+    width: 22px; height: 22px;
+    background: transparent; border: none; border-radius: var(--r-sm);
+    color: var(--muted); font-size: 14px; cursor: pointer;
+  }
+  .starter-close:hover { background: var(--surface-3); color: var(--fg); }
+  .starter-example {
+    background: var(--accent); color: var(--accent-fg);
+    border: none; border-radius: var(--r-md);
+    height: 28px; padding: 0 12px;
+    font: inherit; font-size: var(--text-sm); font-weight: 500;
+    cursor: pointer;
+  }
+  .starter-example:hover { filter: brightness(1.1); }
 
   /* Drag-options gear popover — same card recipe as .ctx-menu but a
      distinct class: '.ctx-menu' presence is the context menu's
@@ -1108,83 +1157,88 @@
   </div>
   <div class="group" data-group="parts">
     <button class="tool" data-tool="res" title="Resistor (R)">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-12 L-10,-5 L-6,5 L-2,-5 L2,5 L6,-5 L10,5 L12,0 H22"
-              fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H5 L6.25 7 L8.75 13 L11.25 7 L13.75 13 L15 10 H18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">R</span>
     </button>
     <button class="tool" data-tool="ind" title="Inductor (L)">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-12 a3,3 0 0 1 6,0 a3,3 0 0 1 6,0 a3,3 0 0 1 6,0 a3,3 0 0 1 6,0 H22"
-              fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H3 a1.75 1.75 0 0 1 3.5 0 a1.75 1.75 0 0 1 3.5 0 a1.75 1.75 0 0 1 3.5 0 a1.75 1.75 0 0 1 3.5 0 H18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">L</span>
     </button>
     <button class="tool" data-tool="cap" title="Capacitor (C)">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-3 M-3,-6 V6 M3,-6 V6 M3,0 H22"
-              fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H8.75 M8.75 5 V15 M11.25 5 V15 M11.25 10 H18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">C</span>
     </button>
   </div>
   <div class="group" data-group="sources">
     <button class="tool" data-tool="vsrc" title="Voltage source (V)">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <circle cx="0" cy="0" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <text x="-3" y="-1" font-size="6" fill="currentColor">+</text>
-        <text x="-3" y="5" font-size="7" fill="currentColor">−</text>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H4.5 M15.5 10 H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="10" cy="10" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M10 6.2 V8.6 M8.8 7.4 H11.2 M8.8 12.6 H11.2"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">V</span>
     </button>
     <button class="tool" data-tool="isrc" title="Current source (I)">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <circle cx="0" cy="0" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M-3.5,0 H3 M0.5,-2 L3.5,0 L0.5,2" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H4.5 M15.5 10 H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="10" cy="10" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M6.8 10 H11.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M13.4 10 L11.2 8.7 L11.2 11.3 Z" fill="currentColor"/>
       </svg>
       <span class="label">I</span>
     </button>
   </div>
   <div class="group" data-group="active">
     <button class="tool" data-tool="diode" title="Diode (D)">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-4 M-4,-5 V5 L4,0 Z M4,-5 V5 M4,0 H22"
-              fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H6.5 M6.5 5.5 V14.5 L13.5 10 Z M13.5 5.5 V14.5 M13.5 10 H18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">D</span>
     </button>
     <button class="tool" data-tool="npn" title="BJT — NPN (Q)">
-      <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
-        <circle cx="9" cy="0" r="8" fill="none" stroke="currentColor" stroke-width="1"/>
-        <path d="M3,-4 V4 M3,-2 L11,-7 M3,2 L11,7 M9,5 L11,7 L8,7" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H7 M7 5 V15 M13.5 2 V4 L7 7.5 M7 12.5 L13.5 16 V18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M11.7 15 L7.6 15 L9.4 11.6 Z" fill="currentColor"/>
       </svg>
       <span class="label">QN</span>
     </button>
     <button class="tool" data-tool="nmos" title="MOSFET — NMOS (M)">
-      <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
-        <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H5.5 M5.5 6.5 V13.5 M8 5 V15 M13.5 2 V6.5 H8 M13.5 18 V13.5 H8"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M9.3 13.5 L12.3 12.1 L12.3 14.9 Z" fill="currentColor"/>
       </svg>
       <span class="label">MN</span>
     </button>
     <!-- TEMPLATE: PNP. Mirrors the NPN icon but with the emitter
          arrow pointing INTO the base bar (PNP convention). -->
     <button class="tool" data-tool="pnp" title="BJT — PNP (Q)">
-      <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
-        <circle cx="9" cy="0" r="8" fill="none" stroke="currentColor" stroke-width="1"/>
-        <path d="M3,-4 V4 M3,-2 L11,-7 M3,2 L11,7" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M5,1 L3,2 L5,4" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H7 M7 5 V15 M13.5 2 V4 L7 7.5 M7 12.5 L13.5 16 V18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M7.5 12.8 L11.6 12.8 L9.8 16.2 Z" fill="currentColor"/>
       </svg>
       <span class="label">QP</span>
     </button>
     <!-- TEMPLATE: PMOS. NMOS shape plus a small bubble between the
          gate line and the channel to mark the inversion. -->
     <button class="tool" data-tool="pmos" title="MOSFET — PMOS (M)">
-      <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
-        <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        <circle cx="3.5" cy="0" r="1.2" fill="none" stroke="currentColor" stroke-width="1"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H3.4 M5.5 6.5 V13.5 M8 5 V15 M13.5 2 V6.5 H8 M13.5 18 V13.5 H8"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="4.4" cy="10" r="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
       </svg>
       <span class="label">MP</span>
     </button>
@@ -1194,28 +1248,26 @@
        extra bulk lead extending to the right. -->
   <div class="group" data-group="active-extra">
     <button class="tool" data-tool="nmos_4t" title="MOSFET — NMOS 4-T">
-      <svg width="22" height="20" viewBox="-2 -10 22 20" aria-hidden="true">
-        <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M5,0 H17" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M8,-1.2 L6,0 L8,1.2" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H5.5 M5.5 6.5 V13.5 M8 5 V15 M13.5 2 V6.5 H8 M13.5 18 V13.5 H8 M8 10 H18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M9.3 13.5 L12.3 12.1 L12.3 14.9 Z" fill="currentColor"/>
       </svg>
       <span class="label">MN4</span>
     </button>
     <button class="tool" data-tool="pmos_4t" title="MOSFET — PMOS 4-T">
-      <svg width="22" height="20" viewBox="-2 -10 22 20" aria-hidden="true">
-        <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        <circle cx="3.5" cy="0" r="1.2" fill="none" stroke="currentColor" stroke-width="1"/>
-        <path d="M5,0 H17" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M14,-1.2 L16,0 L14,1.2" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H3.4 M5.5 6.5 V13.5 M8 5 V15 M13.5 2 V6.5 H8 M13.5 18 V13.5 H8 M8 10 H18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="4.4" cy="10" r="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
       </svg>
       <span class="label">MP4</span>
     </button>
     <button class="tool" data-tool="triode" title="Triode">
-      <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
-        <circle cx="9" cy="0" r="8" fill="none" stroke="currentColor" stroke-width="1"/>
-        <path d="M5,-5 H13" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M5,0 H6.5 M7.5,0 H9 M10,0 H11.5 M12.5,0 H14" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        <path d="M5,4 H8 M9,4 V6.5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M10 2 V6 M6.5 6 H13.5 M2 10 H4.5 M5.5 10 H7.5 M9 10 H11 M12.5 10 H14.5 M12.5 13.5 H7 V18"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">T</span>
     </button>
@@ -1226,55 +1278,62 @@
        what the controlling input is (E/G voltage-, F/H current-). -->
   <div class="group" data-group="controlled">
     <button class="tool" data-tool="vcvs" title="VCVS (E) — voltage-controlled V">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M0,-6 L7,0 L0,6 L-7,0 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <text x="-3" y="-1" font-size="6" fill="currentColor">+</text>
-        <text x="-3" y="5" font-size="7" fill="currentColor">−</text>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H3.5 M16.5 10 H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M10 3.5 L16.5 10 L10 16.5 L3.5 10 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M10 6 V8.4 M8.8 7.2 H11.2 M8.8 12.8 H11.2"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">E</span>
     </button>
     <button class="tool" data-tool="vccs" title="VCCS (G) — voltage-controlled I">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M0,-6 L7,0 L0,6 L-7,0 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M-3.5,0 H3 M0.5,-2 L3.5,0 L0.5,2" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H3.5 M16.5 10 H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M10 3.5 L16.5 10 L10 16.5 L3.5 10 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M6.8 10 H11.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M13.8 10 L11.4 8.6 L11.4 11.4 Z" fill="currentColor"/>
       </svg>
       <span class="label">G</span>
     </button>
     <button class="tool" data-tool="cccs" title="CCCS (F) — current-controlled I">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M0,-6 L7,0 L0,6 L-7,0 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M-3.5,0 H3 M0.5,-2 L3.5,0 L0.5,2" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H3.5 M16.5 10 H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M10 3.5 L16.5 10 L10 16.5 L3.5 10 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M6.8 10 H11.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M13.8 10 L11.4 8.6 L11.4 11.4 Z" fill="currentColor"/>
+        <path d="M2.5 3.2 H5.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M7.4 3.2 L5.4 2.2 L5.4 4.2 Z" fill="currentColor"/>
       </svg>
       <span class="label">F</span>
     </button>
     <button class="tool" data-tool="ccvs" title="CCVS (H) — current-controlled V">
-      <svg width="22" height="14" viewBox="-22 -7 44 14" aria-hidden="true">
-        <path d="M-22,0 H-7 M7,0 H22" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M0,-6 L7,0 L0,6 L-7,0 Z" fill="none" stroke="currentColor" stroke-width="1.5"/>
-        <text x="-3" y="-1" font-size="6" fill="currentColor">+</text>
-        <text x="-3" y="5" font-size="7" fill="currentColor">−</text>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10 H3.5 M16.5 10 H18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M10 3.5 L16.5 10 L10 16.5 L3.5 10 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M10 6 V8.4 M8.8 7.2 H11.2 M8.8 12.8 H11.2"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M2.5 3.2 H5.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M7.4 3.2 L5.4 2.2 L5.4 4.2 Z" fill="currentColor"/>
       </svg>
       <span class="label">H</span>
     </button>
   </div>
   <div class="group" data-group="connect-parts">
     <button class="tool" data-tool="gnd" title="Ground (G)">
-      <svg width="14" height="16" viewBox="-7 -2 14 16" aria-hidden="true">
-        <path d="M0,-2 V4 M-6,4 H6 M-4,7 H4 M-2,10 H2"
-              fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M10 3 V10 M4.5 10 H15.5 M6.5 13 H13.5 M8.5 16 H11.5"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">GND</span>
     </button>
   </div>
   <div class="group" data-group="connect">
     <button class="tool" data-tool="WIRE" title="Wire (W)">
-      <svg width="22" height="14" viewBox="-11 -7 22 14" aria-hidden="true">
-        <path d="M-10,4 L-2,4 L-2,-4 L10,-4" fill="none"
-              stroke="currentColor" stroke-width="1.5"
-              stroke-linecap="round" stroke-linejoin="round"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M3.4 14.5 H9.5 V5.5 H16.6"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="3.4" cy="14.5" r="1.4" fill="currentColor"/>
+        <circle cx="16.6" cy="5.5" r="1.4" fill="currentColor"/>
       </svg>
       <span class="label">Wire</span>
     </button>
@@ -1283,39 +1342,34 @@
  <div class="toolbar-row">
   <div class="group" data-group="edit">
     <button class="tool" data-tool="select" title="Select (S / Esc)">
-      <svg width="14" height="14" viewBox="-1 -1 14 14" aria-hidden="true">
-        <path d="M0.5,0.5 L0.5,10.5 L3.2,7.9 L5.2,11.6 L7.2,10.6 L5.3,7 L9,7 Z"
-              fill="none" stroke="currentColor" stroke-width="1.4"
-              stroke-linejoin="round"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M6 3 V15.2 L9.2 12.2 L11.4 16.8 L13.8 15.7 L11.7 11.1 L15.8 11.1 Z"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">Select</span>
     </button>
     <button class="tool" data-tool="delete" title="Delete tool (X)">
-      <svg width="14" height="14" viewBox="-7 -7 14 14" aria-hidden="true">
-        <path d="M-4,-4 L4,4 M-4,4 L4,-4" fill="none"
-              stroke="currentColor" stroke-width="1.8"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M5 5 L15 15 M15 5 L5 15"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">Delete</span>
     </button>
     <button class="tool" data-tool="rotate" title="Rotate tool (B)">
-      <svg width="14" height="14" viewBox="-7 -7 14 14" aria-hidden="true">
-        <path d="M5,-1 A5,5 0 1 0 4,4" fill="none"
-              stroke="currentColor" stroke-width="1.5"/>
-        <path d="M5,-3 L5,-1 L3,-1" fill="none"
-              stroke="currentColor" stroke-width="1.5"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M15.5 10 A5.5 5.5 0 1 1 10 4.5"
+              fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12.8 4.5 L10 3.2 L10 5.8 Z" fill="currentColor"/>
       </svg>
       <span class="label">Rotate</span>
     </button>
     <button class="tool" data-tool="highlight"
             title="Net Highlight (H): click a wire to highlight its net (and any wires sharing the same name)">
-      <svg width="22" height="14" viewBox="-11 -7 22 14" aria-hidden="true">
-        <!-- A wire under an orange wash, mirroring the canvas overlay. -->
-        <path d="M-10,3 L-3,3 L-3,-3 L10,-3" fill="none"
-              style="stroke: var(--highlight)" stroke-width="4" opacity="0.45"
-              stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M-10,3 L-3,3 L-3,-3 L10,-3" fill="none"
-              stroke="currentColor" stroke-width="1.5"
-              stroke-linecap="round" stroke-linejoin="round"/>
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M4 13.5 H9.5 V6.5 H16" fill="none" style="stroke: var(--highlight)"
+              stroke-width="4" opacity="0.45" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M4 13.5 H9.5 V6.5 H16" fill="none" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
       <span class="label">Highlight</span>
     </button>

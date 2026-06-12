@@ -60,7 +60,13 @@ export async function setup({ viewport = { width: 1400, height: 900 } } = {}) {
   await page.goto(url, { waitUntil: 'networkidle0' });
   // Make sure each test starts from a clean slate — localStorage
   // would otherwise replay the previous test's circuit.
-  await page.evaluate(() => { localStorage.clear(); });
+  await page.evaluate(() => {
+    localStorage.clear();
+    // Pre-dismiss the empty-canvas starter card so it never sits over
+    // canvas coordinates tests click on. starter-card tests clear
+    // this key explicitly.
+    localStorage.setItem('sycan.sedra.welcome.v1', '1');
+  });
   await page.reload({ waitUntil: 'networkidle0' });
   await page.waitForFunction(
     'typeof state !== "undefined" && typeof addPart === "function" && glyphsReady',

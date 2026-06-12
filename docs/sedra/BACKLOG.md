@@ -143,6 +143,27 @@ Carried forward: full 20x20 part-glyph redraw; ERC name-collision
 check; keyboard-invoked context menu (Menu key); picker chevron
 hardcodes one gray for both themes.
 
+## Iteration 4 — DONE
+
+Shipped: full 20x20 icon-set redraw (one grammar: stroke 1.5 round,
+16px live area, solid arrowheads only; QN/QP arrow direction, MN/MP
+arrow/bubble, 4T bulk pins, diamond controlled sources with
+control-current arrows); select-similar (context menu), Tab/Shift+Tab
+part cycling, renumber command (reading order, ctrlSrc remap, default
+values track), ERC duplicate-designator errors; wire-tool snap rings
+(green ring on valid connection targets + draft start); dismissible
+starter card with built-in example circuit; audit fixes — P0 export
+layer leak (ERC/net/calc/matrix/preview overlays now suppressed +
+belt-and-braces strip), net-label rx/ry as attributes (rounded
+corners survive export), counter-scaled ERC badges (9px text at any
+zoom), gear popover closes on Esc/resize/blur, focus ring for hidden
+toggle checkboxes, wrapped-toolbar-row divider suppression.
+Tests: features4.test.mjs (9) — suite 174 assertions / 11 files.
+
+Carried forward: marquee window/crossing semantics; multi-net
+highlight pinning; one-shot paste/undo flash; menubar; OPAMP1 SPICE
+writer note; keyboard-invoked context menu.
+
 ## Next iterations
 
 ### First-solve loading state for Pyodide (~10-20s currently looks frozen)
