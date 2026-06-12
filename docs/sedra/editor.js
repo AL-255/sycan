@@ -445,11 +445,52 @@ function render() {
         && !state.boxSelect && hoverTarget
         && hoverTarget.kind === 'part')
         ? hoverTarget.id : null;
+    // Connected-terminal census (KiCad: connected pins draw nothing,
+    // open pin-ends get a small outline ring). A terminal is connected
+    // when a wire touches it or another terminal coincides.
+    const occupied = new Map();
+    for (const w of state.wires) {
+        if (w.bad || w.points.length < 2)
+            continue;
+        for (const pt of w.points) {
+            const k = `${pt[0]},${pt[1]}`;
+            occupied.set(k, (occupied.get(k) || 0) + 1);
+        }
+        for (let i = 0; i < w.points.length - 1; i++) {
+            const a = w.points[i], b = w.points[i + 1];
+            if (a[0] === b[0]) {
+                for (let y = Math.min(a[1], b[1]); y <= Math.max(a[1], b[1]); y += GRID) {
+                    const k = `${a[0]},${y}`;
+                    occupied.set(k, (occupied.get(k) || 0) + 1);
+                }
+            }
+            else if (a[1] === b[1]) {
+                for (let x = Math.min(a[0], b[0]); x <= Math.max(a[0], b[0]); x += GRID) {
+                    const k = `${x},${a[1]}`;
+                    occupied.set(k, (occupied.get(k) || 0) + 1);
+                }
+            }
+        }
+    }
+    const termCount = new Map();
     for (const p of state.parts) {
+        for (const term of partTerminals(p)) {
+            const k = `${term.pos[0]},${term.pos[1]}`;
+            termCount.set(k, (termCount.get(k) || 0) + 1);
+        }
+    }
+    for (const p of state.parts) {
+        const open = new Set();
+        for (const term of partTerminals(p)) {
+            const k = `${term.pos[0]},${term.pos[1]}`;
+            if (!occupied.has(k) && (termCount.get(k) || 0) <= 1)
+                open.add(term.name);
+        }
         const g = drawPart(p, {
             hitParent: hitLayer,
             selected: state.selectedIds.has(p.id),
             hover: p.id === hoverPartId && !state.selectedIds.has(p.id),
+            openTerminals: open,
         });
         partsLayer.appendChild(g);
     }
@@ -483,16 +524,22 @@ function render() {
     drawJunctions();
     // Layer 3.4: ERC badges (above junctions, below selection UI).
     drawErcMarkers();
-    // Layer 3.5: live box-select rectangle
+    // Layer 3.45: one-shot attention halos (paste / undo / duplicate).
+    drawFlashHalos();
+    // Layer 3.5: live box-select rectangle. Window select (L→R) draws
+    // solid select-blue; crossing select (R→L) draws dashed in the ok
+    // green — KiCad's visual convention.
     if (state.boxSelect) {
         const b = state.boxSelect;
+        const crossing = b.x1 < b.x0;
         const x = Math.min(b.x0, b.x1), y = Math.min(b.y0, b.y1);
         const w = Math.abs(b.x1 - b.x0), h = Math.abs(b.y1 - b.y0);
         el('rect', {
             x, y, width: w, height: h,
-            fill: 'rgba(25, 118, 210, 0.08)',
-            stroke: 'var(--select)', 'stroke-width': 1.2,
-            'stroke-dasharray': '4 3',
+            fill: crossing ? 'rgba(26, 156, 84, 0.08)' : 'rgba(25, 118, 210, 0.08)',
+            stroke: crossing ? 'var(--ok)' : 'var(--select)',
+            'stroke-width': 1.2,
+            'stroke-dasharray': crossing ? '5 4' : 'none',
             'vector-effect': 'non-scaling-stroke',
         }, svg);
     }
@@ -591,7 +638,9 @@ function updateCoords() {
         const [cx, cy] = snapPt(state.cursorWorld);
         txt = `${cx}, ${cy}`;
     }
-    coords.textContent = txt;
+    // Em-dash placeholder so the zone never reads as a render failure
+    // before the pointer first enters the canvas.
+    coords.textContent = txt || '—, —';
 }
 // Selection-summary + zoom-% zones. Memoized so the per-mousemove
 // render() call does zero DOM writes when nothing changed.
@@ -752,15 +801,52 @@ function drawNetLabels() {
         }
     }
 }
-// Net Highlight overlay — orange wash on every wire and terminal in
-// the picked net's grid-point set. The set is computed by
-// `finalizeNetHighlight` and stored on `state.netHighlightOverlay`,
-// using both the connected component (physical) and any cross-component
-// wires whose user label matches the picked net's name.
-function drawNetHighlight() {
-    if (!state.netHighlightOverlay)
+let pinnedNets = [];
+const PIN_HUES = [24, 142, 262, 320, 82, 198];
+function pinCurrentNetHighlight() {
+    const ov = state.netHighlightOverlay;
+    if (!ov)
         return;
-    const set = state.netHighlightOverlay.gridPoints;
+    if (pinnedNets.some(pn => pn.node === ov.node)) {
+        flashHint(`${ov.node} is already pinned`);
+        return;
+    }
+    const hue = PIN_HUES[pinnedNets.length % PIN_HUES.length];
+    pinnedNets.push({ node: ov.node, gridPoints: ov.gridPoints, hue });
+    state.netHighlightOverlay = null;
+    updateNetLegend();
+    render();
+    flashHint(`Pinned net ${ov.node} — Shift+click pins more, legend chips unpin`);
+}
+function unpinNet(node) {
+    pinnedNets = pinnedNets.filter(pn => pn.node !== node);
+    updateNetLegend();
+    render();
+}
+function updateNetLegend() {
+    let legend = document.getElementById('net-legend');
+    if (!pinnedNets.length) {
+        legend?.remove();
+        return;
+    }
+    if (!legend) {
+        legend = document.createElement('div');
+        legend.id = 'net-legend';
+        wrap.appendChild(legend);
+    }
+    legend.innerHTML = '';
+    for (const pn of pinnedNets) {
+        const chip = document.createElement('button');
+        chip.className = 'net-chip';
+        chip.type = 'button';
+        chip.title = `Unpin net ${pn.node}`;
+        chip.style.setProperty('--chip-hue', String(pn.hue));
+        chip.innerHTML = `<span class="net-chip-dot"></span>${pn.node} ×`;
+        chip.addEventListener('click', () => unpinNet(pn.node));
+        legend.appendChild(chip);
+    }
+}
+function drawOneNetWash(set, stroke) {
     if (!set || !set.size)
         return;
     const isPt = (x, y) => set.has(`${x},${y}`);
@@ -769,22 +855,36 @@ function drawNetHighlight() {
         // the set — wires are normalised by `coalesceJunctions` so a
         // single wire never straddles two distinct nets.
         if (w.points.length && w.points.some(([x, y]) => isPt(x, y))) {
-            el('path', {
+            const attrs = {
                 d: wirePath(w.points),
                 class: 'net-highlight',
                 'vector-effect': 'non-scaling-stroke',
-            }, svg);
+            };
+            if (stroke)
+                attrs.style = `stroke: ${stroke}`;
+            el('path', attrs, svg);
         }
     }
     for (const p of state.parts) {
         for (const t of partTerminals(p)) {
             if (isPt(t.pos[0], t.pos[1])) {
-                el('circle', {
+                const attrs = {
                     cx: t.pos[0], cy: t.pos[1], r: 6,
                     class: 'net-highlight-term',
-                }, svg);
+                };
+                if (stroke)
+                    attrs.style = `fill: ${stroke}`;
+                el('circle', attrs, svg);
             }
         }
+    }
+}
+function drawNetHighlight() {
+    for (const pn of pinnedNets) {
+        drawOneNetWash(pn.gridPoints, `hsl(${pn.hue} 70% 55%)`);
+    }
+    if (state.netHighlightOverlay) {
+        drawOneNetWash(state.netHighlightOverlay.gridPoints, null);
     }
 }
 // Strong dashed outline around the most recently picked calc-node net
@@ -2111,13 +2211,17 @@ function ensureDragSelection(g) {
     addPressTarget(g.target);
     refreshProps();
 }
-// Apply the finished marquee. Parts select by bbox-centre
-// containment; wires at segment granularity (both endpoints of a
-// segment strictly inside). Non-additive marquees replace.
+// Apply the finished marquee with KiCad's window/crossing semantics:
+// dragging left→right selects what the box fully CONTAINS (window);
+// right→left selects everything the box TOUCHES (crossing). Parts
+// select by bbox (centre containment for window, bbox intersection
+// for crossing); wires at segment granularity. Non-additive marquees
+// replace.
 function applyMarqueeSelection() {
     const b = state.boxSelect;
     if (!b)
         return;
+    const crossing = b.x1 < b.x0;
     const x0 = Math.min(b.x0, b.x1), y0 = Math.min(b.y0, b.y1);
     const x1 = Math.max(b.x0, b.x1), y1 = Math.max(b.y0, b.y1);
     if (!b.additive) {
@@ -2126,16 +2230,27 @@ function applyMarqueeSelection() {
     }
     for (const p of state.parts) {
         const [bx0, by0, bx1, by1] = partBBox(p);
-        const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
-        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) {
+        const hit = crossing
+            ? bx0 <= x1 && bx1 >= x0 && by0 <= y1 && by1 >= y0 // bbox overlap
+            : (bx0 + bx1) / 2 >= x0 && (bx0 + bx1) / 2 <= x1 // centre inside
+                && (by0 + by1) / 2 >= y0 && (by0 + by1) / 2 <= y1;
+        if (hit)
             state.selectedIds.add(p.id);
-        }
     }
     const inside = ([x, y]) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+    // Axis-aligned segment vs rect intersection (for crossing mode).
+    const segHits = (a, c) => {
+        const sx0 = Math.min(a[0], c[0]), sx1 = Math.max(a[0], c[0]);
+        const sy0 = Math.min(a[1], c[1]), sy1 = Math.max(a[1], c[1]);
+        return sx0 <= x1 && sx1 >= x0 && sy0 <= y1 && sy1 >= y0;
+    };
     for (const w of state.wires) {
         let pickedAny = false;
         for (let i = 0; i < w.points.length - 1; i++) {
-            if (inside(w.points[i]) && inside(w.points[i + 1])) {
+            const hit = crossing
+                ? segHits(w.points[i], w.points[i + 1])
+                : inside(w.points[i]) && inside(w.points[i + 1]);
+            if (hit) {
                 state.selectedSegments.add(segKey(w.id, i));
                 pickedAny = true;
             }
@@ -2460,6 +2575,8 @@ wrap.addEventListener('click', (e) => {
             break;
         case 'highlight':
             finalizeNetHighlight(cur, world);
+            if (e.shiftKey && state.netHighlightOverlay)
+                pinCurrentNetHighlight();
             break;
         default:
             // Element placement
@@ -2901,6 +3018,7 @@ function duplicateSelection() {
     state.selectedSegments.clear();
     for (const id of newWireIds)
         selectWholeWire(id);
+    markFlash(newPartIds);
     pushHistory();
     refreshProps();
     render();
@@ -4148,7 +4266,7 @@ function buildNetlist() {
     // Build netlist lines.
     const lines = [];
     lines.push('* sycan circuit netlist');
-    lines.push(`* generated ${new Date().toISOString()}`);
+    lines.push(`* generated ${new Date().toISOString().slice(0, 10)}`);
     for (const c of labelConflicts) {
         if (c.reason === 'duplicate') {
             lines.push(`* warning: label "${c.dropped}" already in use; ignored`);
@@ -4609,7 +4727,8 @@ function exportSchematicSvg() {
     clone.querySelector('#hit-layer')?.remove();
     clone.querySelectorAll('[data-layer="grid"]').forEach(n => n.remove());
     clone.querySelectorAll('.erc-marker, .net-highlight, .net-highlight-term, ' +
-        '.calc-node-highlight, .matrix-part-highlight, .preview, .snap-ring').forEach(n => n.remove());
+        '.calc-node-highlight, .matrix-part-highlight, .preview, ' +
+        '.snap-ring, .flash-halo').forEach(n => n.remove());
     const [x0, y0, x1, y1] = bbox;
     clone.setAttribute('viewBox', `${x0} ${y0} ${x1 - x0} ${y1 - y0}`);
     clone.setAttribute('width', String(x1 - x0));
@@ -4893,15 +5012,33 @@ function updateUndoRedoButtons() {
     btnUndo.disabled = historyIdx <= 0;
     btnRedo.disabled = historyIdx >= editHistory.length - 1;
 }
+// Flash whatever an undo/redo touched: parts that appeared or moved
+// relative to the pre-restore snapshot.
+function diffFlash(before) {
+    const changed = [];
+    for (const pp of state.parts) {
+        const sig = `${pp.x},${pp.y},${pp.rot},${pp.flip ? 1 : 0},${pp.value ?? ''}`;
+        if (before.get(pp.id) !== sig)
+            changed.push(pp.id);
+    }
+    markFlash(changed);
+}
+function partSigs() {
+    return new Map(state.parts.map(pp => [pp.id, `${pp.x},${pp.y},${pp.rot},${pp.flip ? 1 : 0},${pp.value ?? ''}`]));
+}
 btnUndo.addEventListener('click', () => {
+    const before = partSigs();
     if (historyIdx > 0 && restore(historyIdx - 1)) {
+        diffFlash(before);
         refreshProps();
         render();
     }
     updateUndoRedoButtons();
 });
 btnRedo.addEventListener('click', () => {
+    const before = partSigs();
     if (historyIdx < editHistory.length - 1 && restore(historyIdx + 1)) {
+        diffFlash(before);
         refreshProps();
         render();
     }
@@ -5022,6 +5159,51 @@ document.getElementById('sb-erc').addEventListener('click', () => {
     ercCycle++;
     focusErcFinding(f);
 });
+// One-shot attention flash: a fading halo on parts affected by a
+// paste / duplicate / undo / redo. render() rebuilds the SVG per
+// frame, so the halo is recomputed from a timestamp map and a rAF
+// loop keeps re-rendering until every flash expires.
+const FLASH_MS = 600;
+const flashParts = new Map(); // part id -> expiry ts
+let flashRaf = 0;
+function markFlash(ids) {
+    const until = Date.now() + FLASH_MS;
+    for (const id of ids) {
+        if (state.parts.some(pp => pp.id === id))
+            flashParts.set(id, until);
+    }
+    if (!flashRaf && flashParts.size) {
+        const tick = () => {
+            const now = Date.now();
+            for (const [id, exp] of flashParts) {
+                if (exp <= now)
+                    flashParts.delete(id);
+            }
+            render();
+            flashRaf = flashParts.size ? requestAnimationFrame(tick) : 0;
+        };
+        flashRaf = requestAnimationFrame(tick);
+    }
+}
+function drawFlashHalos() {
+    if (!flashParts.size)
+        return;
+    const now = Date.now();
+    for (const [id, exp] of flashParts) {
+        const pp = state.parts.find(x => x.id === id);
+        if (!pp || exp <= now)
+            continue;
+        const [x0, y0, x1, y1] = partBBox(pp);
+        el('rect', {
+            x: x0 - 4, y: y0 - 4,
+            width: x1 - x0 + 8, height: y1 - y0 + 8,
+            rx: 4, ry: 4,
+            class: 'flash-halo',
+            opacity: String(((exp - now) / FLASH_MS * 0.5).toFixed(3)),
+            'pointer-events': 'none',
+        }, svg);
+    }
+}
 // Empty-canvas starter card: quick orientation for first-time users,
 // dismissed once and remembered.
 const WELCOME_KEY = 'sycan.sedra.welcome.v1';
@@ -5033,13 +5215,21 @@ function loadExampleCircuit() {
     state.nextId = 1;
     state.selectedIds.clear();
     state.selectedSegments.clear();
-    addPart('vsrc', 0, 80, 0);
-    addPart('res', 160, 0, 0);
-    addPart('res', 320, 80, 0);
+    // Voltage divider: V1 feeds R1 (series, horizontal) into R2 (shunt).
+    // Wires meet every terminal end-on — no runs across part bodies.
+    addPart('vsrc', 0, 80, 0); // V1: terminals (0,40),(0,120)
+    const v1 = state.parts[state.parts.length - 1];
+    v1.value = 'Vs';
+    addPart('res', 160, -40, 90); // R1 horizontal: (120,-40),(200,-40)
+    state.parts[state.parts.length - 1].value = '10k';
+    addPart('res', 320, 80, 0); // R2 vertical: (320,40),(320,120)
+    state.parts[state.parts.length - 1].value = '10k';
     addPart('gnd', 0, 240, 0);
     addPart('gnd', 320, 240, 0);
-    state.wires.push({ id: `W${state.nextId++}`, points: [[0, 40], [0, -40], [160, -40]] });
-    state.wires.push({ id: `W${state.nextId++}`, points: [[160, 40], [160, 60], [320, 60], [320, 40]] });
+    state.wires.push({ id: `W${state.nextId++}`,
+        points: [[0, 40], [0, -40], [120, -40]] });
+    state.wires.push({ id: `W${state.nextId++}`,
+        points: [[200, -40], [320, -40], [320, 40]] });
     state.wires.push({ id: `W${state.nextId++}`, points: [[0, 120], [0, 240]] });
     state.wires.push({ id: `W${state.nextId++}`, points: [[320, 120], [320, 240]] });
     pushHistory();
@@ -5088,6 +5278,51 @@ function updateStarterCard() {
     });
     wrap.appendChild(card);
     starterCardEl = card;
+}
+// More-parts popover: long-tail component chips.
+{
+    const more = document.getElementById('btn-more-parts');
+    const pop = document.getElementById('more-parts-pop');
+    const onKey = (ev) => {
+        if (ev.key === 'Escape') {
+            closeMore();
+            more.focus();
+            ev.preventDefault();
+            ev.stopPropagation();
+        }
+    };
+    const closeMore = () => {
+        pop.hidden = true;
+        more.setAttribute('aria-expanded', 'false');
+        document.removeEventListener('keydown', onKey, true);
+        window.removeEventListener('resize', closeMore);
+        window.removeEventListener('blur', closeMore);
+    };
+    more.addEventListener('click', () => {
+        if (!pop.hidden) {
+            closeMore();
+            return;
+        }
+        const r = more.getBoundingClientRect();
+        pop.style.left = `${r.left}px`;
+        pop.style.top = `${r.bottom + 4}px`;
+        pop.hidden = false;
+        more.setAttribute('aria-expanded', 'true');
+        document.addEventListener('keydown', onKey, true);
+        window.addEventListener('resize', closeMore);
+        window.addEventListener('blur', closeMore);
+    });
+    pop.addEventListener('click', (e) => {
+        // Picking a tool chip closes the popover.
+        if (e.target.closest('.tool[data-tool]'))
+            closeMore();
+    });
+    document.addEventListener('mousedown', (e) => {
+        if (!pop.hidden && !pop.contains(e.target)
+            && e.target !== more && !more.contains(e.target)) {
+            closeMore();
+        }
+    }, true);
 }
 // Toolbar Calc-arm button mirrors the side-panel Calc Node button.
 document.getElementById('btn-calc-arm').addEventListener('click', () => {
@@ -6130,6 +6365,7 @@ function commitMove() {
         flashHint(`Moved ${md.ids.length} item${md.ids.length === 1 ? '' : 's'}`);
     }
     else if (md.freshlyPasted) {
+        markFlash(md.ids);
         flashHint(`Placed ${md.ids.length} item${md.ids.length === 1 ? '' : 's'}`);
     }
 }

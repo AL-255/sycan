@@ -133,9 +133,11 @@ const wb = await page.evaluate(() => {
 });
 const sx = (x) => wb.left + wb.px + x;
 const sy = (y) => wb.top + wb.py + y;
-await page.mouse.move(sx(500), sy(420));
+// Left-to-right = window (containment) select; the same rectangle
+// dragged right-to-left would now be a KiCad crossing select.
+await page.mouse.move(sx(380), sy(220));
 await page.mouse.down();
-await page.mouse.move(sx(380), sy(220), { steps: 6 });
+await page.mouse.move(sx(500), sy(420), { steps: 6 });
 await page.mouse.up();
 
 const after = await page.evaluate(() => {

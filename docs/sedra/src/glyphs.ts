@@ -293,6 +293,10 @@ interface DrawPartOpts {
   hitParent?: SVGElement;
   selected?: boolean;
   hover?: boolean;
+  // Terminal names with no connection — drawn as small outline rings
+  // (connected terminals draw nothing, KiCad-style). Omitted = legacy
+  // behavior of stamping a dot on every port (previews).
+  openTerminals?: Set<string>;
 }
 
 
@@ -923,9 +927,13 @@ function drawPart(p: Part, opts: DrawPartOpts = {}): SVGGElement {
   // 2. Terminal dots — one per port.
   if (!opts.preview) {
     for (const port of t.ports) {
+      if (opts.openTerminals && !opts.openTerminals.has(port.name)) {
+        continue;   // connected terminal: the wire IS the indicator
+      }
       el('circle', {
         cx: port.pos[0], cy: port.pos[1],
-        r: NODE_R, class: 'terminal',
+        r: NODE_R,
+        class: opts.openTerminals ? 'terminal-open' : 'terminal',
       }, g);
     }
   }
@@ -939,12 +947,12 @@ function drawPart(p: Part, opts: DrawPartOpts = {}): SVGGElement {
   //    used to scatter the value to the opposite side of the name when
   //    the part rotated.) `partBBox` already returns the rotated bbox,
   //    so we just take its right edge plus a small gap.
-  if (!opts.preview && p.id) {
+  if (!opts.preview && p.id && p.type !== 'gnd') {
     const [bx0, by0, bx1, by1] = partBBox(p);
     const target = opts.hitParent || svg;
     const labelX = bx1 + 6;
     const midY = (by0 + by1) / 2;
-    const hasValue = !!p.value && p.value !== p.id && p.type !== 'gnd';
+    const hasValue = !!p.value && p.value !== p.id;
     const nameY = hasValue ? midY - 6 : midY;
     el('text', {
       x: labelX, y: nameY,

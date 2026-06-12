@@ -164,6 +164,27 @@ Carried forward: marquee window/crossing semantics; multi-net
 highlight pinning; one-shot paste/undo flash; menubar; OPAMP1 SPICE
 writer note; keyboard-invoked context menu.
 
+## Iteration 5 — DONE
+
+Shipped: KiCad marquee semantics (L→R window/containment solid blue,
+R→L crossing/intersection dashed green, incl. axis-aligned
+segment-rect tests); multi-net highlight pinning (Shift+click pins,
+6-hue palette, floating legend chips that unpin, unpinned overlay
+unchanged); one-shot flash halos on paste/duplicate/undo/redo (rAF
+fade, diff-based for undo/redo); fresh-eyes audit fixes — per-theme
+color-scheme (fixes native widgets rendering dark on light chrome),
+example circuit rebuilt (end-on wire approaches, real values Vs/10k),
+gnd refdes labels suppressed, KiCad terminal convention (connected
+pins draw nothing, open pin-ends get outline rings), 7 row-2 icons
+redrawn on the 20x20 artboard, long-tail parts folded into a More ▾
+popover (row 1: R L C V I D More GND Wire), coords zone em-dash
+placeholder, --r-lg + radius/spacing normalization, cool-cast dark
+surfaces, panel rhythm (no double hairlines, non-italic empty states,
+date-only netlist header, primary Copy button).
+Note: the dual-active-tool state in earlier captures was a screenshot
+script artifact — setTool is exclusive live (verified).
+Tests: features5.test.mjs (11) — suite 185 assertions / 12 files.
+
 ## Next iterations
 
 ### First-solve loading state for Pyodide (~10-20s currently looks frozen)
