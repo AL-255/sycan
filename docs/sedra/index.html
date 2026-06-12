@@ -168,7 +168,7 @@
   .tool.active {
     background: var(--accent); color: var(--accent-fg);
   }
-  .tool svg { display: block; width: 16px; height: 16px; flex: none; }
+  .tool svg { display: block; flex: none; }
   .tool .label { font-weight: 500; }
   /* Destructive affordance for Clear. */
   #btn-clear:hover {
@@ -258,21 +258,6 @@
     width: 100%; height: 100%;
     display: block;
   }
-  /* Live cursor / box-select coordinate readout. Rides the bottom-
-     right of the canvas so it doesn't fight the hint bar. Hidden
-     while the cursor is off-canvas (no coordinates to show). */
-  #coords {
-    position: absolute; right: 8px; bottom: 6px;
-    padding: 2px 8px;
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--muted);
-    background: color-mix(in srgb, var(--surface-0) 80%, transparent);
-    border: 1px solid var(--line); border-radius: 4px;
-    pointer-events: none; user-select: none;
-    white-space: nowrap;
-  }
-  #coords.hidden { display: none; }
 
   /* Drag handle for resizing the side panel. Sits between the canvas
      and #side; its mousedown→mousemove→mouseup is wired in editor.ts.
@@ -307,7 +292,7 @@
   .pane { padding: 10px 12px; border-bottom: 1px solid var(--line); }
   .pane label {
     display: flex; align-items: center; gap: 8px;
-    font-size: 0.85rem; margin-bottom: 6px;
+    font-size: var(--text-md); margin-bottom: 6px;
   }
   .pane label span:first-child {
     width: 60px; color: var(--muted); flex: none;
@@ -323,7 +308,7 @@
     outline: none; border-color: var(--accent);
     background: var(--surface-0);
   }
-  .pane .empty-msg { color: var(--muted); font-style: italic; font-size: 0.85rem; }
+  .pane .empty-msg { color: var(--muted); font-style: italic; font-size: var(--text-md); }
 
   #netlist-pane {
     flex: 1; display: flex; flex-direction: column; min-height: 0;
@@ -339,7 +324,7 @@
     outline: none; resize: none;
   }
   .netlist-actions {
-    display: flex; gap: 6px; padding: 6px 8px;
+    display: flex; gap: 6px; padding: var(--sp-2) var(--sp-3);
     border-top: 1px solid var(--line);
     background: var(--panel);
   }
@@ -366,20 +351,66 @@
   /* Calc Node is the side panel's primary action — filled accent. */
   .calc-controls button {
     background: var(--accent); color: var(--accent-fg);
-    border: 1px solid transparent; border-radius: var(--r-sm);
-    padding: 4px 10px; cursor: pointer; font-size: var(--text-sm);
+    border: 1px solid transparent; border-radius: var(--r-md);
+    height: 28px; padding: 0 12px; cursor: pointer; font-size: var(--text-sm);
     font-family: inherit; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
     flex: none;
   }
+  #calc-mode { min-width: 70px; flex: none; }
   .calc-controls button:hover { filter: brightness(1.1); }
   .calc-controls button.armed {
     background: var(--warn); color: var(--surface-0);
   }
   .calc-status {
-    color: var(--muted); font-size: 0.78rem;
+    color: var(--muted); font-size: var(--text-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     flex: 1;
   }
+  /* Staged async progress: a 2px track whose fill width is driven by
+     JS per pipeline stage, with an indeterminate shimmer sweeping the
+     fill so it never looks frozen during the long pyodide download.
+     Reused by the calc pane and the matrix viewer. */
+  .async-progress {
+    height: 2px; flex: none; overflow: hidden;
+    border-radius: 1px; margin-bottom: 6px;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .async-progress[hidden] { display: none; }
+  .async-progress-fill {
+    height: 100%; width: 0%;
+    background: var(--accent);
+    border-radius: 1px;
+    position: relative;
+    transition: width 280ms ease;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .async-progress-fill::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(90deg,
+        transparent, color-mix(in srgb, var(--accent-fg) 35%, transparent), transparent);
+      animation: progress-shimmer 1.2s linear infinite;
+    }
+    @keyframes progress-shimmer {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(100%); }
+    }
+  }
+  /* Busy buttons: disabled + inline spinner. */
+  button.busy { pointer-events: none; opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .tool:disabled:hover { background: transparent; }
+  @media (prefers-reduced-motion: no-preference) {
+    button.busy::before {
+      content: ''; display: inline-block; flex: none;
+      width: 11px; height: 11px; box-sizing: border-box;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%;
+      animation: btn-spin 0.7s linear infinite;
+    }
+    @keyframes btn-spin { to { transform: rotate(360deg); } }
+  }
+
   .calc-output {
     flex: 1; min-height: 0; overflow: auto;
     padding: 6px 8px;
@@ -396,6 +427,7 @@
   .calc-output .calc-mathjax {
     margin-top: 6px; font-family: serif; font-size: 13px;
   }
+  .calc-output .empty-msg { font-family: var(--font-ui); }
   .calc-output .calc-err {
     color: var(--error); white-space: pre-wrap;
   }
@@ -403,15 +435,51 @@
   /* Status / hint bar — fixed height of two text lines so the layout
      never reflows when a hint grows or shrinks. Long hints clip with
      `overflow: hidden`; flashHint replaces them after 1.6s anyway. */
-  #hint {
-    padding: 4px var(--sp-3); font-size: var(--text-xs); color: var(--muted);
-    border-top: 1px solid var(--line); background: var(--surface-1);
-    height: calc(2lh + 8px);
-    line-height: 1.45;
-    overflow: hidden;
-    box-sizing: border-box;
+  /* Status bar — single 24px line, zoned. The hint zone flexes and
+     truncates with an ellipsis; numeric zones are mono with tabular
+     figures so values tick without the bar shifting. flashHint()
+     swaps the hint zone's text for 1.6s (class .flash). */
+  #statusbar {
+    flex: none; height: 24px; box-sizing: border-box;
+    display: flex; align-items: center; gap: var(--sp-2);
+    padding: 0 var(--sp-1) 0 var(--sp-3);
+    font-size: var(--text-xs); color: var(--muted);
+    background: var(--surface-1); border-top: 1px solid var(--line);
+    white-space: nowrap; overflow: hidden; user-select: none;
   }
-  #hint kbd, .shortcut-overlay kbd {
+  #sb-mode {
+    flex: none; color: var(--fg);
+    text-transform: uppercase; letter-spacing: 0.07em;
+    font-size: 10px; font-weight: 600;
+  }
+  #hint {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #hint.flash { color: var(--fg); }
+  .sb-zone {
+    flex: none; display: inline-flex; align-items: center;
+    border-left: 1px solid var(--line);
+    padding-left: var(--sp-2);
+    height: 100%;
+  }
+  .sb-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  #sb-sel.hidden { display: none; }
+  #sb-coords { min-width: 11ch; justify-content: flex-end; }
+  #sb-zoom { padding-left: var(--sp-1); gap: 0; }
+  #sb-zoom button {
+    background: none; border: none; cursor: pointer;
+    font: inherit; color: var(--muted);
+    height: 20px; padding: 0 var(--sp-1); border-radius: var(--r-sm);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #sb-zoom button:hover { color: var(--fg); background: var(--surface-3); }
+  #sb-zoom-out, #sb-zoom-in { font-family: var(--font-mono); width: 20px; padding: 0; }
+  #sb-zoom-pct {
+    font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    min-width: 5ch; text-align: center;
+  }
+  kbd {
     font-family: var(--font-mono);
     font-size: 0.85em; background: var(--surface-2);
     padding: 1px 5px; border: 1px solid var(--line);
@@ -436,9 +504,9 @@
   #notifications-clear-all {
     pointer-events: auto;
     align-self: flex-start;
-    padding: 4px 10px; font-size: 0.72rem;
-    background: var(--panel); color: var(--muted);
-    border: 1px solid var(--line); border-radius: 4px;
+    padding: 4px 10px; font-size: var(--text-xs);
+    background: var(--surface-1); color: var(--muted);
+    border: 1px solid var(--line); border-radius: var(--r-sm);
     cursor: pointer;
   }
   #notifications-clear-all:hover { color: var(--fg); border-color: var(--fg); }
@@ -535,6 +603,100 @@
   }
   .shortcut-row .keys { white-space: nowrap; }
 
+  /* Right-click context menu (built by editor.ts).
+     Z-index ladder: inline-edit 50, matrix 900, toasts 1000,
+     shortcut overlay 1200, ctx-menu 1300, cmdk 1350. */
+  .ctx-menu {
+    position: fixed; z-index: 1300;
+    min-width: 224px; max-width: 320px;
+    background: var(--surface-1); color: var(--fg);
+    border: 1px solid var(--line); border-radius: var(--r-md);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
+    padding: var(--sp-1);
+    font-size: var(--text-sm);
+    user-select: none;
+  }
+  .ctx-item {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: 5px var(--sp-2); border-radius: var(--r-sm);
+    cursor: default; white-space: nowrap;
+  }
+  .ctx-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+  .ctx-keys  { margin-left: auto; white-space: nowrap; }
+  .ctx-item.active { background: var(--accent); color: var(--accent-fg); }
+  .ctx-item.active kbd {
+    background: color-mix(in srgb, var(--accent-fg) 16%, transparent);
+    border-color: color-mix(in srgb, var(--accent-fg) 35%, transparent);
+    color: var(--accent-fg);
+  }
+  .ctx-item[aria-disabled="true"] { color: var(--muted); }
+  .ctx-item[aria-disabled="true"] kbd { opacity: 0.55; }
+  .ctx-item.danger { color: var(--error); }
+  .ctx-item.danger.active {
+    background: color-mix(in srgb, var(--error) 14%, transparent);
+    color: var(--error);
+  }
+  .ctx-sep { height: 1px; background: var(--line); margin: var(--sp-1) var(--sp-2); }
+  .ctx-caption {
+    padding: var(--sp-1) var(--sp-2) 2px;
+    font-size: var(--text-xs); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .ctx-menu { animation: ctx-in 90ms ease-out; transform-origin: top left; }
+    @keyframes ctx-in {
+      from { opacity: 0; transform: scale(0.97); }
+      to   { opacity: 1; transform: none; }
+    }
+  }
+
+  /* Ctrl+K command palette — centered top card. */
+  .cmdk-overlay {
+    position: fixed; inset: 0; z-index: 1350;
+    background: color-mix(in srgb, var(--surface-0) 55%, transparent);
+    display: flex; align-items: flex-start; justify-content: center;
+    padding-top: 12vh;
+  }
+  .cmdk {
+    width: min(560px, calc(100vw - 32px));
+    background: var(--surface-1); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+    overflow: hidden;
+  }
+  .cmdk-input {
+    width: 100%; box-sizing: border-box;
+    height: 44px; padding: 0 var(--sp-4);
+    font: inherit; font-size: var(--text-md);
+    background: transparent; color: var(--fg);
+    border: none; border-bottom: 1px solid var(--line); outline: none;
+  }
+  .cmdk-input::placeholder { color: var(--muted); }
+  .cmdk-list { max-height: min(380px, 50vh); overflow-y: auto; padding: var(--sp-1); }
+  .cmdk-item {
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: 6px var(--sp-2); border-radius: var(--r-sm);
+    font-size: var(--text-sm); cursor: default; white-space: nowrap;
+  }
+  .cmdk-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+  .cmdk-title b { font-weight: 600; color: var(--accent); }
+  .cmdk-group { color: var(--muted); font-size: var(--text-xs); }
+  .cmdk-item.active { background: var(--surface-3); }
+  .cmdk-item.danger .cmdk-title { color: var(--error); }
+  .cmdk-caption {
+    padding: var(--sp-2) var(--sp-2) 2px;
+    font-size: var(--text-xs); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  }
+  .cmdk-empty { padding: var(--sp-4); color: var(--muted); font-size: var(--text-sm); }
+  @media (prefers-reduced-motion: no-preference) {
+    .cmdk { animation: cmdk-in 110ms ease-out; }
+    @keyframes cmdk-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: none; }
+    }
+  }
+
   /* Floating on-canvas value editor (double-click / F2). */
   .inline-edit {
     position: absolute; z-index: 50;
@@ -545,6 +707,26 @@
     font-family: var(--font-mono);
     min-width: 60px;
     outline: none;
+  }
+
+  /* Matrix viewer: ghost header buttons + visible resize grip
+     (token-system overrides of the legacy rules above). */
+  #matrix-viewer-header button {
+    background: transparent; color: var(--fg);
+    border: none; border-radius: var(--r-sm);
+    height: 22px; padding: 0 var(--sp-2);
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: var(--text-xs); cursor: pointer; flex: none;
+  }
+  #matrix-viewer-header button:hover { background: var(--surface-3); }
+  #matrix-viewer-close { width: 22px; padding: 0; justify-content: center; }
+  #matrix-viewer::after {
+    content: ''; position: absolute; right: 3px; bottom: 3px;
+    width: 10px; height: 10px; pointer-events: none;
+    background:
+      linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%,
+        transparent 60%, transparent 75%, var(--muted) 75%, var(--muted) 85%, transparent 85%);
+    opacity: 0.6;
   }
 
   /* Canvas SVG element styling */
@@ -650,8 +832,8 @@
     right: 24px; bottom: 24px;
     width: 380px; height: 380px;
     min-width: 200px; min-height: 200px;
-    background: var(--panel); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
+    background: var(--surface-1); color: var(--fg);
+    border: 1px solid var(--line); border-radius: var(--r-md);
     box-shadow: 0 6px 24px rgba(0,0,0,0.25);
     display: flex; flex-direction: column;
     overflow: hidden; resize: both;
@@ -662,27 +844,27 @@
     display: flex; align-items: center; gap: 8px;
     padding: 6px 8px;
     border-bottom: 1px solid var(--line);
-    background: var(--btn-bg);
+    background: var(--surface-2);
     cursor: move; user-select: none;
     flex: none;
   }
   #matrix-viewer-title {
-    flex: 1; font-size: 0.78rem; font-weight: 600;
+    flex: 1; font-size: var(--text-xs); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #matrix-viewer-header button {
-    background: var(--btn-bg); color: var(--btn-fg);
+    background: var(--surface-2); color: var(--btn-fg);
     border: 1px solid var(--line); border-radius: 4px;
     padding: 2px 6px; font-size: 11px; cursor: pointer;
     flex: none;
   }
   #matrix-viewer-header button:hover { background: var(--hover); }
   #matrix-viewer-status {
-    padding: 4px 10px; font-size: 0.72rem; color: var(--muted);
+    padding: 4px 10px; font-size: var(--text-xs); color: var(--muted);
     border-bottom: 1px solid var(--line);
-    background: var(--bg);
+    background: var(--surface-0);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     flex: none; min-height: 1.45em;
   }
@@ -777,7 +959,8 @@
     }
     /* Coordinate readout: dim further on touch since it's purely
        informational and competes with finger gestures. */
-    #coords { opacity: 0.6; font-size: 12px; }
+    /* No hover cursor on touch — the coords zone is meaningless. */
+    #sb-coords { display: none; }
     /* The crosshair / move / grab cursors don't apply on touch, but
        the "default" cursor still gets one. Override to none — there
        is no pointer to display. */
@@ -895,13 +1078,13 @@
         <circle cx="9" cy="0" r="8" fill="none" stroke="currentColor" stroke-width="1"/>
         <path d="M3,-4 V4 M3,-2 L11,-7 M3,2 L11,7 M9,5 L11,7 L8,7" fill="none" stroke="currentColor" stroke-width="1.2"/>
       </svg>
-      <span class="label">Q</span>
+      <span class="label">QN</span>
     </button>
     <button class="tool" data-tool="nmos" title="MOSFET — NMOS (M)">
       <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
         <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
       </svg>
-      <span class="label">M</span>
+      <span class="label">MN</span>
     </button>
     <!-- TEMPLATE: PNP. Mirrors the NPN icon but with the emitter
          arrow pointing INTO the base bar (PNP convention). -->
@@ -911,7 +1094,7 @@
         <path d="M3,-4 V4 M3,-2 L11,-7 M3,2 L11,7" fill="none" stroke="currentColor" stroke-width="1.2"/>
         <path d="M5,1 L3,2 L5,4" fill="none" stroke="currentColor" stroke-width="1.2"/>
       </svg>
-      <span class="label">Q</span>
+      <span class="label">QP</span>
     </button>
     <!-- TEMPLATE: PMOS. NMOS shape plus a small bubble between the
          gate line and the channel to mark the inversion. -->
@@ -920,7 +1103,7 @@
         <path d="M2,-6 V6 M5,-5 V-2 H12 M5,2 V5 H12 M5,-1 V1" fill="none" stroke="currentColor" stroke-width="1.2"/>
         <circle cx="3.5" cy="0" r="1.2" fill="none" stroke="currentColor" stroke-width="1"/>
       </svg>
-      <span class="label">M</span>
+      <span class="label">MP</span>
     </button>
   </div>
   <!-- TEMPLATE GROUP: 4-terminal MOSFETs and the vacuum triode. The
@@ -933,7 +1116,7 @@
         <path d="M5,0 H17" fill="none" stroke="currentColor" stroke-width="1.2"/>
         <path d="M8,-1.2 L6,0 L8,1.2" fill="none" stroke="currentColor" stroke-width="1.2"/>
       </svg>
-      <span class="label">M4</span>
+      <span class="label">MN4</span>
     </button>
     <button class="tool" data-tool="pmos_4t" title="MOSFET — PMOS 4-T">
       <svg width="22" height="20" viewBox="-2 -10 22 20" aria-hidden="true">
@@ -942,7 +1125,7 @@
         <path d="M5,0 H17" fill="none" stroke="currentColor" stroke-width="1.2"/>
         <path d="M14,-1.2 L16,0 L14,1.2" fill="none" stroke="currentColor" stroke-width="1.2"/>
       </svg>
-      <span class="label">M4</span>
+      <span class="label">MP4</span>
     </button>
     <button class="tool" data-tool="triode" title="Triode">
       <svg width="20" height="20" viewBox="-2 -10 20 20" aria-hidden="true">
@@ -1129,6 +1312,7 @@
     <button id="matrix-viewer-refresh" title="Recompute from current schematic">Refresh</button>
     <button id="matrix-viewer-close" title="Close">×</button>
   </div>
+  <div id="matrix-progress" class="async-progress" hidden><div class="async-progress-fill"></div></div>
   <div id="matrix-viewer-status">Idle.</div>
   <div id="matrix-viewer-body">
     <svg id="matrix-viewer-svg" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -1140,7 +1324,6 @@
     <svg id="canvas" xmlns="http://www.w3.org/2000/svg"></svg>
     <!-- Live grid-snapped cursor readout. While a box-select drag
          is in flight this swaps to the start→end coordinate pair. -->
-    <div id="coords" aria-live="off"></div>
   </div>
 
   <!-- Drag handle to resize the side panel. Wired in editor.ts. -->
@@ -1157,13 +1340,14 @@
     <div id="calc-pane" class="pane">
       <div class="calc-controls">
         <button id="btn-calc-node" title="Symbolically solve a node voltage with sycan">Calc Node</button>
-        <select id="calc-mode" class="picker" title="Analysis mode" style="min-width: 70px; flex: none;">
+        <select id="calc-mode" class="picker" title="Analysis mode">
           <option value="auto" selected>Auto</option>
           <option value="dc">DC</option>
           <option value="ac">AC</option>
         </select>
         <span id="calc-status" class="calc-status"></span>
       </div>
+      <div id="calc-progress" class="async-progress" hidden><div class="async-progress-fill"></div></div>
       <div id="calc-output" class="calc-output">
         <div class="empty-msg">Click <em>Calc Node</em>, then click a wire or terminal to compute its symbolic voltage.</div>
       </div>
@@ -1181,7 +1365,21 @@
   </aside>
 </main>
 
-<div id="hint"></div>
+<!-- Status bar. Zones left→right: mode chip, context hint (flexes,
+     truncates), selection summary, grid pitch, cursor coords, zoom
+     controls. flashHint() temporarily overrides the hint zone. -->
+<footer id="statusbar">
+  <span id="sb-mode"></span>
+  <span id="hint"></span>
+  <span id="sb-sel" class="sb-zone sb-num hidden"></span>
+  <span id="sb-grid" class="sb-zone sb-num" title="Grid pitch (world units)"></span>
+  <span id="sb-coords" class="sb-zone sb-num" title="Cursor position, grid-snapped"></span>
+  <span id="sb-zoom" class="sb-zone">
+    <button type="button" id="sb-zoom-out" title="Zoom out (Ctrl+-)" aria-label="Zoom out">&#8722;</button>
+    <button type="button" id="sb-zoom-pct" title="Reset zoom to 100% (Ctrl+0)">100%</button>
+    <button type="button" id="sb-zoom-in" title="Zoom in (Ctrl+=)" aria-label="Zoom in">+</button>
+  </span>
+</footer>
 
 <!-- Pop-up notification stack. Anchored bottom-left and grown upward
      so the most-recent toast is at the top of the stack. `notify()`

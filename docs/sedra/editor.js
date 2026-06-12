@@ -343,7 +343,10 @@ var wrap = document.getElementById('canvas-wrap');
 const hint = document.getElementById('hint');
 const propPane = document.getElementById('prop-pane');
 const netlistEl = document.getElementById('netlist');
-const coords = document.getElementById('coords');
+const coords = document.getElementById('sb-coords');
+const sbMode = document.getElementById('sb-mode');
+const sbSel = document.getElementById('sb-sel');
+const sbZoomPct = document.getElementById('sb-zoom-pct');
 // Convert a screen-space mouse event to world (logical) coordinates.
 function eventToWorld(e) {
     const rect = wrap.getBoundingClientRect();
@@ -546,6 +549,7 @@ function render() {
     }
     updateNetlist();
     updateCoords();
+    updateStatusBar();
     saveLocal();
 }
 // Live coordinate readout in the bottom-right of the canvas. While
@@ -554,21 +558,51 @@ function render() {
 // when there's no information to show (cursor off-canvas + no
 // active box).
 function updateCoords() {
+    let txt = '';
     if (state.boxSelect) {
         const b = state.boxSelect;
         const [sx0, sy0] = snapPt([b.x0, b.y0]);
         const [sx1, sy1] = snapPt([b.x1, b.y1]);
-        coords.textContent = `(${sx0}, ${sy0}) → (${sx1}, ${sy1})`;
-        coords.classList.remove('hidden');
-        return;
+        txt = `${sx0}, ${sy0} → ${sx1}, ${sy1}`;
     }
-    if (state.cursorInside) {
+    else if (state.cursorInside) {
         const [cx, cy] = snapPt(state.cursorWorld);
-        coords.textContent = `(${cx}, ${cy})`;
-        coords.classList.remove('hidden');
-        return;
+        txt = `${cx}, ${cy}`;
     }
-    coords.classList.add('hidden');
+    coords.textContent = txt;
+}
+// Selection-summary + zoom-% zones. Memoized so the per-mousemove
+// render() call does zero DOM writes when nothing changed.
+let sbSelLast = '';
+let sbZoomLast = '';
+function updateStatusBar() {
+    let sel = '';
+    if (state.selectedIds.size) {
+        const partIds = new Set(state.parts.map(pp => pp.id));
+        let np = 0, nw = 0;
+        for (const id of state.selectedIds) {
+            if (partIds.has(id))
+                np++;
+            else
+                nw++;
+        }
+        const frags = [];
+        if (np)
+            frags.push(`${np} part${np === 1 ? '' : 's'}`);
+        if (nw)
+            frags.push(`${nw} wire${nw === 1 ? '' : 's'}`);
+        sel = frags.join(', ');
+    }
+    if (sel !== sbSelLast) {
+        sbSelLast = sel;
+        sbSel.textContent = sel;
+        sbSel.classList.toggle('hidden', sel === '');
+    }
+    const z = `${Math.round(state.zoom * 100)}%`;
+    if (z !== sbZoomLast) {
+        sbZoomLast = z;
+        sbZoomPct.textContent = z;
+    }
 }
 function drawGrid() {
     const W = wrap.clientWidth, H = wrap.clientHeight;
@@ -1799,60 +1833,61 @@ function isElemKind(t) {
 }
 function refreshHint() {
     const t = state.tool;
+    let mode;
     let h;
     if (state.copyAnchorPending) {
-        const verb = state.copyAnchorPending.cut ? 'cut' : 'copy';
-        h = `Click to pick anchor point for ${verb}. <kbd>Esc</kbd> to cancel.`;
+        mode = state.copyAnchorPending.cut ? 'Cut' : 'Copy';
+        h = 'Click to pick the anchor point · <kbd>Esc</kbd> cancel';
     }
     else if (state.calcNode.armed) {
-        h = 'Calc Node: click on a wire or part terminal to compute its ' +
-            'symbolic voltage. <kbd>Esc</kbd> to cancel.';
+        mode = 'Calc Node';
+        h = 'Click a wire or terminal to solve its symbolic voltage · <kbd>Esc</kbd> cancel';
     }
     else if (state.moveDraft) {
-        if (state.moveDraft.freshlyPasted) {
-            h = 'Place paste: move the cursor, <kbd>click</kbd> to drop, <kbd>Esc</kbd> to cancel.';
-        }
-        else if (state.moveDraft.viaDrag) {
-            h = 'Moving: release the mouse to drop, <kbd>Esc</kbd> to cancel.';
-        }
-        else {
-            h = 'Moving: <kbd>click</kbd> to drop, <kbd>Esc</kbd> to cancel.';
-        }
+        mode = state.moveDraft.freshlyPasted ? 'Paste' : 'Move';
+        h = state.moveDraft.viaDrag && !state.moveDraft.freshlyPasted
+            ? 'Release to drop · <kbd>Esc</kbd> cancel'
+            : 'Click to drop · <kbd>Esc</kbd> cancel';
     }
     else if (state.wireDraft) {
-        h = 'Wire: click to add a corner, <kbd>double-click</kbd> to finish, <kbd>Esc</kbd> to cancel.';
+        mode = 'Wire';
+        h = 'Click adds a corner · <kbd>dbl-click</kbd> finishes · <kbd>Esc</kbd> cancel';
     }
     else if (t === 'select') {
-        h = 'Select: click picks, drag moves, box multi-selects. ' +
-            '<kbd>U</kbd> expand to net, <kbd>Ctrl+D</kbd> duplicate, ' +
-            'arrows nudge, <kbd>double-click</kbd> edits a value, ' +
-            '<kbd>Del</kbd> remove, <kbd>Space</kbd> rotate, ' +
-            '<kbd>Esc</kbd> deselect.';
+        mode = 'Select';
+        h = 'Click picks · drag moves · box multi-selects · ' +
+            '<kbd>U</kbd> net · <kbd>Ctrl+D</kbd> duplicate · ' +
+            '<kbd>F2</kbd> edit value · <kbd>?</kbd> all shortcuts';
     }
     else if (t === 'delete') {
-        h = 'Delete: click a part or wire to remove it.';
+        mode = 'Delete';
+        h = 'Click a part or wire to remove it';
     }
     else if (t === 'rotate') {
-        h = 'Rotate: click a part to rotate 90°.';
+        mode = 'Rotate';
+        h = 'Click a part to rotate 90°';
     }
     else if (t === 'highlight') {
-        h = 'Net Highlight: click a wire or terminal to wash its net. ' +
-            'Wires elsewhere with the same label join the highlight. ' +
-            'Click empty space to clear.';
+        mode = 'Highlight';
+        h = 'Click a wire or terminal to wash its net · click empty space to clear';
     }
     else if (t === 'WIRE') {
-        h = 'Wire: click to start. Each click adds a Manhattan corner; <kbd>double-click</kbd> to finish.';
+        mode = 'Wire';
+        h = 'Click to start · each click adds a Manhattan corner · <kbd>dbl-click</kbd> finishes';
     }
     else if (isElemKind(t)) {
-        h = `Place ${ELEM_TYPES[t].prefix}: click on the grid. <kbd>Space</kbd> rotates the ghost.`;
+        mode = `Place ${ELEM_TYPES[t].prefix}`;
+        h = 'Click the grid to place · <kbd>Space</kbd> rotates the ghost';
     }
     else {
+        mode = '';
         h = '';
     }
-    hint.innerHTML = h +
-        ' &middot; <kbd>?</kbd> shortcuts &middot; <kbd>F</kbd> fit &middot; ' +
-        'scroll pan &middot; <kbd>Ctrl</kbd>+scroll zoom &middot; ' +
-        'middle/right-drag pan.';
+    sbMode.textContent = mode;
+    // A live flash owns the hint zone; the persistent hint is
+    // recomputed from state when the flash timer expires.
+    if (hintTimer === null)
+        hint.innerHTML = h;
 }
 // ------------------------------------------------------------------
 // Mouse handling
@@ -2168,6 +2203,10 @@ wrap.addEventListener('mousedown', (e) => {
     // now reserved for "add to selection".)
     if (e.button === 1 || e.button === 2) {
         e.preventDefault();
+        if (e.button === 2) {
+            rightPress = { x: e.clientX, y: e.clientY,
+                px: state.pan.x, py: state.pan.y };
+        }
         panning = true;
         panStart = { x: e.clientX, y: e.clientY,
             px: state.pan.x, py: state.pan.y };
@@ -2261,6 +2300,8 @@ wrap.addEventListener('mouseup', (e) => {
     if (panning) {
         panning = false;
         wrap.classList.remove('panning');
+        if (e.button === 2)
+            maybeOpenContextMenu(e);
         return;
     }
     // Select-tool gestures (click / move-drag / marquee) finish in the
@@ -2278,7 +2319,30 @@ wrap.addEventListener('mouseleave', () => {
         placementPreview = null;
     render();
 });
+// Right-click: context menu on a press, pan on a drag (≥4px). The
+// browser's contextmenu event is only used to suppress the native
+// menu — its timing differs per platform (Linux fires it on
+// mousedown), so the menu itself opens from our own mouseup logic.
+let rightPress = null;
 wrap.addEventListener('contextmenu', (e) => e.preventDefault());
+function maybeOpenContextMenu(e) {
+    const press = rightPress;
+    rightPress = null;
+    if (!press)
+        return;
+    const moved = Math.hypot(e.clientX - press.x, e.clientY - press.y);
+    if (moved >= 4)
+        return; // right-drag pan
+    // Undo the sub-threshold pan jitter.
+    state.pan.x = press.px;
+    state.pan.y = press.py;
+    render();
+    // Modal interactions own the pointer — no menu while they're live.
+    if (state.moveDraft || state.wireDraft || state.copyAnchorPending
+        || state.calcNode.armed || selectGesture || state.boxSelect)
+        return;
+    openContextMenu(e.clientX, e.clientY);
+}
 wrap.addEventListener('click', (e) => {
     if (panning)
         return;
@@ -2358,6 +2422,22 @@ wrap.addEventListener('click', (e) => {
     }
 });
 // Mouse wheel zoom (anchored to cursor).
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = Math.SQRT2;
+// Set absolute zoom, anchored at screen point (ax, ay) in canvas-wrap
+// coords; defaults to the canvas center (keyboard / button zoom).
+function setZoom(newZoom, ax, ay) {
+    const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
+    if (z === state.zoom)
+        return;
+    const cx = ax !== undefined ? ax : wrap.clientWidth / 2;
+    const cy = ay !== undefined ? ay : wrap.clientHeight / 2;
+    state.pan.x = cx - (cx - state.pan.x) * (z / state.zoom);
+    state.pan.y = cy - (cy - state.pan.y) * (z / state.zoom);
+    state.zoom = z;
+    render();
+}
 // Trackpad-correct wheel handling (Figma convention): pinch gestures
 // (delivered as ctrl+wheel) and explicit Ctrl/Cmd+wheel zoom, anchored
 // at the cursor; plain wheel / two-finger scroll pans. Shift turns a
@@ -2368,18 +2448,8 @@ wrap.addEventListener('wheel', (e) => {
         // Normalise: pinch deltas are small and smooth, mouse detents are
         // ±100-ish — clamp so one detent is a pleasant ~1.6× step.
         const dy = Math.max(-40, Math.min(40, e.deltaY));
-        const factor = Math.exp(-dy * 0.012);
-        const newZoom = Math.max(0.2, Math.min(4, state.zoom * factor));
-        if (newZoom === state.zoom)
-            return;
         const rect = wrap.getBoundingClientRect();
-        const ax = e.clientX - rect.left;
-        const ay = e.clientY - rect.top;
-        // Anchor: keep world point under cursor fixed.
-        state.pan.x = ax - (ax - state.pan.x) * (newZoom / state.zoom);
-        state.pan.y = ay - (ay - state.pan.y) * (newZoom / state.zoom);
-        state.zoom = newZoom;
-        render();
+        setZoom(state.zoom * Math.exp(-dy * 0.012), e.clientX - rect.left, e.clientY - rect.top);
         return;
     }
     const horizontal = e.shiftKey && e.deltaX === 0;
@@ -2456,7 +2526,7 @@ wrap.addEventListener('touchmove', (e) => {
         if (pinch.startDist === 0)
             return;
         const rawZoom = pinch.startZoom * (dist / pinch.startDist);
-        const newZoom = Math.max(0.2, Math.min(4, rawZoom));
+        const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, rawZoom));
         const c = touchCentroid(e.touches);
         // Two contributions to the new pan:
         //   1. zoom anchored at the gesture's *initial* centroid (keeps
@@ -2620,6 +2690,11 @@ function addPart(type, x, y, rot) {
     const id = nextName(meta.prefix);
     const value = type in DEFAULT_VALUES ? DEFAULT_VALUES[type] : id;
     state.parts.push({ id, type, x, y, rot, value });
+    // Interactive placement (tool === type) feeds the recent-parts list
+    // for the canvas context menu; paste/import pass through here too
+    // but with an unrelated tool, which keeps recents honest.
+    if (state.tool === type)
+        noteRecentPart(type);
 }
 // Manhattan wire builder.
 //
@@ -2782,43 +2857,666 @@ function duplicateSelection() {
     const n = newPartIds.length + newWireIds.length;
     flashHint(`Duplicated ${n} item${n === 1 ? '' : 's'} — drag or nudge into place`);
 }
-// ------------------------------------------------------------------
-// Keyboard shortcut registry — single source for the '?' cheat
-// sheet. Keep in sync with the keydown handler below and the
-// toolbar tooltips.
-// ------------------------------------------------------------------
-const SHORTCUT_GROUPS = [
-    { title: 'Tools', rows: [
-            ['S / Esc', 'Select'], ['W', 'Wire'], ['X', 'Delete'],
-            ['B', 'Rotate'], ['H', 'Net highlight'],
-            ['R L C V I D G', 'Place part'],
-        ] },
-    { title: 'Edit', rows: [
-            ['Ctrl+Z / Ctrl+Y', 'Undo / redo'],
-            ['Ctrl+C / X / V', 'Copy / cut / paste'],
-            ['Ctrl+D', 'Duplicate'],
-            ['Ctrl+A', 'Select all parts'],
-            ['Del', 'Delete selection'],
-            ['Space', 'Rotate selection / ghost'],
-            ['F2 / dbl-click', 'Edit part value'],
-            ['← ↑ ↓ →', 'Nudge selection'],
-        ] },
-    { title: 'Selection', rows: [
-            ['Click', 'Select part / segment'],
-            ['Shift+click', 'Add to selection'],
-            ['Ctrl+click', 'Toggle'],
-            ['Drag', 'Move (wires follow)'],
-            ['M', 'Move with cursor'],
-            ['U', 'Expand to whole net'],
-        ] },
-    { title: 'View', rows: [
-            ['F', 'Fit view'],
-            ['Scroll', 'Pan'],
-            ['Ctrl+scroll', 'Zoom'],
-            ['Mid/right-drag', 'Pan'],
-            ['?', 'This cheat sheet'],
-        ] },
+function selectAllParts() {
+    state.selectedIds = new Set(state.parts.map(pp => pp.id));
+    setTool('select');
+    refreshProps();
+    render();
+}
+function expandSelectionToNet(wireId) {
+    const seed = state.wires.find(w => w.id === wireId);
+    if (!seed)
+        return;
+    const { wireIds } = netMembers(seed);
+    state.selectedIds.clear();
+    state.selectedSegments.clear();
+    for (const id of wireIds)
+        selectWholeWire(id);
+    flashHint(`Extended to net (${wireIds.size} wire${wireIds.size === 1 ? '' : 's'})`);
+    refreshProps();
+    render();
+}
+function rotateSelection() {
+    let did = false;
+    for (const id of state.selectedIds) {
+        const pp = state.parts.find(x => x.id === id);
+        if (pp) {
+            pp.rot = (pp.rot + 90) % 360;
+            did = true;
+        }
+    }
+    if (did) {
+        pushHistory();
+        render();
+    }
+}
+// ---- recents (persisted) ----
+const RECENT_CMD_KEY = 'sycan.sedra.cmdk.recent.v1';
+const RECENT_PART_KEY = 'sycan.sedra.recentParts.v1';
+function readRecentList(key) {
+    try {
+        const raw = localStorage.getItem(key);
+        const arr = raw ? JSON.parse(raw) : null;
+        return Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : [];
+    }
+    catch (_) {
+        return [];
+    }
+}
+function writeRecentList(key, list) {
+    try {
+        localStorage.setItem(key, JSON.stringify(list));
+    }
+    catch (_) { /* full */ }
+}
+function noteRecentCommand(id) {
+    const list = readRecentList(RECENT_CMD_KEY).filter(x => x !== id);
+    list.unshift(id);
+    writeRecentList(RECENT_CMD_KEY, list.slice(0, 7));
+}
+function noteRecentPart(kind) {
+    const list = readRecentList(RECENT_PART_KEY).filter(x => x !== kind);
+    list.unshift(kind);
+    writeRecentList(RECENT_PART_KEY, list.slice(0, 3));
+}
+function recentParts() {
+    const list = readRecentList(RECENT_PART_KEY);
+    const seed = list.length ? list : ['res', 'vsrc', 'gnd'];
+    return seed.filter(k => k in ELEM_TYPES);
+}
+// ---- registry ----
+const hasSel = () => state.selectedIds.size > 0 || state.selectedSegments.size > 0;
+const clipboardFull = () => ((clipboard.parts?.length ?? 0) + (clipboard.wires?.length ?? 0)) > 0;
+const opCount = () => state.selectedIds.size;
+const countSuffix = () => (opCount() > 1 ? ` ${opCount()} items` : '');
+const COMMANDS = [
+    // Hit-target commands (context-menu part / wire / net sections).
+    { id: 'part.editValue', title: 'Edit value…', group: 'Edit', shortcut: 'F2',
+        menu: { section: 'part', order: 10 },
+        enabled: ctx => ctx.hit?.kind === 'part'
+            && state.parts.find(pp => pp.id === ctx.hit.id)?.type !== 'gnd',
+        run: ctx => openInlineValueEditor(ctx.hit.id) },
+    { id: 'edit.rotate', title: 'Rotate 90°', group: 'Edit', shortcut: 'Space', cheat: true,
+        menu: { section: 'part', order: 20 },
+        enabled: () => [...state.selectedIds].some(id => state.parts.some(pp => pp.id === id)),
+        run: () => rotateSelection() },
+    { id: 'edit.duplicate', title: () => `Duplicate${countSuffix()}`, group: 'Edit',
+        shortcut: 'Ctrl+D', cheat: true,
+        menu: { section: 'net', order: 30 },
+        enabled: () => hasSel(),
+        run: () => duplicateSelection() },
+    { id: 'edit.copyHere', title: 'Copy (anchor here)', group: 'Edit', shortcut: 'Ctrl+C',
+        menu: { section: 'net', order: 40 }, palette: false,
+        enabled: () => hasSel(),
+        run: ctx => {
+            if (ctx.source === 'menu') {
+                copySelection(false);
+                finalizeCopyAnchor(ctx.snapped);
+            }
+            else {
+                copySelection(false);
+            }
+        } },
+    { id: 'wire.expandNet', title: 'Select whole net', group: 'Selection', shortcut: 'U',
+        cheat: true,
+        menu: { section: 'wire', order: 10 },
+        enabled: ctx => ctx.hit?.kind === 'wire',
+        run: ctx => expandSelectionToNet(ctx.hit.id) },
+    { id: 'net.highlight', title: 'Highlight net', group: 'Tools',
+        menu: { section: 'net', order: 10 },
+        enabled: ctx => ctx.hit !== null,
+        run: ctx => finalizeNetHighlight(ctx.snapped, ctx.world) },
+    { id: 'net.calcHere', title: 'Calc node here', group: 'Tools',
+        menu: { section: 'net', order: 20 },
+        enabled: ctx => ctx.hit !== null,
+        run: ctx => { void finalizeCalcNodePick(ctx.snapped, ctx.world); } },
+    { id: 'edit.delete', title: () => `Delete${countSuffix()}`, group: 'Edit',
+        shortcut: 'Del', cheat: true, danger: true,
+        menu: { section: 'net', order: 90 },
+        enabled: () => hasSel(),
+        run: () => deleteSelection() },
+    // Empty-canvas commands.
+    { id: 'edit.pasteHere', title: 'Paste here', group: 'Edit', shortcut: 'Ctrl+V',
+        menu: { section: 'canvas', order: 10 }, palette: false,
+        enabled: () => clipboardFull(),
+        run: ctx => pasteClipboard(ctx.world) },
+    { id: 'select.all', title: 'Select all parts', group: 'Selection', shortcut: 'Ctrl+A',
+        cheat: true,
+        menu: { section: 'canvas', order: 20 },
+        enabled: () => state.parts.length > 0,
+        run: () => selectAllParts() },
+    { id: 'view.fit', title: 'Fit view', group: 'View', shortcut: 'F', cheat: true,
+        menu: { section: 'canvas', order: 30 },
+        run: () => fitView() },
+    // Palette-only commands.
+    { id: 'edit.undo', title: 'Undo', group: 'Edit', shortcut: 'Ctrl+Z', cheat: true,
+        enabled: () => historyIdx > 0,
+        run: () => document.getElementById('btn-undo').click() },
+    { id: 'edit.redo', title: 'Redo', group: 'Edit', shortcut: 'Ctrl+Y', cheat: true,
+        enabled: () => historyIdx < editHistory.length - 1,
+        run: () => document.getElementById('btn-redo').click() },
+    { id: 'edit.copy', title: 'Copy (pick anchor)', group: 'Edit', shortcut: 'Ctrl+C',
+        cheat: true,
+        enabled: () => hasSel(),
+        run: () => copySelection(false) },
+    { id: 'edit.cut', title: 'Cut (pick anchor)', group: 'Edit', shortcut: 'Ctrl+X',
+        enabled: () => hasSel(),
+        run: () => copySelection(true) },
+    { id: 'edit.paste', title: 'Paste at cursor', group: 'Edit', shortcut: 'Ctrl+V',
+        cheat: true,
+        enabled: () => clipboardFull(),
+        run: () => pasteClipboard() },
+    { id: 'tool.select', title: 'Select tool', group: 'Tools', shortcut: 'S / Esc',
+        cheat: true, run: () => setTool('select') },
+    { id: 'tool.wire', title: 'Wire tool', group: 'Tools', shortcut: 'W',
+        cheat: true, run: () => setTool('WIRE') },
+    { id: 'tool.delete', title: 'Delete tool', group: 'Tools', shortcut: 'X',
+        cheat: true, run: () => setTool('delete') },
+    { id: 'tool.rotate', title: 'Rotate tool', group: 'Tools', shortcut: 'B',
+        cheat: true, run: () => setTool('rotate') },
+    { id: 'tool.highlight', title: 'Net highlight tool', group: 'Tools', shortcut: 'H',
+        cheat: true, run: () => setTool('highlight') },
+    { id: 'place.byLetter', title: 'Place part', group: 'Tools',
+        shortcut: 'R L C V I D G', cheat: true, palette: false,
+        run: () => { } },
+    { id: 'view.zoomSelection', title: 'Zoom to selection', group: 'View',
+        shortcut: 'Shift+F', cheat: true,
+        enabled: () => hasSel(),
+        run: () => zoomToSelection() },
+    { id: 'view.zoom100', title: 'Zoom to 100%', group: 'View', shortcut: 'Ctrl+0',
+        cheat: true, run: () => setZoom(1) },
+    { id: 'view.zoomIn', title: 'Zoom in', group: 'View', shortcut: 'Ctrl+=',
+        run: () => setZoom(state.zoom * ZOOM_STEP) },
+    { id: 'view.zoomOut', title: 'Zoom out', group: 'View', shortcut: 'Ctrl+-',
+        run: () => setZoom(state.zoom / ZOOM_STEP) },
+    { id: 'view.matrix', title: 'MNA matrix viewer', group: 'View',
+        run: () => document.getElementById('btn-matrix').click() },
+    { id: 'view.cheatsheet', title: 'Keyboard shortcuts', group: 'View', shortcut: '?',
+        run: () => toggleShortcutOverlay() },
+    { id: 'view.palette', title: 'Command palette', group: 'View', shortcut: 'Ctrl+K',
+        cheat: true, palette: false,
+        run: () => toggleCmdPalette() },
+    { id: 'file.copyNetlist', title: 'Copy netlist', group: 'File',
+        run: () => document.getElementById('btn-copy').click() },
+    { id: 'file.exportJson', title: 'Export JSON', group: 'File',
+        run: () => document.getElementById('btn-export-json').click() },
+    { id: 'file.importJson', title: 'Import JSON…', group: 'File',
+        run: () => document.getElementById('btn-import-json').click() },
+    { id: 'file.clearAll', title: 'Clear schematic…', group: 'File', danger: true,
+        enabled: () => state.parts.length > 0 || state.wires.length > 0,
+        run: () => document.getElementById('btn-clear').click() },
 ];
+// Place commands for every part kind (palette).
+for (const kind of Object.keys(ELEM_TYPES)) {
+    const letter = { res: 'R', ind: 'L', cap: 'C', vsrc: 'V', isrc: 'I',
+        diode: 'D', gnd: 'G' }[kind];
+    COMMANDS.push({
+        id: `place.${kind}`,
+        title: `Place ${ELEM_TYPES[kind].label ?? kind}`,
+        group: 'Place',
+        shortcut: letter,
+        run: () => setTool(kind),
+    });
+}
+const COMMANDS_BY_ID = new Map(COMMANDS.map(c => [c.id, c]));
+function makeCtx(world, hit, source) {
+    return { world, snapped: snapPt(world), hit, source };
+}
+function viewportCenterWorld() {
+    return [(wrap.clientWidth / 2 - state.pan.x) / state.zoom,
+        (wrap.clientHeight / 2 - state.pan.y) / state.zoom];
+}
+function cmdTitle(c, ctx) {
+    return typeof c.title === 'string' ? c.title : c.title(ctx);
+}
+function runCommand(c, ctx) {
+    if (c.enabled && !c.enabled(ctx))
+        return;
+    noteRecentCommand(c.id);
+    c.run(ctx);
+}
+// Render a shortcut label as <kbd> chips; ' / ' separates alternates.
+function kbdHtml(label) {
+    return label.split(' / ').map(part => `<kbd>${part}</kbd>`).join(' / ');
+}
+// ------------------------------------------------------------------
+// Right-click context menu
+// ------------------------------------------------------------------
+let ctxMenuEl = null;
+let ctxMenuCleanup = null;
+function closeContextMenu() {
+    if (ctxMenuCleanup) {
+        ctxMenuCleanup();
+        ctxMenuCleanup = null;
+    }
+    if (ctxMenuEl) {
+        ctxMenuEl.remove();
+        ctxMenuEl = null;
+    }
+}
+const MENU_SECTION_ORDER = ['part', 'wire', 'net', 'canvas'];
+function sectionVisible(section, hit) {
+    switch (section) {
+        case 'part': return hit?.kind === 'part';
+        case 'wire': return hit?.kind === 'wire';
+        case 'net': return hit !== null;
+        case 'canvas': return hit === null;
+    }
+}
+function openContextMenu(sx, sy) {
+    closeContextMenu();
+    closeCmdPalette();
+    if (shortcutOverlayEl)
+        toggleShortcutOverlay();
+    const world = eventToWorld({ clientX: sx, clientY: sy });
+    const hit = pickAt(world);
+    // KiCad selection rule: right-click on an unselected item re-targets
+    // the selection to it; on a selected item the multi-selection is
+    // kept so verbs apply to all of it; empty space keeps selection.
+    if (hit && !state.selectedIds.has(hit.id)) {
+        if (state.tool !== 'select')
+            setTool('select');
+        state.selectedIds = new Set([hit.id]);
+        state.selectedSegments.clear();
+        if (hit.kind === 'wire')
+            selectWholeWire(hit.id);
+        refreshProps();
+        render();
+    }
+    const ctx = makeCtx(world, hit, 'menu');
+    const menu = document.createElement('div');
+    menu.className = 'ctx-menu';
+    menu.setAttribute('role', 'menu');
+    const rows = [];
+    let lastSection = null;
+    const addItem = (cmd, title) => {
+        const item = document.createElement('div');
+        item.className = 'ctx-item' + (cmd.danger ? ' danger' : '');
+        item.setAttribute('role', 'menuitem');
+        const enabled = !cmd.enabled || cmd.enabled(ctx);
+        if (!enabled)
+            item.setAttribute('aria-disabled', 'true');
+        const label = document.createElement('span');
+        label.className = 'ctx-label';
+        label.textContent = title;
+        item.appendChild(label);
+        if (cmd.shortcut) {
+            const keys = document.createElement('span');
+            keys.className = 'ctx-keys';
+            keys.innerHTML = kbdHtml(cmd.shortcut);
+            item.appendChild(keys);
+        }
+        menu.appendChild(item);
+        if (enabled)
+            rows.push({ el: item, cmd });
+        return item;
+    };
+    for (const section of MENU_SECTION_ORDER) {
+        if (!sectionVisible(section, hit))
+            continue;
+        const cmds = COMMANDS
+            .filter(c => c.menu && c.menu.section === section)
+            .sort((a, b) => a.menu.order - b.menu.order);
+        if (!cmds.length)
+            continue;
+        if (lastSection !== null) {
+            const sep = document.createElement('div');
+            sep.className = 'ctx-sep';
+            sep.setAttribute('role', 'separator');
+            menu.appendChild(sep);
+        }
+        lastSection = section;
+        for (const cmd of cmds)
+            addItem(cmd, cmdTitle(cmd, ctx));
+    }
+    // Recent parts on empty canvas.
+    if (!hit) {
+        const recents = recentParts();
+        if (recents.length) {
+            const sep = document.createElement('div');
+            sep.className = 'ctx-sep';
+            menu.appendChild(sep);
+            const cap = document.createElement('div');
+            cap.className = 'ctx-caption';
+            cap.textContent = 'Place recent';
+            menu.appendChild(cap);
+            for (const kind of recents) {
+                const cmd = COMMANDS_BY_ID.get(`place.${kind}`);
+                if (cmd)
+                    addItem(cmd, cmdTitle(cmd, ctx));
+            }
+        }
+    }
+    document.body.appendChild(menu);
+    ctxMenuEl = menu;
+    // Clamp into the viewport; flip when overflowing.
+    const r = menu.getBoundingClientRect();
+    let left = sx, top = sy;
+    if (left + r.width > window.innerWidth - 8)
+        left = Math.max(8, sx - r.width);
+    if (top + r.height > window.innerHeight - 8)
+        top = Math.max(8, sy - r.height);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    // Shared active index for mouse + keyboard.
+    let active = -1;
+    const setActive = (idx) => {
+        if (active >= 0)
+            rows[active].el.classList.remove('active');
+        active = idx;
+        if (active >= 0)
+            rows[active].el.classList.add('active');
+    };
+    rows.forEach((row, idx) => {
+        row.el.addEventListener('mouseenter', () => setActive(idx));
+        row.el.addEventListener('mouseup', () => {
+            closeContextMenu();
+            runCommand(row.cmd, ctx);
+        });
+    });
+    const onKey = (ev) => {
+        if (ev.key === 'Escape') {
+            closeContextMenu();
+        }
+        else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+            const dir = ev.key === 'ArrowDown' ? 1 : -1;
+            const n = rows.length;
+            if (n)
+                setActive(((active + dir) % n + n) % n);
+        }
+        else if (ev.key === 'Home' && rows.length) {
+            setActive(0);
+        }
+        else if (ev.key === 'End' && rows.length) {
+            setActive(rows.length - 1);
+        }
+        else if (ev.key === 'Enter' && active >= 0) {
+            const row = rows[active];
+            closeContextMenu();
+            runCommand(row.cmd, ctx);
+        }
+        else {
+            return;
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+    };
+    const onDown = (ev) => {
+        if (ctxMenuEl && !ctxMenuEl.contains(ev.target))
+            closeContextMenu();
+    };
+    const onAway = () => closeContextMenu();
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('mousedown', onDown, true);
+    window.addEventListener('blur', onAway);
+    window.addEventListener('resize', onAway);
+    wrap.addEventListener('wheel', onAway, { passive: true });
+    ctxMenuCleanup = () => {
+        document.removeEventListener('keydown', onKey, true);
+        document.removeEventListener('mousedown', onDown, true);
+        window.removeEventListener('blur', onAway);
+        window.removeEventListener('resize', onAway);
+        wrap.removeEventListener('wheel', onAway);
+    };
+}
+// ------------------------------------------------------------------
+// Ctrl+K command palette
+// ------------------------------------------------------------------
+let cmdkEl = null;
+function closeCmdPalette() {
+    if (cmdkEl) {
+        cmdkEl.remove();
+        cmdkEl = null;
+    }
+}
+// Case-insensitive subsequence fuzzy match. Returns null when query is
+// not a subsequence; otherwise a score (higher = better) + matched
+// indices for highlight.
+function fuzzyMatch(query, haystack) {
+    const q = query.toLowerCase();
+    const h = haystack.toLowerCase();
+    let score = 0;
+    let hi = 0;
+    let prev = -2;
+    const indices = [];
+    for (let qi = 0; qi < q.length; qi++) {
+        const ch = q[qi];
+        let found = -1;
+        for (let k = hi; k < h.length; k++) {
+            if (h[k] === ch) {
+                found = k;
+                break;
+            }
+        }
+        if (found === -1)
+            return null;
+        score += 1;
+        if (found === prev + 1)
+            score += 2; // consecutive
+        if (found === 0 || h[found - 1] === ' ' || h[found - 1] === '(')
+            score += 3;
+        score -= (found - hi) * 0.05; // gap penalty
+        indices.push(found);
+        prev = found;
+        hi = found + 1;
+    }
+    return { score, indices };
+}
+function toggleCmdPalette() {
+    if (cmdkEl) {
+        closeCmdPalette();
+        return;
+    }
+    closeContextMenu();
+    if (shortcutOverlayEl)
+        toggleShortcutOverlay();
+    const overlay = document.createElement('div');
+    overlay.className = 'cmdk-overlay';
+    const card = document.createElement('div');
+    card.className = 'cmdk';
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-label', 'Command palette');
+    const input = document.createElement('input');
+    input.className = 'cmdk-input';
+    input.type = 'text';
+    input.placeholder = 'Type a command…';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    const list = document.createElement('div');
+    list.className = 'cmdk-list';
+    list.setAttribute('role', 'listbox');
+    const empty = document.createElement('div');
+    empty.className = 'cmdk-empty';
+    empty.textContent = 'No matching commands';
+    empty.hidden = true;
+    card.appendChild(input);
+    card.appendChild(list);
+    card.appendChild(empty);
+    overlay.appendChild(card);
+    const ctx = makeCtx(viewportCenterWorld(), null, 'palette');
+    const eligible = () => COMMANDS.filter(c => c.palette !== false && (!c.enabled || c.enabled(ctx)));
+    let entries = [];
+    let active = 0;
+    const setActive = (idx) => {
+        entries[active]?.el.classList.remove('active');
+        active = idx;
+        const e = entries[active];
+        if (e) {
+            e.el.classList.add('active');
+            e.el.scrollIntoView({ block: 'nearest' });
+        }
+    };
+    const makeRow = (cmd, titleHtml) => {
+        const item = document.createElement('div');
+        item.className = 'cmdk-item' + (cmd.danger ? ' danger' : '');
+        item.setAttribute('role', 'option');
+        const title = document.createElement('span');
+        title.className = 'cmdk-title';
+        title.innerHTML = titleHtml;
+        const group = document.createElement('span');
+        group.className = 'cmdk-group';
+        group.textContent = cmd.group;
+        item.appendChild(title);
+        item.appendChild(group);
+        if (cmd.shortcut) {
+            const keys = document.createElement('span');
+            keys.className = 'ctx-keys';
+            keys.innerHTML = kbdHtml(cmd.shortcut);
+            item.appendChild(keys);
+        }
+        item.addEventListener('mouseenter', () => {
+            const idx = entries.findIndex(en => en.el === item);
+            if (idx >= 0)
+                setActive(idx);
+        });
+        item.addEventListener('mouseup', () => {
+            closeCmdPalette();
+            runCommand(cmd, ctx);
+        });
+        return item;
+    };
+    const escapeHtmlLocal = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const refill = () => {
+        const q = input.value.trim();
+        list.innerHTML = '';
+        entries = [];
+        const recents = readRecentList(RECENT_CMD_KEY);
+        const pool = eligible();
+        if (!q) {
+            // Recents first, then grouped catalog.
+            const recentCmds = recents
+                .map(id => pool.find(c => c.id === id))
+                .filter((c) => !!c);
+            if (recentCmds.length) {
+                const cap = document.createElement('div');
+                cap.className = 'cmdk-caption';
+                cap.textContent = 'Recent';
+                list.appendChild(cap);
+                for (const cmd of recentCmds) {
+                    const el = makeRow(cmd, escapeHtmlLocal(cmdTitle(cmd, ctx)));
+                    list.appendChild(el);
+                    entries.push({ cmd, el });
+                }
+            }
+            for (const groupName of ['Edit', 'Selection', 'Tools', 'Place', 'View', 'File']) {
+                const cmds = pool.filter(c => c.group === groupName);
+                if (!cmds.length)
+                    continue;
+                const cap = document.createElement('div');
+                cap.className = 'cmdk-caption';
+                cap.textContent = groupName;
+                list.appendChild(cap);
+                for (const cmd of cmds) {
+                    const el = makeRow(cmd, escapeHtmlLocal(cmdTitle(cmd, ctx)));
+                    list.appendChild(el);
+                    entries.push({ cmd, el });
+                }
+            }
+        }
+        else {
+            const scored = pool
+                .map(cmd => {
+                const title = cmdTitle(cmd, ctx);
+                const m = fuzzyMatch(q, `${title} ${cmd.group}`);
+                if (!m)
+                    return null;
+                const recIdx = recents.indexOf(cmd.id);
+                return { cmd, title, m, rec: recIdx === -1 ? 99 : recIdx };
+            })
+                .filter((x) => !!x)
+                .sort((a, b) => b.m.score - a.m.score || a.rec - b.rec);
+            for (const { cmd, title, m } of scored) {
+                const marks = new Set(m.indices.filter(ix => ix < title.length));
+                let html = '';
+                for (let ix = 0; ix < title.length; ix++) {
+                    const c = escapeHtmlLocal(title[ix]);
+                    html += marks.has(ix) ? `<b>${c}</b>` : c;
+                }
+                const el = makeRow(cmd, html);
+                list.appendChild(el);
+                entries.push({ cmd, el });
+            }
+        }
+        empty.hidden = entries.length > 0;
+        active = 0;
+        if (entries.length)
+            entries[0].el.classList.add('active');
+    };
+    input.addEventListener('input', refill);
+    card.addEventListener('keydown', (ev) => {
+        if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+            const dir = ev.key === 'ArrowDown' ? 1 : -1;
+            const n = entries.length;
+            if (n)
+                setActive(((active + dir) % n + n) % n);
+        }
+        else if (ev.key === 'Home' && entries.length) {
+            setActive(0);
+        }
+        else if (ev.key === 'End' && entries.length) {
+            setActive(entries.length - 1);
+        }
+        else if (ev.key === 'Enter') {
+            const e = entries[active];
+            closeCmdPalette();
+            if (e)
+                runCommand(e.cmd, ctx);
+        }
+        else if (ev.key === 'Escape' || (ev.key.toLowerCase() === 'k' && (ev.ctrlKey || ev.metaKey))) {
+            closeCmdPalette();
+        }
+        else {
+            ev.stopPropagation();
+            return;
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+    });
+    overlay.addEventListener('mousedown', (ev) => {
+        if (ev.target === overlay)
+            closeCmdPalette();
+    });
+    document.body.appendChild(overlay);
+    cmdkEl = overlay;
+    refill();
+    input.focus();
+}
+// ------------------------------------------------------------------
+// '?' cheat sheet — derived from the registry plus gesture rows that
+// aren't commands.
+// ------------------------------------------------------------------
+const STATIC_SHORTCUT_ROWS = {
+    Selection: [
+        ['Click', 'Select part / segment'],
+        ['Shift+click', 'Add to selection'],
+        ['Ctrl+click', 'Toggle'],
+        ['Drag', 'Move (wires follow)'],
+        ['Right-click', 'Context menu'],
+        ['M', 'Move with cursor'],
+    ],
+    View: [
+        ['Scroll', 'Pan'],
+        ['Ctrl+scroll', 'Zoom'],
+        ['Mid/right-drag', 'Pan'],
+        ['?', 'This cheat sheet'],
+    ],
+    Edit: [
+        ['F2 / dbl-click', 'Edit part value'],
+        ['← ↑ ↓ →', 'Nudge selection'],
+    ],
+};
+const CHEAT_GROUP_ORDER = ['Tools', 'Edit', 'Selection', 'View'];
+function shortcutGroups() {
+    const ctx = makeCtx([0, 0], null, 'palette');
+    return CHEAT_GROUP_ORDER.map(title => ({
+        title,
+        rows: [
+            ...COMMANDS.filter(c => c.cheat && c.shortcut && c.group === title)
+                .map(c => [c.shortcut, cmdTitle(c, ctx)]),
+            ...(STATIC_SHORTCUT_ROWS[title] ?? []),
+        ],
+    })).filter(g => g.rows.length > 0);
+}
 let shortcutOverlayEl = null;
 function toggleShortcutOverlay() {
     if (shortcutOverlayEl) {
@@ -2835,7 +3533,7 @@ function toggleShortcutOverlay() {
     card.appendChild(h2);
     const cols = document.createElement('div');
     cols.className = 'shortcut-cols';
-    for (const group of SHORTCUT_GROUPS) {
+    for (const group of shortcutGroups()) {
         const g = document.createElement('div');
         g.className = 'shortcut-group';
         const h4 = document.createElement('h4');
@@ -2848,8 +3546,7 @@ function toggleShortcutOverlay() {
             d.textContent = desc;
             const k = document.createElement('span');
             k.className = 'keys';
-            k.innerHTML = keys.split(' / ')
-                .map(part => `<kbd>${part}</kbd>`).join(' / ');
+            k.innerHTML = kbdHtml(keys);
             row.appendChild(d);
             row.appendChild(k);
             g.appendChild(row);
@@ -3452,9 +4149,38 @@ document.getElementById('btn-copy').addEventListener('click', async () => {
 let hintTimer = null;
 function flashHint(msg) {
     hint.textContent = msg;
+    hint.classList.add('flash');
     if (hintTimer !== null)
         clearTimeout(hintTimer);
-    hintTimer = window.setTimeout(refreshHint, 1600);
+    hintTimer = window.setTimeout(() => {
+        // Null the timer BEFORE refreshHint so its flash-guard lets the
+        // persistent hint through.
+        hintTimer = null;
+        hint.classList.remove('flash');
+        refreshHint();
+    }, 1600);
+}
+// ------------------------------------------------------------------
+// Async affordance helpers: staged progress bars + busy buttons.
+// ------------------------------------------------------------------
+// frac in [0,1] shows the bar at that width; null hides it.
+function setAsyncProgress(track, frac) {
+    if (!track)
+        return;
+    if (frac === null) {
+        track.hidden = true;
+        return;
+    }
+    track.hidden = false;
+    const fill = track.firstElementChild;
+    if (fill)
+        fill.style.width = `${Math.max(0, Math.min(100, Math.round(frac * 100)))}%`;
+}
+// Disabled + spinner. `disabled` (not just the class) so synthetic
+// .click() calls and keyboard-triggered clicks are inert too.
+function setBtnBusy(btn, busy) {
+    btn.disabled = busy;
+    btn.classList.toggle('busy', busy);
 }
 // ------------------------------------------------------------------
 // Pop-up notifications
@@ -3583,6 +4309,7 @@ function pushHistory() {
     if (editHistory.length > HISTORY_LIMIT)
         editHistory.shift();
     historyIdx = editHistory.length - 1;
+    updateUndoRedoButtons();
 }
 function restore(idx) {
     if (idx < 0 || idx >= editHistory.length)
@@ -3603,17 +4330,27 @@ function restore(idx) {
     historyIdx = idx;
     return true;
 }
-document.getElementById('btn-undo').addEventListener('click', () => {
+const btnUndo = document.getElementById('btn-undo');
+const btnRedo = document.getElementById('btn-redo');
+// Reflect the history stack in the buttons (KiCad/Figma convention:
+// a greyed Undo tells you there's nothing left to undo).
+function updateUndoRedoButtons() {
+    btnUndo.disabled = historyIdx <= 0;
+    btnRedo.disabled = historyIdx >= editHistory.length - 1;
+}
+btnUndo.addEventListener('click', () => {
     if (historyIdx > 0 && restore(historyIdx - 1)) {
         refreshProps();
         render();
     }
+    updateUndoRedoButtons();
 });
-document.getElementById('btn-redo').addEventListener('click', () => {
+btnRedo.addEventListener('click', () => {
     if (historyIdx < editHistory.length - 1 && restore(historyIdx + 1)) {
         refreshProps();
         render();
     }
+    updateUndoRedoButtons();
 });
 document.getElementById('btn-clear').addEventListener('click', () => {
     if (state.parts.length === 0 && state.wires.length === 0)
@@ -3630,6 +4367,19 @@ document.getElementById('btn-clear').addEventListener('click', () => {
     render();
 });
 document.getElementById('btn-fit').addEventListener('click', fitView);
+document.getElementById('sb-grid').textContent = `Grid ${GRID}`;
+document.getElementById('sb-zoom-in').addEventListener('click', (e) => {
+    setZoom(state.zoom * ZOOM_STEP);
+    e.currentTarget.blur(); // keep Space = rotate
+});
+document.getElementById('sb-zoom-out').addEventListener('click', (e) => {
+    setZoom(state.zoom / ZOOM_STEP);
+    e.currentTarget.blur();
+});
+sbZoomPct.addEventListener('click', (e) => {
+    setZoom(1);
+    e.currentTarget.blur();
+});
 function fitView() {
     if (state.parts.length === 0 && state.wires.length === 0) {
         state.pan.x = wrap.clientWidth / 2;
@@ -3654,14 +4404,50 @@ function fitView() {
             ymax = Math.max(ymax, y);
         }
     }
+    fitBounds(xmin, ymin, xmax, ymax, 2);
+}
+function fitBounds(xmin, ymin, xmax, ymax, maxZoom) {
     const pad = 40;
     const W = wrap.clientWidth, H = wrap.clientHeight;
     const w = (xmax - xmin) + 2 * pad;
     const h = (ymax - ymin) + 2 * pad;
-    state.zoom = Math.min(W / w, H / h, 2);
+    state.zoom = Math.min(W / w, H / h, maxZoom);
     state.pan.x = -xmin * state.zoom + (W - (xmax - xmin) * state.zoom) / 2;
     state.pan.y = -ymin * state.zoom + (H - (ymax - ymin) * state.zoom) / 2;
     render();
+}
+// Shift+F. Segment-selected wires also mirror their wireId into
+// selectedIds, so iterating selectedIds covers segment selections.
+function zoomToSelection() {
+    if (!state.selectedIds.size) {
+        fitView();
+        return;
+    }
+    let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+    for (const pp of state.parts) {
+        if (!state.selectedIds.has(pp.id))
+            continue;
+        const [x0, y0, x1, y1] = partBBox(pp);
+        xmin = Math.min(xmin, x0);
+        ymin = Math.min(ymin, y0);
+        xmax = Math.max(xmax, x1);
+        ymax = Math.max(ymax, y1);
+    }
+    for (const w of state.wires) {
+        if (!state.selectedIds.has(w.id))
+            continue;
+        for (const [x, y] of w.points) {
+            xmin = Math.min(xmin, x);
+            ymin = Math.min(ymin, y);
+            xmax = Math.max(xmax, x);
+            ymax = Math.max(ymax, y);
+        }
+    }
+    if (xmin === Infinity) {
+        fitView();
+        return;
+    }
+    fitBounds(xmin, ymin, xmax, ymax, ZOOM_MAX);
 }
 // ------------------------------------------------------------------
 // Toolbar wiring + keyboard shortcuts
@@ -3718,15 +4504,32 @@ document.addEventListener('keydown', (e) => {
             return;
         }
         if (k === 'a') {
-            state.selectedIds = new Set(state.parts.map(p => p.id));
-            setTool('select');
-            refreshProps();
-            render();
+            selectAllParts();
             e.preventDefault();
             return;
         }
         if (k === 'd') {
             duplicateSelection();
+            e.preventDefault();
+            return;
+        }
+        if (k === 'k') {
+            toggleCmdPalette();
+            e.preventDefault();
+            return;
+        }
+        if (k === '0') {
+            setZoom(1);
+            e.preventDefault();
+            return;
+        }
+        if (k === '=' || k === '+') {
+            setZoom(state.zoom * ZOOM_STEP);
+            e.preventDefault();
+            return;
+        }
+        if (k === '-' || k === '_') {
+            setZoom(state.zoom / ZOOM_STEP);
             e.preventDefault();
             return;
         }
@@ -3776,18 +4579,7 @@ document.addEventListener('keydown', (e) => {
     // part-placement shortcut.
     if (k === 'u' && !e.altKey && state.selectedSegments.size) {
         const firstKey = state.selectedSegments.values().next().value;
-        const wireId = firstKey.slice(0, firstKey.indexOf('|'));
-        const seed = state.wires.find(w => w.id === wireId);
-        if (seed) {
-            const { wireIds } = netMembers(seed);
-            state.selectedIds.clear();
-            state.selectedSegments.clear();
-            for (const id of wireIds)
-                selectWholeWire(id);
-            flashHint(`Extended to net (${wireIds.size} wire${wireIds.size === 1 ? '' : 's'})`);
-            refreshProps();
-            render();
-        }
+        expandSelectionToNet(firstKey.slice(0, firstKey.indexOf('|')));
         e.preventDefault();
         return;
     }
@@ -3822,11 +4614,24 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     if (k === 'f' && !e.altKey) {
-        fitView();
+        if (e.shiftKey && state.selectedIds.size)
+            zoomToSelection();
+        else
+            fitView();
         e.preventDefault();
         return;
     }
     if (e.key === 'Escape') {
+        if (cmdkEl) {
+            closeCmdPalette();
+            e.preventDefault();
+            return;
+        }
+        if (ctxMenuEl) {
+            closeContextMenu();
+            e.preventDefault();
+            return;
+        }
         if (shortcutOverlayEl) {
             toggleShortcutOverlay();
             e.preventDefault();
@@ -3883,18 +4688,7 @@ document.addEventListener('keydown', (e) => {
             rotateMoveDraft();
         }
         else if (state.selectedIds.size) {
-            let did = false;
-            for (const id of state.selectedIds) {
-                const p = state.parts.find(p => p.id === id);
-                if (p) {
-                    p.rot = (p.rot + 90) % 360;
-                    did = true;
-                }
-            }
-            if (did) {
-                pushHistory();
-                render();
-            }
+            rotateSelection();
         }
         else if (isElemKind(state.tool)) {
             previewRot = (previewRot + 90) % 360;
@@ -4037,15 +4831,16 @@ function cancelCopyAnchor() {
     refreshHint();
     render();
 }
-function pasteClipboard() {
+function pasteClipboard(at) {
     const np = clipboard.parts ? clipboard.parts.length : 0;
     const nw = clipboard.wires ? clipboard.wires.length : 0;
     if (np + nw === 0)
         return;
-    // Anchor at the current cursor (snapped). If the user hasn't put
-    // the cursor over the canvas yet, anchor a couple of cells off the
-    // origin so duplicates don't stack invisibly.
-    let anchor = snapPt(state.cursorWorld);
+    // Anchor at the given point (context menu's "Paste here") or the
+    // current cursor (snapped). If the user hasn't put the cursor over
+    // the canvas yet, anchor a couple of cells off the origin so
+    // duplicates don't stack invisibly.
+    let anchor = snapPt(at ?? state.cursorWorld);
     if (!anchor[0] && !anchor[1])
         anchor = [GRID * 2, GRID * 2];
     const newIds = new Set();
@@ -4811,10 +5606,16 @@ async function finalizeCalcNodePick(snapped, world) {
     exprDiv.textContent = 'Loading sycan…';
     calcOutputEl.appendChild(exprDiv);
     render();
+    const calcProgress = document.getElementById('calc-progress');
+    setBtnBusy(calcBtn, true);
     try {
-        const py = await ensureSycan((s) => calcLog(s));
+        const py = await ensureSycan((s, frac) => {
+            calcLog(s);
+            setAsyncProgress(calcProgress, frac);
+        });
         const mode = pickAnalysisMode(info.text);
         calcLog(`Solving (${mode})…`);
+        setAsyncProgress(calcProgress, 0.9);
         const result = await runSycanSolve(py, info.text, node, mode);
         if (result.error) {
             exprDiv.classList.add('calc-err');
@@ -4842,6 +5643,10 @@ async function finalizeCalcNodePick(snapped, world) {
         exprDiv.textContent = msg;
         calcLog('Solver error');
     }
+    finally {
+        setBtnBusy(calcBtn, false);
+        setAsyncProgress(calcProgress, null);
+    }
 }
 // Decide whether to ask sycan for a DC operating point or an AC
 // transfer function. AC is the only mode that gives a useful symbolic
@@ -4867,7 +5672,7 @@ function ensureSycan(onStatus = () => { }) {
     if (_pyodidePromise)
         return _pyodidePromise;
     _pyodidePromise = (async () => {
-        onStatus('Loading pyodide…');
+        onStatus('Loading Python runtime… (1/4, one-time ~15s)', 0.08);
         // pyodide.js script tag is loaded async — wait for it.
         let waited = 0;
         while (typeof loadPyodide !== 'function') {
@@ -4877,16 +5682,16 @@ function ensureSycan(onStatus = () => { }) {
             waited += 100;
         }
         const py = await loadPyodide();
-        onStatus('Installing sympy…');
+        onStatus('Installing sympy… (2/4)', 0.45);
         await py.loadPackage(['sympy', 'micropip']);
-        onStatus('Installing sycan…');
+        onStatus('Installing sycan… (3/4)', 0.75);
         await py.runPythonAsync(`
 import micropip
 await micropip.install('../repl/sycan-0.1.8-py3-none-any.whl')
 import sycan, sympy
 print('sycan ready (sympy', sympy.__version__, ')')
 `);
-        onStatus('Ready');
+        onStatus('Ready', 1);
         return py;
     })().catch((e) => {
         _pyodidePromise = null; // allow a retry on the next click
@@ -5410,10 +6215,15 @@ async function refreshMatrixData() {
         // Already running — let the in-flight call finish first.
         return;
     }
+    const matrixProgress = document.getElementById('matrix-progress');
     setMatrixStatus('Loading sycan…');
     _matrixDataPromise = (async () => {
-        const py = await ensureSycan(setMatrixStatus);
+        const py = await ensureSycan((s, frac) => {
+            setMatrixStatus(s);
+            setAsyncProgress(matrixProgress, frac);
+        });
         setMatrixStatus('Building matrix…');
+        setAsyncProgress(matrixProgress, 0.9);
         return await computeMatrixData(py, nl.text);
     })();
     try {
@@ -5428,6 +6238,7 @@ async function refreshMatrixData() {
     }
     finally {
         _matrixDataPromise = null;
+        setAsyncProgress(document.getElementById('matrix-progress'), null);
     }
 }
 function openMatrixViewer() {
@@ -5436,6 +6247,18 @@ function openMatrixViewer() {
         return;
     els.panel.classList.remove('hidden');
     els.panel.setAttribute('aria-hidden', 'false');
+    // First open: position inside the canvas area so the popup doesn't
+    // cover the side panel's action row. The header drag switches to
+    // left/top pinning, so this only applies until the user moves it.
+    if (!els.panel.style.left) {
+        const cw = document.getElementById('canvas-wrap').getBoundingClientRect();
+        els.panel.style.left =
+            `${Math.max(8, cw.right - els.panel.offsetWidth - 16)}px`;
+        els.panel.style.top =
+            `${Math.max(8, cw.bottom - els.panel.offsetHeight - 16)}px`;
+        els.panel.style.right = 'auto';
+        els.panel.style.bottom = 'auto';
+    }
     refreshMatrixData();
 }
 function closeMatrixViewer() {

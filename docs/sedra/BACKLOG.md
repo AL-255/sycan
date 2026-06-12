@@ -95,6 +95,29 @@ Partial / carried forward:
 ### Trackpad-correct wheel handling: pinch/Ctrl zooms, two-finger scroll pans
 [canvas-experience · S · impact 4] The wheel handler (editor.ts:2301-2314) treats every event as zoom from deltaY and discards deltaX and e.ctrlKey — on laptops (a primary device for a browser tool) two-finger pan zooms, horizontal motion does nothing, and OS pinch is indistinguishable from scroll. Robust rule: e.ctrlKey → zoom anchored at cursor (covers pinch); deltaX !== 0 → pan both axes (state.pan -= delta); otherwise keep zoom so mouse wheels behave as today. Update the hint text accordingly.
 
+## Iteration 2 — DONE
+
+Shipped: regression fixes from the audit (un-squashed toolbar icons,
+deduped QN/QP/MN/MP/MN4/MP4 labels, matrix viewer tokenized + ghost
+header buttons + visible resize grip + first-open position inside the
+canvas, global kbd chips, calc row alignment, off-token sweeps);
+zoned status bar (mode chip / hint / selection summary / grid /
+coords / zoom controls) replacing the two-line prose hint + floating
+coords; zoom commands (Ctrl+0/=/-/Shift+F, ×√2 steps, clickable %,
+shared clamps); flashHint flash-guard (fixes the copy-anchor flash
+clobber); command registry feeding right-click context menu (KiCad
+selection rule, right-drag-pan disambiguation via mouseup — Linux
+fires contextmenu on mousedown!, section separators, greyed disabled
+items, danger styling, Place-recent from persisted recents), Ctrl+K
+palette (fuzzy match with word-start bonus, recents-first, accent
+match highlight), '?' sheet derived from the registry; async loading
+states (staged Pyodide progress bar with shimmer, busy-spinner Calc
+button, matrix progress) and undo/redo disabled states.
+Tests: commands.test.mjs (30) — suite now 148 assertions / 9 files.
+
+Carried forward: full 20×20 part-glyph redraw; menu translucency
+during entrance animation is cosmetic-only (screenshot artifact).
+
 ## Next iterations
 
 ### First-solve loading state for Pyodide (~10-20s currently looks frozen)

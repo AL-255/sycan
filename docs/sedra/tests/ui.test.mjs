@@ -34,17 +34,17 @@ const wrap = await page.$eval('#canvas-wrap', (el) => {
 });
 await page.mouse.move(wrap.left + 300, wrap.top + 280, { steps: 4 });
 await new Promise(r => setTimeout(r, 50));
-const readout = await page.$eval('#coords', (el) => ({
-  text: el.textContent || '', hidden: el.classList.contains('hidden'),
+const readout = await page.$eval('#sb-coords', (el) => ({
+  text: el.textContent || '',
 }));
-assert(!readout.hidden && readout.text === '(100, 80)',
-       `coords reads the snapped cursor (got "${readout.text}")`);
+assert(readout.text === '100, 80',
+       `status-bar coords read the snapped cursor (got "${readout.text}")`);
 
 await page.mouse.down();
 await page.mouse.move(wrap.left + 460, wrap.top + 380, { steps: 4 });
-const boxText = await page.$eval('#coords', (el) => el.textContent || '');
+const boxText = await page.$eval('#sb-coords', (el) => el.textContent || '');
 await page.mouse.up();
-assert(/^\(\d+, \d+\)\s*→\s*\(\d+, \d+\)$/.test(boxText),
+assert(/^\d+, \d+ → \d+, \d+$/.test(boxText),
        `box-select readout shows start→end (got "${boxText}")`);
 
 // (3) Notifications: info auto-dismisses, warn is sticky with [×].
