@@ -244,6 +244,11 @@
     min-width: 170px; cursor: pointer;
   }
   .picker:focus { outline: none; border-color: var(--accent); }
+  @media (prefers-color-scheme: dark) {
+    .picker {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%239a9aa3' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
+    }
+  }
 
   /* Main work area */
   main {
@@ -380,7 +385,9 @@
   #calc-mode { min-width: 70px; flex: none; }
   .calc-controls button:hover { filter: brightness(1.1); }
   .calc-controls button.armed {
-    background: var(--warn); color: var(--surface-0);
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+    color: var(--warn);
+    border-color: var(--warn);
   }
   .calc-status {
     color: var(--muted); font-size: var(--text-xs);

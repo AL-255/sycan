@@ -185,84 +185,27 @@ Note: the dual-active-tool state in earlier captures was a screenshot
 script artifact — setTool is exclusive live (verified).
 Tests: features5.test.mjs (11) — suite 185 assertions / 12 files.
 
-## Next iterations
+## Iteration 6 — CONSOLIDATION / LOOP CLOSED
 
-### First-solve loading state for Pyodide (~10-20s currently looks frozen)
-[polish-details · S · impact 4] Calc Node's first run loads Pyodide+sympy+the sycan wheel (editor.ts:4565-4593) with progress only in an 11px ellipsis-clipped span; the button stays clickable mid-solve. Disable calcBtn (and the mode select) from finalizeCalcNodePick until the solve settles; add a pure-CSS 12px spinner next to #calc-status via a .busy class; stage the output-pane message: 'Loading Python runtime — one-time, ~10s…' → 'Solving (dc)…'. All hooks exist via ensureSycan's onStatus callback.
+Saturation verdict from the release-readiness audit: **professional**
+— no product-blocking findings. (Two apparent P1s in captures were
+screenshot-pipeline artifacts: Chromium auto-dark dimming and a frame
+caught mid-transition; both disproven with verification renders.)
 
-### Right-click context menu on parts, wires, and empty canvas
-[power-ergonomics + canvas-experience · M · impact 4] Merged duplicate findings — the universal power-user gesture is currently swallowed by pan (editor.ts:2113) with contextmenu blanket-suppressed (2214). Keep right-drag pan; on right-mouseup with travel under the existing DRAG_THRESHOLD_PX (editor.ts:~1854), show a positioned <div> menu from pickAt: part → Edit value, Rotate (Space), Duplicate (Ctrl+D), Cut/Copy/Delete, Select all <Type>; wire → Edit net label, Expand to net (U), Highlight net (H), Calc node, Delete; empty → Paste here, Fit (F), Zoom 100%, Select all. Show the shortcut beside each item (free training, exactly like KiCad); dismiss on click-away/Esc. ~100 lines vanilla TS+CSS; every verb already exists as a function.
+Fold-ins shipped this pass: cold-start defaults to the Select tool,
+armed Calc Node restyled as a tinted chip (AA in both themes),
+theme-aware picker chevron, docs/README.md sedra section rewritten,
+CI wiring verified (npm test runs all 12 suite files).
 
-### Ctrl+K command palette over the unified command registry
-[power-ergonomics + feature-gaps · M · impact 4] Merged duplicate findings — both lenses flagged that only 7 of ~17 part types have letter shortcuts and Matrix/Calc Node/Export/Fit are button-only; the palette is what most changes 'demo' vs 'productivity software'. Build a commands array unifying all ELEM_TYPES entries (run: setTool(kind), reusing toolbar SVGs as icons) and every id'd button (wiring visible at editor.ts:3420-3432). Ctrl+K (and 'a' with no selection) opens a centered input+list, subsequence fuzzy filter, arrows+Enter, Esc closes, bound keys right-aligned per row. Reuses the registry from the tooltip/cheat-sheet work. ~150 lines vanilla TS+CSS.
+## Remaining queue (future work, not loop-blocking)
 
-### Mirror/flip support + rotate keys that act on the selection
-[feature-gaps · M · impact 4] Zero flip/mirror exists, and no number of 90° rotations produces a mirror — with NPN/PNP, NMOS/PMOS and 4-terminal MOSFETs needing to face the opposite rail, this is the most painful daily gap for circuit work. Add mir?: boolean to Part; render with translate/rotate + scale(-1,1); negate local x before rotating in the terminal-position helper (editor.ts:~788-802) so netlist pin mapping stays correct; persist in JSON/localStorage (~3118) and copy/paste. Bind eeschema-style on non-empty selection: X = mirror horizontal, Y = mirror vertical, B = rotate selection 90° in place (current tool-switch meanings survive when selection is empty); same keys during move-draft. Add a Mirror toolbar button next to Rotate.
-
-### Export SVG (plus Copy PNG) — the canvas already IS an SVG
-[feature-gaps · M · impact 4] The only exports are netlist text and JSON, yet this is a documentation/teaching tool whose drawings belong in notebooks and slides. Add 'Export SVG' beside Export JSON: clone #canvas, strip grid/crosshair/selection/hit/preview layers, set viewBox from the fitView bbox math (editor.ts:~3393) + padding, inline a <style> block with CSS variables resolved to light-theme print values, serialize via XMLSerializer to a Blob download. Optionally 'Copy PNG' via offscreen canvas at 2x + navigator.clipboard. Cheapest high-value feature in the backlog; synergizes with the text-annotation item in 'later'.
-
-### Zoned pro status bar replacing the two-line prose hint
-[information-architecture + canvas-experience · M · impact 4] Merged with the drag-delta finding. Restructure #hint into a single-line flex bar: left = active-tool chip ('PLACE R' / 'SELECT' — replacing the dropdown's non-standard role as tool indicator) + one ellipsized contextual hint; right = selection summary ('2 parts + 1 wire'), coords cell (absorbing the floating #coords overlay), grid pitch, and a clickable zoom % cell. The coords cell shows Δ(dx,dy) during moveDraft (data lives at editor.ts:4070-4073) and segment length in grid units during wireDraft — the KiCad readout power users place by. refreshHint fills only the hint zone so flashHint stops clobbering context; fixed-width mono cells prevent jitter.
-
-### Zoom commands, indicator, and a wider clamp
-[feature-gaps + polish-details + canvas-experience · M · impact 4] Merged three findings: zoom state is invisible, there's no zoom-to-selection, and Ctrl+0 currently triggers browser page-zoom which permanently desyncs the chrome. Refactor fitView to take an optional bbox; Shift+F fits the selection bbox (fall back to fit-all; make net-highlight overlays fittable too); Ctrl+0 → 100%, Ctrl+=/− → ×1.25 steps about viewport center (preventDefault); widen the clamp from 0.2-4 to 0.05-10 (editor.ts:2304). Surface current % in the status-bar zoom cell (click = fit) and optionally a [−][%][+][fit] widget near coords; update from render().
-
-### Promote Calc Node + Matrix into a first-class Analyze group
-[information-architecture · S · impact 4] Symbolic node solving is SYCAN's differentiator, yet Calc Node is a small mid-panel button and Matrix is the last text-only toolbar button — first-time discoverability is near zero. Create a data-group="analyze" toolbar group with distinct icons ('V(?)' probe, 4×4 dot grid); mirror state.calcNode.armed (editor.ts:1772) so the toolbar button shows .active while picking; bind 'n' to arm Calc Node and Alt+M for the matrix viewer; flash the Node Expression section header when a result lands.
-
-### Terminal/connection snap indicator while drawing wires
-[polish-details · M · impact 4] During wire drafting nothing signals 'this click makes an electrical connection' vs merely landing on grid — connections are only discovered after committing. In the wireDraft mousemove branch (editor.ts:2159) reuse the nearest-vertex search from resolveNetAt (line 4444) to find a terminal/wire-vertex within HIT_PAD, store wireDraft.snapTarget, draw a hollow circle (r 5, stroke var(--select), vector-effect: non-scaling-stroke) in drawWirePreview and snap the endpoint to it. Also ring the placement ghost when a part terminal will land on an existing net.
-
-### Proactive ERC with click-to-locate canvas markers
-[feature-gaps · M · impact 4] Dangling wires, floating terminals, missing ground and label conflicts are buried as '* warning:' comment lines in the readonly netlist (editor.ts:~3041) — a user can Calc Node a silently-floating circuit and get confusing symbolic output. Add a 'Check' command (and run implicitly before Calc Node/Matrix): free wire endpoints (snapshot logic ~1343 already finds them), untouched part terminals, no-ground, label conflicts (~2985). Render amber circle markers at offending grid points in a new layer; each notification click pans/zooms to its marker; show 'ERC: 3 warnings' or a green check in the status bar.
-
-### Toolbar row-2 IA: Select first, expert toggles into a gear popover, Clear out of the Undo group
-[information-architecture · S · impact 3] Row 2 mixes five concerns and puts destructive Clear one slip from Redo inside a single unlabeled 'file' group; the default pointer tool sits mid-toolbar. Reorder: [Select Delete Rotate Highlight] first, then parts, [Undo Redo], [Fit], the new Analyze group; right-align (margin-left:auto) a gear button opening a popover containing the Drag/Parity/No-revert checkboxes with one-line explanations — they are expert connectivity toggles most sessions never touch. Clear moves to the File menu (below) or far right with confirmation handled by the undo-toast item.
-
-### Wire-drafting power keys: Backspace pops a corner, Enter finishes, '/' flips posture
-[power-ergonomics + canvas-experience · S · impact 3] Merged duplicate findings. Mid-draft the only key is Esc, which discards the whole run; and near 45° the dx>=dy heuristic (editor.ts:2158-2167) makes the preview flicker between H-first/V-first with no override. In keydown, before the generic Delete branch (~3569): while state.wireDraft is active, Backspace pops back to the previous committed corner (cancel when empty), Enter calls finalizeWireDraft(), '/' toggles an axisLock overriding the heuristic until the next corner (cleared in handleWireClick). Update the wire hint string (editor.ts:1787).
-
-### Undo/Redo (and friends) show disabled states
-[polish-details · S · impact 3] Handlers no-op on exhausted stacks (editor.ts:3357-3368) but the buttons render enabled forever — an always-lit Undo reads as broken or untrustworthy. Add syncHistoryButtons() setting btnUndo.disabled = historyIdx <= 0 and btnRedo.disabled = historyIdx >= editHistory.length - 1, called from pushHistory() and restore(); add .tool:disabled { opacity: 0.4; pointer-events: none }. Same pattern for Copy/Clear/Fit/Matrix when the schematic is empty.
-
-### Replace the native confirm() on Clear with an undoable toast
-[polish-details · S · impact 3] window.confirm (editor.ts:3372) is browser chrome that belongs to no theme and blocks the event loop — and Clear already goes through pushHistory(), so the confirmation is redundant friction. Drop it and call notify('Schematic cleared — Ctrl+Z to undo', 'info') after clearing; the toast system (notify, line 3235) supports exactly this.
-
-### Renumber/annotate command for clean reference designators
-[feature-gaps · S · impact 3] Edits leave R1, R3, R7 gaps that leak straight into netlists and symbolic Calc Node results — exactly where documentation readability matters. Add a Renumber command (toolbar/palette): group by ELEM_TYPES prefix, sort by (y, x) reading order, reassign sequentially. Critical detail: when part.value === old id (the symbolic default from addPart, editor.ts:2565), update value to the new name too; keep explicit values like '2k'. Remap selectedIds, pushHistory, regenerate netlist, notify.
-
-### Dismissible empty-canvas starter card
-[information-architecture + polish-details · S · impact 3] Merged duplicate findings — first run is a featureless dot void; the props pane and netlist have good empty states but the main stage has none. When parts and wires are both empty and no ghost is active, render a centered pointer-events:none card in #canvas-wrap: 'R place a resistor · W draw wires · G drop a ground', 'then Calc Node solves any node symbolically', plus an 'Open example circuit' link loading bundled JSON through the existing import path. Toggle a .hidden class from render(); gone on first placement.
-
-### Part chip row: frequent strip + labeled overflow; stop abusing the dropdown as tool indicator
-[information-architecture · M · impact 4] 16 cryptic glyph chips in unlabeled groups fully duplicate the #part-picker dropdown; the NPN/PNP, NMOS/PMOS, M4 pairs and CCCS/VCCS, CCVS/VCVS diamond icons are pixel-near-identical. Keep chips only for the 8 single-key parts (R L C V I D GND Wire, matching editor.ts:3521-3531); demote Q/M/M4/T/E/G/F/H to the dropdown renamed 'More parts…' (it already has optgroups); stop syncing the select as the active-tool indicator — the status-bar mode chip takes that role. If all chips must stay, add 9px uppercase group captions via .group::before { content: attr(data-label) } and differentiate the F/H diamonds with the controlling-current arrow.
-
-### File / Edit / View / Analyze / Help menubar — give document operations a home
-[information-architecture · L · impact 5] Phase 2 of the header collapse (merged finding). Document ops are scattered: Clear in the toolbar, Export/Import JSON under 'Netlist', no New/Open/Save vocabulary despite localStorage persistence and JSON round-trip (editor.ts:3103-3139). Add menubar buttons to the slim app bar, each toggling an absolutely-positioned popover (close on outside-click/Esc, right-aligned kbd hints): File = New (Clear), Open JSON, Save JSON, Copy netlist, Export SVG; Edit = Undo/Redo/Cut/Copy/Paste/Duplicate/Select All; View = Fit, zoom presets, grid toggle, panel sections; Analyze = Calc Node, MNA Matrix, Check; Help = cheat sheet, docs home · REPL · source. All map to existing functions.
-
-### Grid rendering overhaul: constant screen weight, adaptive density, display toggle
-[canvas-experience + feature-gaps · M · impact 4] Merged two findings. drawGrid (editor.ts:624-648) draws '+' marks in world units (chunky at 4x, sub-pixel at 0.2) with a hard one-frame disappearance past 600 columns, and rebuilds the path string every mousemove. Add vector-effect: non-scaling-stroke; when screen pitch < ~8px, step pitch by 2/5/10 with skipped-to-major points slightly brighter (two paths); fade near density transitions. Replace per-frame string building with an SVG <pattern> per density tier filling one viewport rect — pan/zoom only updates pattern transforms. Add a Shift+G display toggle (dots/lines/off) persisted to localStorage — snapping stays always-on (connectivity is grid-point identity-based, so variable pitch is dangerous) and the toggle hint says so.
-
-### Collapsible side-panel sections; free the Node-expression pane from its 220px letterbox
-[information-architecture · M · impact 3] Properties / Node expression / Netlist are rigidly allocated: solved symbolic expressions — the payoff content — scroll in a 220px cap (#calc-pane, index.html:249-254) while an empty Netlist claims all remaining height. Make each <h3> a chevron toggle button, persist per-section collapsed state in the existing localStorage blob (editor.ts:3118); when Netlist is collapsed, the calc pane drops its cap and takes flex:1. Optionally add a drag divider reusing the #side-resizer pattern (index.html:178-188). Export/Import JSON move out from under 'Netlist' into the File menu (they are document ops).
-
-## Later
-
-### Free-text annotation element (titles, design notes on canvas)
-[feature-gaps · M · impact 3] No way to title a schematic or note 'bias network' — a real gap for a documentation-oriented tool, and exported SVGs are far more useful with captions baked in. Add a 'text' kind stored in state.parts with the string in value, excluded from netlist generation and terminal logic, rendered as <text> (reuse .net-label-text styling, larger size); place via palette/toolbar, edit through the existing props-pane value input, move/delete/copy via normal selection machinery since it has no terminals.
-
-### Multi-net highlight pinning in distinct colors
-[feature-gaps · M · impact 2] The Highlight tool shows one net in orange and Esc clears it; tracing a feedback loop wants 2-3 nets pinned simultaneously. Change netHighlightOverlay (editor.ts:~714) to an array of {gridPoints, color} cycling 4-5 colorblind-safe hues; clicking a highlighted net unpins it; Esc clears all; the draw loop (~720) just needs color parameterized. Show color-chip + net-label legend entries in the status bar, click to unpin.
-
-### Select-similar (all parts of the same type)
-[power-ergonomics · S · impact 2] Bulk operations on a component class currently require shift-clicking every instance. Add selectSimilar(seedId): set selectedIds to all parts sharing .type, refreshProps + render, flashHint('Selected N resistors'). Expose as the context-menu item 'Select all <Type>' (already listed in that menu's spec) and as Alt+click in the select tool — applyClickSelection already inspects modifiers.
-
-### Tab / Shift+Tab cycles selection through parts
-[power-ergonomics · S · impact 2] No keyboard way to walk the schematic part-by-part for a pre-solve value audit. Tab (canvas focused, no modifiers) selects the next part in state.parts order, Shift+Tab previous; clear selectedSegments, refreshProps + render, pan minimally if off-screen (reuse fitView viewport math); preventDefault to stop browser focus traversal. Pairs with F2 inline edit for a fully keyboard-driven loop: Tab, F2, type, Enter, Tab.
-
-### One-shot flash on pasted/undone elements
-[polish-details · M · impact 2] After paste-commit or Ctrl+Z, changed elements materialize silently — on a dense sheet the user mentally diffs the canvas. Record affected ids + timestamp in a transient flashIds set after commitMove (fresh pastes) and restore() (editor.ts:3357); in render() draw an extra bbox rect with @keyframes commit-flash (fill var(--select), opacity 0.55→0, 400ms ease-out); clear via setTimeout(render, 450). Doubles as confirmation the operation landed.
-
-### Marquee window/crossing semantics; fix center-point part selection
-[canvas-experience · M · impact 2] applyMarqueeSelection (editor.ts:2004-2033) includes a part only when its bbox center is inside the rect — boxing the visible half of a MOSFET selects nothing — and wires need both endpoints contained. Adopt the KiCad/AutoCAD convention: L→R drag = 'window' (full bbox containment), R→L = 'crossing' (rect-intersects-bbox; wires by any-endpoint or segment-intersect). Differentiate the live rect (dashed blue for window, solid stroke with a warm --highlight 0.08 fill for crossing) — boxSelect already knows its origin corner.
+- Slim File + Help menu-button on the app bar (last structural IA
+  gap; scope tightly — Ctrl+K and context menus already cover
+  Edit/View/Analyze).
+- Free-text annotation element (titles/captions baked into exported
+  SVGs) — last genuine feature gap for teaching use.
+- Keyboard-invoked context menu (Menu key / Shift+F10).
+- OPAMP1 SPICE-writer support note.
+- Explicitly skipped on review: wire-color-by-net (fights schematic
+  convention; multi-net pinning covers the need), grid <pattern>
+  performance rewrite (no observed jank).

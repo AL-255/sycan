@@ -16,18 +16,32 @@ folder is overlaid into `_site/` so the REPL ends up at `/repl/`.
   - `sycan-*.whl` — the wheel the page installs via `micropip`.
 - `sedra/` — SYCAN's in-browser schematic capture editor, served at
   `/sedra/`. Originally inspired by the Java circedit reference in
-  <https://github.com/andrescg2sj/Sycan>; now a TypeScript app with:
-  snap-grid canvas, full SYCAN component library (R, L, C, V, I, D,
-  NPN/PNP BJT, NMOS/PMOS — 3T and 4T, triode, VCVS/VCCS/CCCS/CCVS,
-  ground, wire), click-to-place + Manhattan multi-segment wires with
-  Steiner T-junction coalescing, KiCad-style drag (attached wires
-  stretch at their moving end, connectivity preserved by construction,
-  optional parity guard against new shorts), segment-level selection,
-  undo/redo,
-  copy/paste, auto-naming, drag-to-move with optional bad-connection
-  placeholders, net highlight overlay, symbolic node-voltage solver
-  (`Calc Node` — runs sycan in the page via Pyodide), netlist export,
-  JSON save/load, notification center.
+  <https://github.com/andrescg2sj/Sycan>; now a TypeScript app built
+  to a power-user productivity bar:
+  - **Editing** — full SYCAN component library (R/L/C, V/I sources,
+    diode, NPN/PNP, NMOS/PMOS 3T/4T, triode, VCVS/VCCS/CCCS/CCVS,
+    ground), Manhattan wires with Steiner T-junction coalescing,
+    KiCad-style drag (attached wires stretch at their moving end,
+    connectivity preserved by construction, optional parity guard),
+    KiCad marquee semantics (window vs crossing select), flip/rotate,
+    inline value editing (dbl-click/F2), duplicate, arrow-key nudge,
+    select-similar, Tab cycling, renumber, undoable Clear.
+  - **Command surfaces** — one command registry drives the right-click
+    context menu, the Ctrl+K fuzzy command palette, and the `?`
+    shortcut cheat sheet; gear popover for drag options; More popover
+    for long-tail parts.
+  - **Feedback** — proactive ERC overlay (floating pins, dangles,
+    duplicate refs, missing ground) with click-to-locate badges,
+    zoned status bar (mode/hint/selection/grid/coords/zoom/ERC),
+    wire-snap rings, hover pre-selection, flash halos on paste/undo,
+    multi-net highlight pinning with legend chips, starter card.
+  - **Analysis & I/O** — symbolic node-voltage solver (`Calc Node`,
+    sycan via Pyodide with staged loading progress), MNA matrix
+    viewer, netlist export, standalone SVG export + PNG clipboard
+    copy, JSON save/load.
+  - **Design system** — token-driven dark/light themes (surface
+    elevation scale, semantic colors, JetBrains Mono), uniform 20×20
+    icon grammar, zoom-adaptive grid, collapsible panels.
   - `index.html` — markup + inline `<style>`.
   - `src/glyphs.ts`, `src/editor.ts` — TypeScript sources.
   - `glyphs.js`, `editor.js` — `tsc` output, loaded as classic

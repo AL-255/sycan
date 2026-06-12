@@ -16,7 +16,7 @@ const state = {
     wires: [],
     nextId: 1, // monotonic counter for unique wire ids
     nameCounters: {}, // per-prefix counter, e.g. {R: 3, C: 1}
-    tool: 'res',
+    tool: 'select',
     // Multi-selection: a Set of part / wire ids.
     selectedIds: new Set(),
     pan: { x: 0, y: 0 }, // screenX = pan.x + worldX * zoom
@@ -6800,7 +6800,7 @@ async function init() {
         state.pan.x = wrap.clientWidth / 2;
         state.pan.y = wrap.clientHeight / 2;
     }
-    setTool('res');
+    setTool('select');
     pushHistory();
     refreshProps();
     render();
