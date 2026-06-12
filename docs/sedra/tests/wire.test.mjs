@@ -1,6 +1,6 @@
 // Wire canonicalisation: end-to-end merge, T-junction preservation,
 // overlap absorption with label inheritance, dangle-trim on commit,
-// and bad-wire emission when BFS fails.
+// and stretch behaviour into congested areas.
 import { setup, assert, assertEqual, summary } from './_helpers.mjs';
 
 const { browser, page, errors } = await setup();
@@ -48,17 +48,18 @@ assertEqual(r[0].id, 'W1', 'lower-indexed wire wins ownership');
 assertEqual(r[0].points, [[0, 0], [600, 0]], 'union interval [0,600]');
 assertEqual(r[0].label, 'BUS', 'unlabelled primary inherits absorbed label');
 
-// (5) Dangle-trim: spanning wire BFS overlays an existing stub; the
-// stub's now-orphaned endpoint is trimmed on commit.
+// (5) Dangle-trim: a stretched wire's path lands on an existing
+// stub's track; overlap-merge consumes the stub and the now-orphaned
+// endpoint is trimmed on commit.
 const trim = await page.evaluate(() => {
   state.parts = []; state.wires = []; state.nameCounters = {}; state.nextId = 1;
   state.selectedIds.clear(); state.selectedSegments.clear();
   state.tool = 'select';
   document.getElementById('drag-mode').checked = true;
   document.getElementById('parity-check').checked = false;
-  // R1 with a vertical stub down to (40, 200). Drag R1 down so BFS
-  // routes through the stub's track and overlap-merge consumes it,
-  // leaving (40, 200) as a pre-drag-free orphan that should be trimmed.
+  // R1 with a vertical stub down to (40, 200). Drag R1 down so the
+  // stretched stub collapses onto R1's moved terminal and the trunk
+  // stretch absorbs the track, leaving no orphan at (40, 0).
   addPart('res', 0, 0, 90);                              // R1 terminals (-40,0),(40,0)
   addPart('vsrc', -200, 0, 90);                          // V1 anchors W1 outside endpoint
   state.wires.push({ id: 'W1', points: [[-160, 0], [-40, 0]] });
@@ -72,10 +73,15 @@ const trim = await page.evaluate(() => {
   return state.wires.map(w => ({ id: w.id, points: w.points }));
 });
 const hasOrphan = trim.some(w => w.points.some(p => p[0] === 40 && p[1] === 0));
-assert(!hasOrphan, `(40, 0) orphan trimmed after spanning route absorbed it`);
+assert(!hasOrphan, `(40, 0) orphan trimmed after the stretch absorbed it`);
 
-// (6) BFS-fail emits a bad wire and the drag still commits.
-const bad = await page.evaluate(() => {
+// (6) Stretch into a congested area: under the old router model this
+// enclosure was unrouteable and W1 was flagged as a red bad wire.
+// The stretch model has no routing step — W1's attached end simply
+// follows R1, the wire stays Manhattan, and the drag commits without
+// any failure path. (Crossing other parts' terminals is the user's
+// call, as in KiCad; the parity checkbox guards it when enabled.)
+const congested = await page.evaluate(() => {
   state.parts = []; state.wires = []; state.nameCounters = {}; state.nextId = 1;
   state.selectedIds.clear(); state.selectedSegments.clear();
   state.tool = 'select';
@@ -95,14 +101,23 @@ const bad = await page.evaluate(() => {
   updateMove([200, 200]);   // R1.left lands inside the enclosure
   commitMove();
   const r1 = state.parts.find(p => p.id === 'R1');
-  const w1 = state.wires.find(w => w.id === 'W1');
-  return { r1x: r1.x, r1y: r1.y, w1Bad: !!w1?.bad,
-           hasBadClass: !!document.querySelector('.wire-bad[data-id="W1"]') };
+  const manhattan = (pts) => pts.every((p, i) =>
+    i === 0 || p[0] === pts[i-1][0] || p[1] === pts[i-1][1]);
+  // R1's left terminal after the move sits at (160, 200); the wire
+  // serving it must reach that point with a Manhattan path and no
+  // bad flag.
+  const serving = state.wires.find(w =>
+    w.points.some(p => p[0] === 160 && p[1] === 200));
+  return { r1x: r1.x, r1y: r1.y,
+           served: !!serving, servedBad: !!serving?.bad,
+           servedManhattan: serving ? manhattan(serving.points) : false,
+           moveActive: state.moveDraft !== null };
 });
-assert(bad.r1x === 200 && bad.r1y === 200,
-       `R1 committed at the dragged position despite BFS failure (got (${bad.r1x}, ${bad.r1y}))`);
-assert(bad.w1Bad, 'failed-route wire flagged bad=true');
-assert(bad.hasBadClass, 'bad wire renders with .wire-bad class');
+assert(congested.r1x === 200 && congested.r1y === 200,
+       `drag into congestion commits (got (${congested.r1x}, ${congested.r1y}))`);
+assert(congested.served && !congested.servedBad && congested.servedManhattan,
+       'attached wire follows as a clean Manhattan path — no bad-wire fallback');
+assert(!congested.moveActive, 'no stuck move-draft');
 
 await browser.close();
 process.exit(summary(errors));

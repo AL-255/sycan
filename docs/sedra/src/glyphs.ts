@@ -117,21 +117,30 @@ interface Glyph {
 //   * `wire`           — explicitly-selected wire; translates by the
 //                        full delta (current behaviour).
 //   * `wire-captured`  — auto-captured by drag-mode because both
-//                        endpoints sit on terminals of selected parts;
-//                        also translates by delta.
-//   * `wire-spanning`  — auto-captured by drag-mode because exactly
-//                        one endpoint sits on a selected part's
-//                        terminal. The inside endpoint follows the
-//                        delta; the outside stays anchored; the path
-//                        between them is re-routed each frame.
+//                        endpoints sit on moving anchor points; also
+//                        translates by delta. (KiCad: a line carrying
+//                        both STARTPOINT and ENDPOINT flags.)
+//   * `wire-stretch`   — auto-captured by drag-mode because exactly
+//                        one endpoint sits on a moving anchor point.
+//                        The inside endpoint follows the delta and a
+//                        bend vertex keeps the polyline Manhattan;
+//                        the rest of the wire stays anchored. This is
+//                        KiCad's flagged-endpoint drag (sch_move_tool
+//                        STARTPOINT/ENDPOINT + orthoLineDrag) —
+//                        connectivity is preserved by construction,
+//                        with no re-routing step at commit.
+//                        `axisHint` picks the first-leg orientation
+//                        when the wire has no usable first segment
+//                        (drag-spawned zero-length stubs); `null`
+//                        falls back to the dominant drag direction.
 type MoveOrig =
   | { kind: 'part'; x: number; y: number }
   | { kind: 'wire'; points: Point[] }
   | { kind: 'wire-captured'; points: Point[] }
-  | { kind: 'wire-spanning';
+  | { kind: 'wire-stretch';
       points: Point[];
       insideEnd: 'start' | 'end';
-      axisHint: 'h' | 'v'; };
+      axisHint: 'h' | 'v' | null; };
 
 // Pre-drag wire / selection snapshot. Used to revert partial-segment
 // drags (where startMove physically splits each partially-selected
@@ -158,10 +167,9 @@ interface MoveDraft {
   // operation.
   dragMode: boolean;
   parityCheck: boolean;
-  // When true, a parity check that exhausts every routing retry (and
-  // would normally revert the whole drag) instead commits the drag
-  // with each wire-spanning wire marked as a red bad-connection
-  // placeholder. The user clears the placeholders by hand.
+  // When true, a failed parity check (the drag landed moved geometry
+  // on a previously-unrelated net) commits the drag anyway with a
+  // warning notification instead of reverting it.
   noRevert: boolean;
   // Pre-drag connectivity signature (sorted normalised partition of
   // every part-terminal into its DSU root). `null` when parity check

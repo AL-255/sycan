@@ -20,8 +20,10 @@ folder is overlaid into `_site/` so the REPL ends up at `/repl/`.
   snap-grid canvas, full SYCAN component library (R, L, C, V, I, D,
   NPN/PNP BJT, NMOS/PMOS — 3T and 4T, triode, VCVS/VCCS/CCCS/CCVS,
   ground, wire), click-to-place + Manhattan multi-segment wires with
-  Steiner T-junction coalescing, A\* auto-router for drag-mode wire
-  re-routing with parity check, segment-level selection, undo/redo,
+  Steiner T-junction coalescing, KiCad-style drag (attached wires
+  stretch at their moving end, connectivity preserved by construction,
+  optional parity guard against new shorts), segment-level selection,
+  undo/redo,
   copy/paste, auto-naming, drag-to-move with optional bad-connection
   placeholders, net highlight overlay, symbolic node-voltage solver
   (`Calc Node` — runs sycan in the page via Pyodide), netlist export,

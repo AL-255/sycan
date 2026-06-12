@@ -383,19 +383,10 @@
   .wire-selected {
     stroke: var(--select); stroke-width: 2.4;
   }
-  /* Spanning wires being live-rerouted by an in-flight drag. The
-     direct (non-Manhattan) line is purely a placeholder until
-     mouseup; commitMove replaces it with an A*-routed Manhattan
-     path. The semi-transparent + dashed treatment signals "not
-     committed yet" to the user. */
-  .wire-draft {
-    opacity: 0.55;
-    stroke-dasharray: 5 4;
-  }
-  /* "Bad connection" wires emitted when the A* auto-router fails
-     to find a clean Manhattan path. Drawn red as a point-to-point
-     line (may be diagonal) — a visual marker telling the user to
-     select, delete, and re-route by hand. */
+  /* "Bad connection" wires (legacy saves / failed WIRE-tool
+     routes). Drawn red as a point-to-point line (may be diagonal) —
+     a visual marker telling the user to select, delete, and
+     re-route by hand. */
   .wire-bad {
     stroke: #d73a49; stroke-width: 2.2;
     stroke-dasharray: 6 3;
@@ -862,17 +853,17 @@
   </div>
   <div class="group" data-group="drag-options">
     <label class="check"
-           title="When dragging selected components, also move wires that connect them; reroute wires that bridge the selection to the rest of the schematic.">
+           title="When dragging selected components, keep attached wires connected: wires inside the selection move along, wires bridging to the rest of the schematic stretch at their attached end (KiCad-style drag).">
       <input type="checkbox" id="drag-mode" checked>
       <span>Drag</span>
     </label>
     <label class="check"
-           title="On commit, verify that the dragged routing didn't change net connectivity. Revert the drag if it did.">
+           title="On commit, verify the drag didn't change net connectivity. Stretched wires keep their connections by construction, so this only triggers when moved geometry lands on another net (a new short); the drag is then reverted.">
       <input type="checkbox" id="parity-check" checked>
       <span>Parity</span>
     </label>
     <label class="check"
-           title="When a drag would normally revert (parity check fails after every retry), instead commit it and mark each unrouteable spanning wire as a red bad-connection placeholder for the user to fix manually.">
+           title="When the parity check would revert a drag (moved geometry landed on another net), commit it anyway with a warning instead.">
       <input type="checkbox" id="no-revert">
       <span>No-revert</span>
     </label>
