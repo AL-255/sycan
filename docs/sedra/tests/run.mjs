@@ -50,6 +50,7 @@ const srcMax = newestMtime(join(sedraDir, 'src'), (p) => p.endsWith('.ts'));
 const outMin = Math.min(
   fileMtime(join(sedraDir, 'glyphs.js')),
   fileMtime(join(sedraDir, 'editor.js')),
+  fileMtime(join(sedraDir, 'viewer.js')),
 );
 if (srcMax === 0 || outMin === 0 || srcMax > outMin) {
   console.log('==> tsc (sources newer than emitted JS)');

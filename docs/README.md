@@ -39,17 +39,43 @@ folder is overlaid into `_site/` so the REPL ends up at `/repl/`.
     sycan via Pyodide with staged loading progress), MNA matrix
     viewer, netlist export, standalone SVG export + PNG clipboard
     copy, JSON save/load.
+  - **Embedding** — `viewer.html` is a standalone view-only widget:
+    it renders a base64-encoded circuit document carried in the URL
+    fragment (`viewer.html#data=<b64>`, URL-safe alphabet, padding
+    optional) with fit-to-content, drag-pan, wheel-zoom, an
+    Open-in-SEDRA link, and `?theme=light|dark` / `?controls=0`
+    options. The editor's Ctrl+K commands *Copy embed code
+    (view-only iframe)* and *Copy view-only link* produce the
+    snippet/URL; opening the editor itself with `#data=<b64>`
+    imports the linked schematic (confirming before replacing a
+    non-empty one). The codec lives in `glyphs.ts`
+    (`encodeCircuitB64`/`decodeCircuitB64`) — the one file both
+    pages share.
+
+    ```html
+    <iframe src="https://…/sedra/viewer.html#data=<base64>"
+            width="720" height="480" loading="lazy"
+            title="SEDRA schematic (view-only)"></iframe>
+    ```
+
+    `embed-example.html` is a runnable copy of this — a CSS-free
+    plain-HTML page with a voltage divider baked into the fragment
+    (served at `/sedra/embed-example.html`).
   - **Design system** — token-driven dark/light themes (surface
     elevation scale, semantic colors, JetBrains Mono), uniform 20×20
     icon grammar, zoom-adaptive grid, collapsible panels.
-  - `index.html` — markup + inline `<style>`.
-  - `src/glyphs.ts`, `src/editor.ts` — TypeScript sources.
-  - `glyphs.js`, `editor.js` — `tsc` output, loaded as classic
-    `<script defer>` tags in document order so `glyphs.ts` symbols
-    (`ELEM_TYPES`, `drawPart`, the cross-file `interface`s, …) are
-    in scope by the time `editor.js` runs. `tsconfig.json` sets
-    `module: "none"` to keep the two files sharing one global scope,
-    so neither file uses `import`/`export`.
+  - `index.html` — markup + inline `<style>`. `viewer.html` — the
+    embeddable view-only page (loads `glyphs.js` + `viewer.js` only).
+  - `src/glyphs.ts`, `src/editor.ts`, `src/viewer.ts` — TypeScript
+    sources.
+  - `glyphs.js`, `editor.js`, `viewer.js` — `tsc` output, loaded as
+    classic `<script defer>` tags in document order so `glyphs.ts`
+    symbols (`ELEM_TYPES`, `drawPart`, the cross-file `interface`s, …)
+    are in scope by the time `editor.js` / `viewer.js` runs.
+    `tsconfig.json` sets `module: "none"` to keep the files sharing
+    one global scope, so none of them uses `import`/`export`
+    (`viewer.ts` wraps everything in an IIFE to avoid top-level
+    collisions with `editor.ts`).
   - `tests/` — Puppeteer-driven browser test suite. `node tests/run.mjs`
     (or `npm test`) compiles TypeScript if needed, spawns a local
     `python -m http.server`, then runs every `*.test.mjs` against the

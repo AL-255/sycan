@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SEDRA schematic viewer</title>
+
+<!--
+  SEDRA embeddable viewer — view-only.
+
+  Embed on any website with an iframe whose URL fragment carries a
+  base64-encoded circuit (the editor's "Copy embed code" command
+  produces the full snippet):
+
+    <iframe src="https://…/sedra/viewer.html#data=<base64>"
+            width="720" height="480" loading="lazy"
+            title="SEDRA schematic (view-only)"></iframe>
+
+  Query options: ?theme=light|dark (default: auto) · ?controls=0
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  /* Design tokens — the canvas-relevant subset of the editor's set.
+     Light is the base; dark applies via prefers-color-scheme unless
+     the embedder forces ?theme=light, and ?theme=dark forces it on. */
+  :root {
+    color-scheme: light;
+    --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono",
+                 "Cascadia Code", Menlo, Consolas, monospace;
+    --text-xs: 11px;
+    --text-sm: 12px;
+
+    --bg: #fcfcfd;
+    --fg: #1b1b1f;
+    --muted: #71717a;
+    --line: #dcdce1;
+    --surface-1: #f3f3f5;
+    --surface-3: #dfdfe4;
+    --stroke: #1b1b1f;
+    --select: #1976d2;
+    --terminal: #44444a;
+    --error: #d24343;
+    --shadow-1: 0 4px 16px rgba(0, 0, 0, 0.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #131318;
+      --fg: #e6e6e9;
+      --muted: #9a9aa3;
+      --line: #2e2e36;
+      --surface-1: #1a1a20;
+      --surface-3: #2b2b34;
+      --stroke: #e7e7e9;
+      --select: #6cb4ff;
+      --terminal: #a4a4ac;
+      --error: #e5645c;
+      --shadow-1: 0 4px 16px rgba(0, 0, 0, 0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #131318;
+    --fg: #e6e6e9;
+    --muted: #9a9aa3;
+    --line: #2e2e36;
+    --surface-1: #1a1a20;
+    --surface-3: #2b2b34;
+    --stroke: #e7e7e9;
+    --select: #6cb4ff;
+    --terminal: #a4a4ac;
+    --error: #e5645c;
+    --shadow-1: 0 4px 16px rgba(0, 0, 0, 0.5);
+  }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: var(--font-ui);
+    background: var(--bg); color: var(--fg);
+    overflow: hidden;
+  }
+
+  #viewer-root {
+    position: relative;
+    width: 100%; height: 100%;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #viewer-root.panning { cursor: grabbing; }
+  #viewer-svg { display: block; width: 100%; height: 100%; }
+
+  /* Canvas SVG element styling — mirrors the editor's classes so
+     drawPart/labels render identically. */
+  .glyph { color: var(--stroke); }
+  .part-body {
+    fill: none; stroke: var(--stroke); stroke-width: 1.6;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  .part-fill { fill: var(--bg); stroke: var(--stroke); stroke-width: 1.6; }
+  .part-text {
+    fill: var(--stroke); font-size: 11px;
+    font-family: var(--font-mono);
+    pointer-events: none;
+  }
+  .part-name {
+    fill: var(--stroke); font-size: 11px; font-weight: 600;
+    font-family: var(--font-ui);
+    pointer-events: none;
+  }
+  .wire {
+    fill: none; stroke: var(--stroke); stroke-width: 1.8;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  .wire-bad {
+    stroke: var(--error); stroke-width: 2.2;
+    stroke-dasharray: 6 3;
+  }
+  .terminal { fill: var(--terminal); stroke: none; }
+  .terminal-open {
+    fill: none; stroke: var(--muted); stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+  }
+  .node-dot { fill: var(--stroke); stroke: none; }
+  .net-label-text {
+    fill: var(--stroke); font-size: 11px; font-weight: 600;
+    font-family: var(--font-mono);
+    pointer-events: none;
+  }
+  .net-label-bg {
+    fill: var(--bg); stroke: var(--stroke); stroke-width: 1;
+    pointer-events: none;
+  }
+  /* drawPart emits invisible hit-rects for the editor's click model;
+     in the viewer they must never swallow pan/zoom gestures. */
+  .hit-rect { fill: transparent; pointer-events: none; }
+
+  /* Control cluster — bottom right, fades in on hover so a small
+     embed reads as a clean figure until the reader engages. */
+  #viewer-controls {
+    position: absolute; right: 8px; bottom: 8px;
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px;
+    background: var(--surface-1);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow-1);
+    opacity: 0.35;
+    transition: opacity 0.15s ease;
+  }
+  #viewer-root:hover #viewer-controls { opacity: 1; }
+  #viewer-controls button {
+    width: 24px; height: 24px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; border-radius: 5px;
+    background: transparent; color: var(--fg);
+    font: 600 14px/1 var(--font-ui);
+    cursor: pointer; padding: 0;
+  }
+  #viewer-controls button:hover { background: var(--surface-3); }
+  #viewer-controls a {
+    height: 24px; padding: 0 8px;
+    display: inline-flex; align-items: center;
+    border-radius: 5px;
+    color: var(--muted); text-decoration: none;
+    font-size: var(--text-xs); font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  #viewer-controls a:hover { background: var(--surface-3); color: var(--fg); }
+  #viewer-controls .sep {
+    width: 1px; height: 16px; background: var(--line); flex: none;
+  }
+
+  /* Empty / error card. */
+  #viewer-msg {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 6px; padding: 24px; text-align: center;
+  }
+  #viewer-msg[hidden] { display: none; }
+  .viewer-msg-title { font-size: 14px; font-weight: 600; }
+  .viewer-msg-detail {
+    font-size: var(--text-sm); color: var(--muted); max-width: 420px;
+  }
+</style>
+</head>
+<body>
+
+<div id="viewer-root">
+  <svg id="viewer-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="viewer-msg" hidden></div>
+  <div id="viewer-controls">
+    <button id="vz-out" title="Zoom out">−</button>
+    <button id="vz-in" title="Zoom in">+</button>
+    <button id="vz-fit" title="Fit view (or double-click)">⛶</button>
+    <span class="sep"></span>
+    <a id="v-open" target="_blank" rel="noopener" title="Open a copy in the SEDRA editor">SEDRA&nbsp;↗</a>
+  </div>
+</div>
+
+<script src="glyphs.js" defer></script>
+<script src="viewer.js" defer></script>
+</body>
+</html>

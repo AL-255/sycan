@@ -3348,6 +3348,12 @@ const COMMANDS: Command[] = [
     run: () => { void copySchematicPng(); } },
   { id: 'file.copyNetlist', title: 'Copy netlist', group: 'File',
     run: () => (document.getElementById('btn-copy') as HTMLButtonElement).click() },
+  { id: 'file.copyViewLink', title: 'Copy view-only link', group: 'File',
+    enabled: () => state.parts.length > 0 || state.wires.length > 0,
+    run: () => { void copyTextSnippet(viewerShareUrl(), 'View-only link copied'); } },
+  { id: 'file.copyEmbed', title: 'Copy embed code (view-only iframe)', group: 'File',
+    enabled: () => state.parts.length > 0 || state.wires.length > 0,
+    run: () => { void copyTextSnippet(buildEmbedSnippet(), 'Embed code copied'); } },
   { id: 'file.exportJson', title: 'Export JSON', group: 'File',
     run: () => (document.getElementById('btn-export-json') as HTMLButtonElement).click() },
   { id: 'file.importJson', title: 'Import JSON…', group: 'File',
@@ -4403,6 +4409,80 @@ function exportJson(): void {
   a.download = 'circuit.json';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---- view-only sharing (viewer.html) ----
+//
+// The whole schematic rides in a URL fragment as URL-safe base64
+// (codec lives in glyphs.ts, shared with the viewer). Two commands
+// build on it: "Copy view-only link" (the bare URL) and "Copy embed
+// code" (an <iframe> snippet for dropping into any web page).
+function viewerShareUrl(): string {
+  const b64 = encodeCircuitB64({
+    version: 1,
+    parts: state.parts,
+    wires: state.wires,
+    nameCounters: state.nameCounters,
+  });
+  return new URL(`viewer.html#data=${b64}`, location.href).toString();
+}
+
+function buildEmbedSnippet(): string {
+  return `<iframe src="${viewerShareUrl()}"\n`
+    + '        width="720" height="480" loading="lazy"\n'
+    + '        style="border: 1px solid #d0d0d6; border-radius: 8px;"\n'
+    + '        title="SEDRA schematic (view-only)"></iframe>';
+}
+
+async function copyTextSnippet(text: string, okMsg: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    notify(okMsg, 'info');
+  } catch (_) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    notify(ok ? okMsg : 'Clipboard unavailable', ok ? 'info' : 'warn');
+  }
+}
+
+// Shared-link import: viewer.html's "Open in SEDRA" and copied
+// view-only links put `#data=<b64>` on the editor URL. Called once
+// from init() after loadLocal(); replaces the schematic (with consent
+// when one already exists) and strips the fragment so a reload
+// doesn't re-prompt.
+function tryImportFromHash(): boolean {
+  const m = /^#(?:data|circuit)=([A-Za-z0-9_\-+/=]+)$/.exec(location.hash || '');
+  if (!m) return false;
+  const stripHash = () =>
+    history.replaceState(null, '', location.pathname + location.search);
+  const doc = decodeCircuitB64(m[1]);
+  if (!doc) {
+    stripHash();
+    notify('Link contained no readable schematic', 'warn');
+    return false;
+  }
+  const hasExisting = state.parts.length > 0 || state.wires.length > 0;
+  if (hasExisting
+      && !confirm('Load the schematic from this link? '
+                  + 'Your current schematic will be replaced.')) {
+    stripHash();
+    return false;
+  }
+  state.parts = doc.parts || [];
+  state.wires = doc.wires || [];
+  state.nameCounters = doc.nameCounters || {};
+  state.nextId = Math.max(state.nextId,
+    ...state.wires.map(w => parseInt(String(w.id).replace(/\D/g, '') || '0', 10) + 1));
+  state.selectedIds.clear();
+  state.selectedSegments.clear();
+  stripHash();
+  return true;
 }
 
 document.getElementById('btn-export-json')!.addEventListener('click', exportJson);
@@ -6812,10 +6892,15 @@ async function init(): Promise<void> {
     state.pan.x = wrap.clientWidth / 2;
     state.pan.y = wrap.clientHeight / 2;
   }
+  const linked = tryImportFromHash();
   setTool('select');
   pushHistory();
   refreshProps();
   render();
+  if (linked) {
+    fitView();
+    notify('Loaded schematic from link', 'info');
+  }
 }
 
 window.addEventListener('resize', render);

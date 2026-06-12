@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Embedding a SEDRA schematic — plain-HTML example</title>
+<!--
+  Minimal embed example: no CSS, no JavaScript — just an <iframe>
+  whose URL fragment carries the circuit as base64.
+
+  To make your own:
+    1. Draw the circuit in the SEDRA editor (index.html).
+    2. Press Ctrl+K and run "Copy embed code (view-only iframe)".
+    3. Paste the snippet into your page. Done.
+
+  The iframe src below is relative because this file sits next to
+  viewer.html; on your own website use the absolute URL the editor
+  copies for you (https://…/sedra/viewer.html#data=…).
+
+  Optional query parameters (before the #):
+    viewer.html?theme=dark#data=…      force dark theme
+    viewer.html?theme=light#data=…     force light theme
+    viewer.html?controls=0#data=…      hide the zoom/fit/open buttons
+  Default theme follows the reader's prefers-color-scheme.
+-->
+</head>
+<body>
+
+<h1>My circuit write-up</h1>
+
+<p>
+  The divider below is a live SEDRA embed — drag to pan, scroll to
+  zoom, double-click to re-fit. The width/height attributes are all
+  the styling an iframe needs; everything visual lives inside the
+  widget itself.
+</p>
+
+<iframe src="viewer.html#data=eyJ2ZXJzaW9uIjoxLCJwYXJ0cyI6W3siaWQiOiJWMSIsInR5cGUiOiJ2c3JjIiwieCI6LTE2MCwieSI6NDAsInJvdCI6MCwidmFsdWUiOiJWaW4ifSx7ImlkIjoiUjEiLCJ0eXBlIjoicmVzIiwieCI6MCwieSI6MCwicm90Ijo5MCwidmFsdWUiOiJSMSJ9LHsiaWQiOiJSMiIsInR5cGUiOiJyZXMiLCJ4IjoxMDAsInkiOjEyMCwicm90IjowLCJ2YWx1ZSI6IlIyIn0seyJpZCI6IkcxIiwidHlwZSI6ImduZCIsIngiOi0xNjAsInkiOjIwMCwicm90IjowfSx7ImlkIjoiRzIiLCJ0eXBlIjoiZ25kIiwieCI6MTAwLCJ5IjoyMDAsInJvdCI6MH1dLCJ3aXJlcyI6W3siaWQiOiJXMSIsInBvaW50cyI6W1stMTYwLDBdLFstMTYwLC00MF0sWy00MCwtNDBdLFstNDAsMF1dfSx7ImlkIjoiVzIiLCJwb2ludHMiOltbNDAsMF0sWzEwMCwwXSxbMTAwLDgwXV0sImxhYmVsIjoib3V0In0seyJpZCI6IlczIiwicG9pbnRzIjpbWzEwMCwxNjBdLFsxMDAsMjAwXV19LHsiaWQiOiJXNCIsInBvaW50cyI6W1stMTYwLDgwXSxbLTE2MCwyMDBdXX1dLCJuYW1lQ291bnRlcnMiOnsiViI6MSwiUiI6MiwiR05EIjoyfX0"
+        width="720" height="480" loading="lazy"
+        title="Voltage divider (view-only SEDRA schematic)"></iframe>
+
+<p>
+  The output node rides the wire labelled <code>out</code>:
+  V<sub>out</sub> = V<sub>in</sub> · R2 / (R1 + R2).
+</p>
+
+</body>
+</html>

@@ -653,3 +653,39 @@ function drawPart(p, opts = {}) {
     }
     return g;
 }
+// JSON → UTF-8 bytes → base64, then URL-safe alphabet ('+/' → '-_')
+// with padding stripped so the string drops into a #fragment verbatim.
+function encodeCircuitB64(doc) {
+    const bytes = new TextEncoder().encode(JSON.stringify(doc));
+    let bin = '';
+    // Chunked fromCharCode — a single spread overflows the arg limit on
+    // large schematics.
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+// Accepts both standard and URL-safe alphabets, with or without
+// padding / stray whitespace (mail clients love wrapping long URLs).
+// Returns null on any malformed input — callers show a friendly
+// error instead of throwing.
+function decodeCircuitB64(b64) {
+    try {
+        let s = b64.replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
+        while (s.length % 4)
+            s += '=';
+        const bin = atob(s);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++)
+            bytes[i] = bin.charCodeAt(i);
+        const doc = JSON.parse(new TextDecoder().decode(bytes));
+        if (!doc || typeof doc !== 'object' || !Array.isArray(doc.parts))
+            return null;
+        if (doc.wires !== undefined && !Array.isArray(doc.wires))
+            return null;
+        return doc;
+    }
+    catch (_) {
+        return null;
+    }
+}

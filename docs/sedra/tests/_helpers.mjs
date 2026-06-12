@@ -37,7 +37,17 @@ function findChrome() {
 // Launch a fresh headless browser and return a page already loaded
 // against the editor with localStorage cleared and the runtime
 // symbols ready. Caller is responsible for `await browser.close()`.
-export async function setup({ viewport = { width: 1400, height: 900 } } = {}) {
+//
+// Options beyond `viewport` (all default to the editor page):
+//   page:    HTML file to load instead of index.html (e.g. 'viewer.html')
+//   hash:    URL fragment appended verbatim (e.g. '#data=…')
+//   waitFor: readiness expression for waitForFunction
+export async function setup({
+  viewport = { width: 1400, height: 900 },
+  page: pageFile = 'index.html',
+  hash = '',
+  waitFor = 'typeof state !== "undefined" && typeof addPart === "function" && glyphsReady',
+} = {}) {
   const { default: puppeteer } = await import('puppeteer-core');
   const browser = await puppeteer.launch({
     executablePath: findChrome(),
@@ -56,7 +66,8 @@ export async function setup({ viewport = { width: 1400, height: 900 } } = {}) {
   });
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   await page.setViewport(viewport);
-  const url = process.env.SEDRA_TEST_URL || DEFAULT_URL;
+  const base = process.env.SEDRA_TEST_URL || DEFAULT_URL;
+  const url = base.replace(/index\.html$/, pageFile) + hash;
   await page.goto(url, { waitUntil: 'networkidle0' });
   // Make sure each test starts from a clean slate — localStorage
   // would otherwise replay the previous test's circuit.
@@ -68,9 +79,7 @@ export async function setup({ viewport = { width: 1400, height: 900 } } = {}) {
     localStorage.setItem('sycan.sedra.welcome.v1', '1');
   });
   await page.reload({ waitUntil: 'networkidle0' });
-  await page.waitForFunction(
-    'typeof state !== "undefined" && typeof addPart === "function" && glyphsReady',
-    { timeout: 5000 });
+  await page.waitForFunction(waitFor, { timeout: 5000 });
   return { browser, page, errors };
 }
 
