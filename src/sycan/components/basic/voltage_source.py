@@ -72,7 +72,12 @@ def waveform_laplace(source, s: cas.Expr) -> cas.Expr:
     wf = source.waveform
     if wf == "sine":
         omega = 2 * cas.pi * source.frequency
-        return _sine_laplace(s, source.amplitude, omega, source.phase)
+        out = _sine_laplace(s, source.amplitude, omega, source.phase)
+        if source.value != 0:
+            # The DC ``value`` doubles as the sine offset (SPICE SIN
+            # ``vo``), riding on the waveform as a step at t = 0.
+            out += source.value / s
+        return out
     if wf == "pulse":
         return _pulse_laplace(s, source.v1, source.v2, source.td, source.pw)
     if wf == "exp":
@@ -94,7 +99,10 @@ def waveform_time(source, t: cas.Expr) -> cas.Expr:
     wf = source.waveform
     if wf == "sine":
         omega = 2 * cas.pi * source.frequency
-        return source.amplitude * cas.sin(omega * t + source.phase)
+        return (
+            source.value
+            + source.amplitude * cas.sin(omega * t + source.phase)
+        )
     if wf == "pulse":
         dV = source.v2 - source.v1
         out = source.v1 + dV * cas.Heaviside(t - source.td)

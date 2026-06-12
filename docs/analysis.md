@@ -123,6 +123,21 @@ tran = solve_transient(c, outputs=["out"], simplify=True)
 print(tran.t_solution[cas.Symbol("V(out)")])   # Vstep - Vstep*exp(-t/(C*R))
 ```
 
+The SPICE parser understands the equivalent netlist syntax —
+`SIN(vo va freq)` (phase in degrees), `PULSE(v1 v2 [td tr tf pw])`
+(ideal-edge, single-shot), `EXP(v1 v2 td1 tau1 [td2 tau2])`, and
+`IC=` on C / L lines — and `to_spice` writes them back out:
+
+```python
+from sycan import parse
+c = parse("""rc step
+V1 in 0 PULSE(0 Vstep)
+R1 in out R
+C1 out 0 C IC=V0
+.end
+""")
+```
+
 Limitations: exact inversion is CAS-limited — when the CAS cannot
 close the transform the entry is preserved as an unevaluated
 `InverseLaplaceTransform` (and the raw `s_solution` is still there);
@@ -130,8 +145,9 @@ partial fractions (`apart`) are applied automatically beforehand to
 maximise the hit rate. Transmission-line (`TLINE`) responses invert
 only as far as the CAS can handle their transcendental s-domain
 expressions. Inverse Laplace transforms are computed by sympy — under
-the symengine backend the operation bridges to sympy, and results
-containing `Heaviside` stay sympy-side. The free helpers
+the symengine backend the operation bridges to sympy (treating the
+time variable as positive, since symengine symbols carry no
+assumptions), and results containing `Heaviside` stay sympy-side. The free helpers
 `waveform_laplace(source, s)` / `waveform_time(source, t)` expose the
 stamped transform and its time-domain counterpart for docs and
 validation.

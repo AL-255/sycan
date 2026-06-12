@@ -1,4 +1,4 @@
-"""Minimal SPICE netlist parser (and writer) for DC / AC circuits.
+"""Minimal SPICE netlist parser (and writer) for DC / AC / transient circuits.
 
 Supported syntax:
 
@@ -18,10 +18,10 @@ Supported syntax:
 * elements::
 
       Rxxx  N+ N- value
-      Lxxx  N+ N- value            ; inductor (DC short, AC 1/(sL))
-      Cxxx  N+ N- value            ; capacitor (DC open, AC sC)
-      Vxxx  N+ N- [DC dcval] [AC acval]
-      Ixxx  N+ N- [DC dcval] [AC acval]
+      Lxxx  N+ N- value [IC=i0]    ; inductor (DC short, AC 1/(sL))
+      Cxxx  N+ N- value [IC=v0]    ; capacitor (DC open, AC sC)
+      Vxxx  N+ N- [DC dcval] [AC acval] [SIN(...)|PULSE(...)|EXP(...)]
+      Ixxx  N+ N- [DC dcval] [AC acval] [SIN(...)|PULSE(...)|EXP(...)]
       Exxx  N+ N- NC+ NC- gain     ; VCVS
       Gxxx  N+ N- NC+ NC- gain     ; VCCS
       Fxxx  N+ N- VNAM gain        ; CCCS
@@ -39,6 +39,24 @@ Supported syntax:
                                                     ; vacuum-tube triode subcircuit
       Xxxx  IN+ IN- OUT OPAMP [A]                   ; ideal differential op-amp
       GND[n] NODE                  ; ties NODE to the absolute zero reference
+
+Transient source specs map onto the Python ``waveform=`` API:
+
+* ``SIN(vo va freq [td theta phase])`` → ``waveform="sine"`` with
+  ``amplitude=va``, ``frequency=freq``, and ``phase`` converted from
+  degrees (SPICE convention) to radians. The offset ``vo`` becomes the
+  source's DC ``value`` (an explicit ``DC`` token wins). Non-zero
+  ``td`` (delay) and ``theta`` (damping) are rejected — the symbolic
+  sine model has neither.
+* ``PULSE(v1 v2 [td tr tf pw per])`` → ``waveform="pulse"`` with
+  ``v1``, ``v2``, ``td`` (default 0), ``pw`` (default ∞). Non-zero
+  rise/fall times and any period are rejected — the symbolic pulse is
+  a single ideal-edge rectangle.
+* ``EXP(v1 v2 td1 tau1 [td2 tau2])`` → ``waveform="exp"``.
+
+``IC=`` on ``C`` / ``L`` lines sets the transient initial condition
+(capacitor voltage / inductor current); other trailing tokens on those
+lines are still ignored for compatibility.
 
 Values may be plain numbers with an engineering suffix
 (``T G MEG K M U N P F``, case-insensitive) plus arbitrary trailing unit
@@ -267,6 +285,135 @@ def _preprocess(text: str) -> list[tuple[int, str]]:
     return out
 
 
+# SIN( ... ) / PULSE( ... ) / EXP( ... ) transient source specs. The
+# arguments may contain whitespace, so this is matched against the
+# re-joined remainder of the source line rather than per-token.
+_TRAN_SPEC_RE = re.compile(
+    r"\b(?P<fn>sin|pulse|exp)\s*\(\s*(?P<args>[^)]*)\)",
+    re.IGNORECASE,
+)
+
+
+def _parse_tran_spec(
+    rest: str, lineno: int, name: str
+) -> tuple[str, Optional[cas.Expr], dict[str, cas.Expr]]:
+    """Extract a ``SIN(...)`` / ``PULSE(...)`` / ``EXP(...)`` spec.
+
+    Returns ``(remaining_text, dc_offset, waveform_kwargs)`` where
+    ``remaining_text`` is the source line minus the matched spec (DC /
+    AC tokens stay in it), ``dc_offset`` is the SIN offset ``vo`` (or
+    ``None``), and ``waveform_kwargs`` feeds straight into
+    ``add_vsource`` / ``add_isource``. All three are no-ops when the
+    line carries no transient spec.
+    """
+    m = _TRAN_SPEC_RE.search(rest)
+    if m is None:
+        return rest, None, {}
+    fn = m.group("fn").lower()
+    args = [parse_value(tok) for tok in m.group("args").split()]
+    remaining = (rest[: m.start()] + " " + rest[m.end():]).strip()
+
+    def _arg(idx: int, default: Optional[cas.Expr] = None) -> Optional[cas.Expr]:
+        return args[idx] if len(args) > idx else default
+
+    if fn == "sin":
+        # SIN(VO VA FREQ TD THETA PHASE) — phase in degrees per SPICE.
+        if len(args) < 3:
+            raise ValueError(
+                f"line {lineno}: source {name!r}: SIN needs at least "
+                "(vo va freq)"
+            )
+        vo, va, freq = args[0], args[1], args[2]
+        td = _arg(3, cas.Integer(0))
+        theta = _arg(4, cas.Integer(0))
+        if td != 0 or theta != 0:
+            raise ValueError(
+                f"line {lineno}: source {name!r}: SIN delay (td) and "
+                "damping (theta) are not supported by the symbolic "
+                "sine model; both must be 0 or omitted"
+            )
+        phase_deg = _arg(5, cas.Integer(0))
+        kwargs: dict[str, cas.Expr] = {
+            "waveform": "sine",
+            "amplitude": va,
+            "frequency": freq,
+            "phase": phase_deg * cas.pi / 180,
+        }
+        return remaining, vo, kwargs
+
+    if fn == "pulse":
+        # PULSE(V1 V2 TD TR TF PW PER) — ideal-edge single-shot only.
+        if len(args) < 2:
+            raise ValueError(
+                f"line {lineno}: source {name!r}: PULSE needs at least "
+                "(v1 v2)"
+            )
+        tr = _arg(3, cas.Integer(0))
+        tf = _arg(4, cas.Integer(0))
+        if tr != 0 or tf != 0:
+            raise ValueError(
+                f"line {lineno}: source {name!r}: PULSE rise/fall times "
+                "are not supported by the symbolic ideal-edge pulse "
+                "model; tr and tf must be 0 or omitted"
+            )
+        if len(args) > 6:
+            raise ValueError(
+                f"line {lineno}: source {name!r}: periodic PULSE (per) "
+                "is not supported; the symbolic pulse is single-shot"
+            )
+        kwargs = {
+            "waveform": "pulse",
+            "v1": args[0],
+            "v2": args[1],
+            "td": _arg(2, cas.Integer(0)),
+            "pw": _arg(5, cas.oo),
+        }
+        return remaining, None, kwargs
+
+    # EXP(V1 V2 TD1 TAU1 TD2 TAU2)
+    if len(args) < 4:
+        raise ValueError(
+            f"line {lineno}: source {name!r}: EXP needs at least "
+            "(v1 v2 td1 tau1)"
+        )
+    if len(args) == 5:
+        raise ValueError(
+            f"line {lineno}: source {name!r}: EXP fall spec needs both "
+            "td2 and tau2"
+        )
+    kwargs = {
+        "waveform": "exp",
+        "v1": args[0],
+        "v2": args[1],
+        "td1": args[2],
+        "tau1": args[3],
+    }
+    if len(args) > 5:
+        kwargs["td2"] = args[4]
+        kwargs["tau2"] = args[5]
+    return remaining, None, kwargs
+
+
+def _parse_trailing_ic(
+    tokens: list[str], lineno: int, name: str
+) -> Optional[cas.Expr]:
+    """Pick an ``IC=<val>`` token out of a C/L line's trailing tokens.
+
+    Other trailing tokens are ignored, matching the parser's existing
+    lenience toward unsupported element options.
+    """
+    ic: Optional[cas.Expr] = None
+    for tok in tokens:
+        if tok.lower().startswith("ic="):
+            val = tok[3:]
+            if not val:
+                raise ValueError(
+                    f"line {lineno}: element {name!r}: IC= missing value"
+                )
+            ic = parse_value(val)
+    return ic
+
+
 def _source_values(
     tokens: list[str], lineno: int, name: str
 ) -> tuple[cas.Expr, cas.Expr | None]:
@@ -383,18 +530,40 @@ def _build_circuit(
             circuit.add_resistor(name, parts[1], parts[2], parse_value(parts[3]))
         elif head == "l":
             _require(parts, 4, lineno, name)
-            circuit.add_inductor(name, parts[1], parts[2], parse_value(parts[3]))
+            ic = _parse_trailing_ic(parts[4:], lineno, name)
+            circuit.add_inductor(
+                name, parts[1], parts[2], parse_value(parts[3]), ic=ic
+            )
         elif head == "c":
             _require(parts, 4, lineno, name)
-            circuit.add_capacitor(name, parts[1], parts[2], parse_value(parts[3]))
-        elif head == "v":
+            ic = _parse_trailing_ic(parts[4:], lineno, name)
+            circuit.add_capacitor(
+                name, parts[1], parts[2], parse_value(parts[3]), ic=ic
+            )
+        elif head in ("v", "i"):
             _require(parts, 4, lineno, name)
-            dc_val, ac_val = _source_values(parts[3:], lineno, name)
-            circuit.add_vsource(name, parts[1], parts[2], dc_val, ac_val)
-        elif head == "i":
-            _require(parts, 4, lineno, name)
-            dc_val, ac_val = _source_values(parts[3:], lineno, name)
-            circuit.add_isource(name, parts[1], parts[2], dc_val, ac_val)
+            rest, vo, wf_kwargs = _parse_tran_spec(
+                " ".join(parts[3:]), lineno, name
+            )
+            rest_tokens = rest.split()
+            if rest_tokens:
+                dc_val, ac_val = _source_values(rest_tokens, lineno, name)
+                # An explicit DC/value token wins over the SIN offset.
+                if vo is not None and dc_val == 0 and "dc" not in (
+                    t.lower() for t in rest_tokens
+                ):
+                    dc_val = vo
+            elif wf_kwargs:
+                # Pure transient spec: the SIN offset doubles as the DC
+                # value; pulse / exp derive DC from v1 in the component.
+                dc_val = vo if vo is not None else cas.Integer(0)
+                ac_val = None
+            else:
+                raise ValueError(
+                    f"line {lineno}: source {name!r} missing value"
+                )
+            adder = circuit.add_vsource if head == "v" else circuit.add_isource
+            adder(name, parts[1], parts[2], dc_val, ac_val, **wf_kwargs)
         elif head == "e":
             _require(parts, 6, lineno, name)
             circuit.add_vcvs(
@@ -921,26 +1090,58 @@ def _emit_component(
 
 
 def _emit_two_term(comp) -> str:
-    return " ".join([
+    tokens = [
         comp.name,
         _format_node(comp.n_plus),
         _format_node(comp.n_minus),
         _format_value(comp.value),
-    ])
+    ]
+    # Transient initial condition on capacitors / inductors.
+    ic = getattr(comp, "ic", None)
+    if ic is not None:
+        tokens.append(f"IC={_format_value(ic)}")
+    return " ".join(tokens)
+
+
+def _emit_tran_spec(comp) -> str:
+    """Render a source's waveform as a ``SIN/PULSE/EXP(...)`` token.
+
+    Inverse of :func:`_parse_tran_spec`: SIN phase is emitted in
+    degrees, the DC ``value`` becomes the SIN offset ``vo``, and an
+    infinite pulse width is emitted by omitting ``pw``.
+    """
+    wf = comp.waveform
+    if wf == "sine":
+        args = [comp.value, comp.amplitude, comp.frequency]
+        if comp.phase != 0:
+            args += [0, 0, comp.phase * 180 / cas.pi]
+        return "SIN(" + " ".join(_format_value(a) for a in args) + ")"
+    if wf == "pulse":
+        args = [comp.v1, comp.v2, comp.td]
+        if comp.pw != cas.oo:
+            args += [0, 0, comp.pw]
+        return "PULSE(" + " ".join(_format_value(a) for a in args) + ")"
+    # exp
+    args = [comp.v1, comp.v2, comp.td1, comp.tau1]
+    if comp.td2 is not None and comp.tau2 is not None:
+        args += [comp.td2, comp.tau2]
+    return "EXP(" + " ".join(_format_value(a) for a in args) + ")"
 
 
 def _emit_v_or_i_source(comp) -> str:
-    """Emit V/I sources as ``DC <val> [AC <val>]`` (waveforms not supported)."""
-    if comp.waveform is not None:
-        raise NotImplementedError(
-            f"to_spice: waveform sources are not yet supported "
-            f"({comp.name!r}, waveform={comp.waveform!r})"
-        )
+    """Emit V/I sources as ``[DC <val>] [AC <val>] [SIN/PULSE/EXP(...)]``."""
     tokens = [
         comp.name,
         _format_node(comp.n_plus),
         _format_node(comp.n_minus),
     ]
+    if comp.waveform is not None:
+        # A sine source's DC value is folded into the SIN offset; for
+        # pulse / exp the DC level is v1 inside the spec itself.
+        if comp.ac_value is not None:
+            tokens += ["AC", _format_value(comp.ac_value)]
+        tokens.append(_emit_tran_spec(comp))
+        return " ".join(tokens)
     if comp.ac_value is not None:
         tokens += ["DC", _format_value(comp.value),
                    "AC", _format_value(comp.ac_value)]

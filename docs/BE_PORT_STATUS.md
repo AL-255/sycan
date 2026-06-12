@@ -5,10 +5,18 @@ Tracks the migration off a hard sympy dependency to the pluggable
 
 ## Status
 
-- **sympy backend** — default, full coverage. 220/220 tests pass.
+- **sympy backend** — default, full coverage (460/460 tests as of the
+  transient-analysis release).
 - **symengine backend** — opt-in via `SYCAN_CAS_BACKEND=symengine`.
-  210 pass, 10 skipped (representation / API divergences listed below);
-  no failures.
+  At port time (220-test suite): 210 pass, 10 skipped (representation /
+  API divergences listed below), no failures. Coverage has since
+  drifted: tests added after the port were not all re-verified under
+  symengine, and some pre-existing failures / hangs exist there (e.g.
+  `tests/AC/test_solve_tf.py` dc-gain via `subs(s=0)` canonicalisation,
+  `tests/blocks/test_mutual_coupling.py`) that predate the transient
+  work. The transient suite (`tests/transient/`) passes under
+  symengine except two canonical-form tests skipped in
+  `tests/conftest.py` (waveform parameters lose positivity).
 
 ## What changed (sympy migration)
 
@@ -189,7 +197,11 @@ For anyone implementing a new backend, sycan's call sites need:
   `Max`, `Min`, `Piecewise`, `factorial`.
 - Manipulation: `cancel`, `simplify`, `expand`, `expand_log`, `factor`,
   `together`, `trigsimp`, `fraction`.
-- Calculus: `diff`, `integrate`, `limit`, `series`, `solve`, `nsolve`.
+- Calculus: `diff`, `integrate`, `limit`, `series`, `solve`, `nsolve`,
+  `apart`, `laplace_transform`, `inverse_laplace_transform` (the
+  Laplace pair bridges to sympy under symengine and treats the time
+  variable as positive; `Heaviside` / `DiracDelta` /
+  `InverseLaplaceTransform` objects stay sympy-side).
 - Matrix utilities: `eye`, `zeros`, `diag`.
 - Conversion / output: `sympify`, `lambdify` (with `modules="numpy"`),
   `latex`, `pprint`.

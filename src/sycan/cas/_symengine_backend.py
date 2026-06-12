@@ -201,17 +201,51 @@ def apart(expr, *args, **kwargs):
     )
 
 
+def _positive_time(t_sp):
+    """Return ``(t_for_sympy, needs_backsub)`` for a Laplace time var.
+
+    Symengine symbols carry no assumptions, so a ``Symbol("t",
+    positive=True)`` minted by ``solve_transient`` arrives here as a
+    bare symbol and sympy keeps ``Heaviside(t)`` factors explicit. We
+    run the transform with a positive clone (matching the caller's
+    declared intent) and substitute the bare symbol back afterwards.
+    """
+    if isinstance(t_sp, _sp.Symbol) and t_sp.is_positive is None:
+        return _sp.Symbol(t_sp.name, positive=True), True
+    return t_sp, False
+
+
 def inverse_laplace_transform(expr, s, t, **kwargs):
     """Inverse Laplace transform — sympy-only; bridge.
 
+    The time variable is treated as positive (see :func:`_positive_time`).
     Results containing sympy-only objects (``Heaviside``, unevaluated
     ``InverseLaplaceTransform``) come back as sympy expressions because
     symengine has no representation for them (``_to_se`` returns such
     objects unchanged).
     """
+    t_sp = _to_sp(t)
+    t_pos, backsub = _positive_time(t_sp)
     res = _sp.inverse_laplace_transform(
-        _to_sp(expr), _to_sp(s), _to_sp(t), **kwargs
+        _to_sp(expr), _to_sp(s), t_pos, **kwargs
     )
+    if backsub:
+        res = res.subs(t_pos, t_sp)
+    return _to_se(res)
+
+
+def laplace_transform(expr, t, s, **kwargs):
+    """Laplace transform — sympy-only; bridge.
+
+    Mirrors :func:`inverse_laplace_transform`, including the
+    positive-time-variable treatment.
+    """
+    t_sp = _to_sp(t)
+    t_pos, backsub = _positive_time(t_sp)
+    expr_sp = _to_sp(expr)
+    if backsub:
+        expr_sp = expr_sp.subs(t_sp, t_pos)
+    res = _sp.laplace_transform(expr_sp, t_pos, _to_sp(s), **kwargs)
     return _to_se(res)
 
 
@@ -381,7 +415,7 @@ def __dir__() -> list[str]:
         "simplify", "cancel", "factor", "together", "expand_log",
         "trigsimp", "fraction", "integrate", "limit", "factorial",
         "solve", "nsolve", "pprint", "lambdify",
-        "apart", "inverse_laplace_transform",
+        "apart", "inverse_laplace_transform", "laplace_transform",
         "Heaviside", "DiracDelta", "InverseLaplaceTransform",
         "Poly", "PolynomialError",
     }

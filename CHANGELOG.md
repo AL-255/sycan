@@ -34,9 +34,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names or non-storage components raise `ValueError`). Capacitor
   polarity is `v0 = V(n+) − V(n−)`; inductor current is positive
   `n+ → n−`. Coupled inductors stamp the `−M·i_j0` cross terms.
-- SymEngine backend: `apart` / `inverse_laplace_transform` bridges
-  (results containing `Heaviside` stay sympy-side).
-- Tests under `tests/transient/`; REPL demos ("RC step response",
+- SPICE parser / writer support for transient sources and ICs:
+  `SIN(vo va freq [td theta phase])` (phase in degrees per SPICE,
+  offset `vo` becomes the DC `value`), `PULSE(v1 v2 [td tr tf pw per])`
+  (ideal-edge single-shot; non-zero `tr`/`tf` and any `per` are
+  rejected with a clear message), `EXP(v1 v2 td1 tau1 [td2 tau2])`,
+  and `IC=` on C / L lines. `to_spice` emits all of these, so
+  waveform sources round-trip (previously `NotImplementedError`).
+- SymEngine backend: `apart`, `inverse_laplace_transform`, and
+  `laplace_transform` bridges. The Laplace bridges treat the time
+  variable as positive (symengine symbols carry no assumptions);
+  results containing `Heaviside` stay sympy-side. The transient test
+  suite passes under `SYCAN_CAS_BACKEND=symengine` except two
+  canonical-form tests that need positive waveform parameters
+  (skipped with reasons in `tests/conftest.py`).
+- Tests under `tests/transient/` (solver, parser/writer round-trip,
+  waveform-helper consistency); REPL demos ("RC step response",
   "Natural responses (ICs)"); docs in `docs/analysis.md`,
   `sphinx/getting_started.rst`, `STRUCTURE.md`.
 
