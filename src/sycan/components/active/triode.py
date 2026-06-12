@@ -109,7 +109,7 @@ class Triode(Component):
     # ------------------------------------------------------------------
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode != "ac":
+        if ctx.mode not in ("ac", "tran"):
             return
 
         g_m, g_p = self._small_signal_params()

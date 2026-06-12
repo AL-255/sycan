@@ -69,6 +69,7 @@ from sycan.mna import (
     NoiseSource,
     NoiseSpec,
     StampContext,
+    TransientResult,
     build_mna,
     build_residuals,
     k_B,
@@ -82,6 +83,11 @@ from sycan.mna import (
     solve_pz,
     solve_sensitivity,
     solve_tf,
+    solve_transient,
+)
+from sycan.components.basic.voltage_source import (
+    waveform_laplace,
+    waveform_time,
 )
 from sycan.assumptions import (
     Approximate,
@@ -145,6 +151,7 @@ __all__ = [
     "T_kelvin",
     "TLINE",
     "TransferFunction",
+    "TransientResult",
     "Triode",
     "k_B",
     "q",
@@ -188,7 +195,10 @@ __all__ = [
     "solve_pz",
     "solve_sensitivity",
     "solve_tf",
+    "solve_transient",
     "solve",
+    "waveform_laplace",
+    "waveform_time",
     "main",
     "print_hierarchy",
     "to_spice",

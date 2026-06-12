@@ -71,12 +71,12 @@ class TransferFunction(Component):
         return g if _is_finite(g) else None
 
     def aux_count(self, mode: str) -> int:
-        if mode == "ac":
+        if mode in ("ac", "tran"):
             return 1
         return 1 if self._dc_gain_or_none() is not None else 0
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode == "ac":
+        if ctx.mode in ("ac", "tran"):
             gain = self.H.subs(self.var, ctx.s)
         else:
             gain = self._dc_gain_or_none()

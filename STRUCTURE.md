@@ -1,6 +1,6 @@
 # SYCAN — Repository Structure
 
-**SYCAN** (Symbolic Circuit ANalysis) is a Python 3.11+ package for symbolic circuit simulation built on SymPy, with support for DC, AC, and noise analysis, automatic schematic drawing, and an in-browser REPL.
+**SYCAN** (Symbolic Circuit ANalysis) is a Python 3.11+ package for symbolic circuit simulation built on SymPy, with support for DC, AC, transient, and noise analysis, automatic schematic drawing, and an in-browser REPL.
 
 ```
 sycan/
@@ -48,6 +48,7 @@ sycan/
 │   ├── DC/                 # DC analysis tests (23 files)
 │   ├── AC/                 # AC analysis tests (6 files)
 │   ├── noise/              # Noise analysis tests (4 files)
+│   ├── transient/          # Symbolic transient tests (3 files)
 │   ├── blocks/             # Circuit block tests (8 files)
 │   ├── rf/                 # RF component tests (1 file)
 │   └── drawing/            # autodraw tests (2 files)
@@ -113,6 +114,7 @@ sycan/
 
 - **DC** — Operating point (MNA with Newton-Raphson for nonlinear devices)
 - **AC** — Small-signal frequency response
+- **Transient** — Symbolic Laplace transient (inverse Laplace of the s-domain solution; supports C/L initial conditions)
 - **Noise** — Device noise contribution analysis
 
 ## Dependencies

@@ -12,6 +12,9 @@
   {"category": "AC / impedance", "label": "CS amp impedances",    "file": "cs_amp.py"},
   {"category": "AC / impedance", "label": "SRPP optimal load",    "file": "srpp.py"},
 
+  {"category": "Transient",      "label": "RC step response",     "file": "rc_step_transient.py"},
+  {"category": "Transient",      "label": "Natural responses (ICs)", "file": "transient_natural.py"},
+
   {"category": "Noise",          "label": "RC noise (kT/C)",      "file": "rc_noise.py"},
   {"category": "Noise",          "label": "CS amp noise",         "file": "cs_amp_noise.py"},
   {"category": "Noise",          "label": "Noise-cancelling LNA", "file": "noise_cancelling_lna.py"},

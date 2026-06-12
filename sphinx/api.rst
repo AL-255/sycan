@@ -14,7 +14,8 @@ Common entry points
      - :class:`sycan.Circuit`, :func:`sycan.parse`
    * - Run analyses
      - :func:`sycan.solve_dc`, :func:`sycan.solve_ac`,
-       :func:`sycan.solve_impedance`, :func:`sycan.solve_noise`
+       :func:`sycan.solve_transient`, :func:`sycan.solve_impedance`,
+       :func:`sycan.solve_noise`
    * - Draw schematics
      - :func:`sycan.autodraw`
    * - Add components directly

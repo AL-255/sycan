@@ -58,6 +58,84 @@ Returns `dict[Symbol, Expr]` keyed the same way as `solve_dc`. Disable
 H = solve_ac(circuit)[sp.Symbol("V(out)")] / Vin
 ```
 
+Note: source `waveform=` specs (`"sine"` / `"pulse"` / `"exp"`) also
+stamp their Laplace transforms in AC mode. That is legacy
+compatibility — `solve_transient` below is the intended API for
+time-domain responses.
+
+## Symbolic transient — `solve_transient(circuit, outputs=None, s=None, t=None, simplify=False, initial_conditions=None, noconds=True)`
+
+Exact time-domain response of an LTI circuit: the Laplace-domain MNA
+system is solved in `mode="tran"` and the selected unknowns are
+inverse-Laplace-transformed into closed-form expressions in `t`. This
+is symbolic Laplace analysis, not numeric time stepping.
+
+In `tran` mode:
+
+- **Sources** stamp the Laplace transform of their `waveform=` spec
+  (`"sine"`, `"pulse"`, `"exp"`); a source without a waveform stamps
+  its DC `value` switched on at `t = 0`, i.e. `value/s`. `ac_value`
+  is ignored — it is an AC-phasor concept.
+- **Capacitors / inductors** stamp their usual `s·C` / `s·L` dynamic
+  terms plus initial-condition injections: a capacitor with initial
+  voltage `v0` adds `+C·v0` / `−C·v0` current injections at its
+  terminals; an inductor with initial current `i0` adds `−L·i0` on
+  its KVL row (from `V = L·(s·I − i0)`). Coupled inductors pick up
+  the corresponding `−M·i_j0` cross terms.
+- **Nonlinear devices** contribute their small-signal AC stamps only,
+  so the result is a *small-signal transient around the supplied
+  operating point* — not a nonlinear large-signal simulation.
+
+Initial conditions can be set per element or at solve time (the
+solve-time map wins):
+
+```python
+c.add_capacitor("C1", "out", "0", C, ic=V0)   # v0 = V(n+) − V(n−) at t = 0⁻
+c.add_inductor("L1", "in", "out", L, ic=I0)   # i0 flows n+ → n− through L
+solve_transient(c, initial_conditions={"C1": V0, "L1": I0})
+```
+
+Unknown names, or names of components that are not capacitors /
+inductors, raise `ValueError`.
+
+`outputs` selects what gets inverse-transformed: node-name strings map
+to `Symbol("V(<node>)")`, symbols such as `Symbol("I(L1)")` are used
+directly, and `None` transforms every unknown. The returned
+`TransientResult` carries both domains:
+
+- `s_solution` — the full Laplace-domain solution (always available),
+- `t_solution` — time-domain expressions for the selected outputs,
+- `s`, `t` — the variables used (`t` is created positive so
+  `Heaviside(t)` factors collapse to 1; delayed edges keep explicit
+  `Heaviside(t − td)` terms).
+
+```python
+from sycan import Circuit, solve_transient, cas
+
+R, C, Vstep = cas.symbols("R C Vstep", positive=True)
+
+c = Circuit("rc_step")
+c.add_vsource("V1", "in", "0", 0, waveform="pulse", v1=0, v2=Vstep, td=0, pw=cas.oo)
+c.add_resistor("R1", "in", "out", R)
+c.add_capacitor("C1", "out", "0", C)
+
+tran = solve_transient(c, outputs=["out"], simplify=True)
+print(tran.t_solution[cas.Symbol("V(out)")])   # Vstep - Vstep*exp(-t/(C*R))
+```
+
+Limitations: exact inversion is CAS-limited — when the CAS cannot
+close the transform the entry is preserved as an unevaluated
+`InverseLaplaceTransform` (and the raw `s_solution` is still there);
+partial fractions (`apart`) are applied automatically beforehand to
+maximise the hit rate. Transmission-line (`TLINE`) responses invert
+only as far as the CAS can handle their transcendental s-domain
+expressions. Inverse Laplace transforms are computed by sympy — under
+the symengine backend the operation bridges to sympy, and results
+containing `Heaviside` stay sympy-side. The free helpers
+`waveform_laplace(source, s)` / `waveform_time(source, t)` expose the
+stamped transform and its time-domain counterpart for docs and
+validation.
+
 ## Port impedance — `solve_impedance(circuit, port_name, termination="auto", s=None, simplify=False)`
 
 Small-signal impedance looking into a named `Port`. A 1 V AC test

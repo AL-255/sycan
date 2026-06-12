@@ -85,7 +85,7 @@ class MutualCoupling(Component):
             )
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode != "ac":
+        if ctx.mode not in ("ac", "tran"):
             return
         if len(self._values) < 2:
             return
@@ -102,3 +102,13 @@ class MutualCoupling(Component):
                 M = self.k * cas.sqrt(Li * Lj)
                 ctx.A[ai, aj] -= s * M
                 ctx.A[aj, ai] -= s * M
+                if ctx.mode == "tran":
+                    # v_i includes M·d(i_j)/dt ⟷ s·M·I_j − M·i_j(0⁻);
+                    # the IC constant lands on the partner's KVL RHS,
+                    # mirroring the inductor's own −L·i0 term.
+                    i0_i = ctx.ic(ni)
+                    i0_j = ctx.ic(nj)
+                    if i0_j is not None:
+                        ctx.b[ai] -= M * i0_j
+                    if i0_i is not None:
+                        ctx.b[aj] -= M * i0_i

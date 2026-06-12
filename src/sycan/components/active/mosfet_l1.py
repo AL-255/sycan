@@ -219,7 +219,7 @@ class _MOSFET_L1(Component):
         return g_m, g_ds
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode != "ac":
+        if ctx.mode not in ("ac", "tran"):
             return
 
         g_m, g_ds = self._small_signal_params()

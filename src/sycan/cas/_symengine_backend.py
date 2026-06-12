@@ -194,6 +194,34 @@ def factorial(n, *args, **kwargs):
     return _to_se(_sp.factorial(_to_sp(n), *args, **kwargs))
 
 
+def apart(expr, *args, **kwargs):
+    # Partial-fraction decomposition has no symengine equivalent.
+    return _to_se(
+        _sp.apart(_to_sp(expr), *[_to_sp(a) for a in args], **kwargs)
+    )
+
+
+def inverse_laplace_transform(expr, s, t, **kwargs):
+    """Inverse Laplace transform — sympy-only; bridge.
+
+    Results containing sympy-only objects (``Heaviside``, unevaluated
+    ``InverseLaplaceTransform``) come back as sympy expressions because
+    symengine has no representation for them (``_to_se`` returns such
+    objects unchanged).
+    """
+    res = _sp.inverse_laplace_transform(
+        _to_sp(expr), _to_sp(s), _to_sp(t), **kwargs
+    )
+    return _to_se(res)
+
+
+# sympy-only special objects used by transient analysis. Expressions
+# containing them stay sympy-side — symengine cannot represent them.
+Heaviside = _sp.Heaviside
+DiracDelta = _sp.DiracDelta
+InverseLaplaceTransform = _sp.InverseLaplaceTransform
+
+
 class _SENativeUnsupported(Exception):
     """Internal sentinel — symengine cannot handle this solve shape.
 
@@ -353,6 +381,8 @@ def __dir__() -> list[str]:
         "simplify", "cancel", "factor", "together", "expand_log",
         "trigsimp", "fraction", "integrate", "limit", "factorial",
         "solve", "nsolve", "pprint", "lambdify",
+        "apart", "inverse_laplace_transform",
+        "Heaviside", "DiracDelta", "InverseLaplaceTransform",
         "Poly", "PolynomialError",
     }
     return sorted(set(dir(_se)) | own)

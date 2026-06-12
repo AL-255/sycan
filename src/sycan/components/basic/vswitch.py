@@ -82,7 +82,7 @@ class VSwitch(Component):
         return self.R_off + (self.R_on - self.R_off) * half_open
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode != "ac":
+        if ctx.mode not in ("ac", "tran"):
             return
         # AC small-signal: g0 between (n_plus, n_minus) plus a control
         # transconductance gm = ∂I/∂V_c · sign that maps V_c to current

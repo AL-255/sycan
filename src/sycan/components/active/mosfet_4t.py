@@ -305,7 +305,7 @@ class _MOSFET_4T(Component):
         return out
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode != "ac":
+        if ctx.mode not in ("ac", "tran"):
             return
         g_m, g_ds, g_mb = self._small_signal_params()
         s = ctx.s

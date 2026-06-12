@@ -2,8 +2,9 @@ Getting started
 ===============
 
 This page walks through installing sycan, building a circuit, and using
-the four core solvers — :func:`~sycan.solve_dc`, :func:`~sycan.solve_ac`,
-:func:`~sycan.solve_impedance`, and :func:`~sycan.solve_noise` — plus
+the five core solvers — :func:`~sycan.solve_dc`, :func:`~sycan.solve_ac`,
+:func:`~sycan.solve_transient`, :func:`~sycan.solve_impedance`, and
+:func:`~sycan.solve_noise` — plus
 the schematic renderer :func:`~sycan.autodraw`. The examples are small
 and can be pasted into a Python REPL in order.
 
@@ -135,6 +136,37 @@ small-signal transfer function:
 Pass your own ``s`` symbol if you want to share it with downstream
 analysis (e.g. polynomial filter prototypes from
 :mod:`sycan.polynomials`).
+
+Symbolic transient — :func:`~sycan.solve_transient`
+---------------------------------------------------
+
+For linear time-invariant circuits, :func:`~sycan.solve_transient`
+solves the same Laplace-domain system and inverse-transforms the
+result into an exact time-domain expression. The classic RC step
+response comes out in closed form:
+
+.. code-block:: python
+
+   from sycan import cas as cas
+   from sycan import Circuit, solve_transient
+
+   R, C, Vstep = cas.symbols("R C Vstep", positive=True)
+
+   c = Circuit("rc_step")
+   c.add_vsource("V1", "in", "0", 0,
+                 waveform="pulse", v1=0, v2=Vstep, td=0, pw=cas.oo)
+   c.add_resistor("R1", "in", "out", R)
+   c.add_capacitor("C1", "out", "0", C)
+
+   tran = solve_transient(c, outputs=["out"], simplify=True)
+   print(tran.t_solution[cas.Symbol("V(out)")])
+   # Vstep - Vstep*exp(-t/(C*R))
+
+Capacitor / inductor initial conditions are supported via the ``ic=``
+element field or a solver-time ``initial_conditions={"C1": V0}`` map;
+the raw Laplace-domain solution is always available as
+``tran.s_solution`` even when the CAS cannot close the inverse
+transform.
 
 Port impedance — :func:`~sycan.solve_impedance`
 -----------------------------------------------

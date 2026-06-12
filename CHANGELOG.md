@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Symbolic transient analysis
+- New `solve_transient(circuit, outputs=None, s=None, t=None,
+  simplify=False, initial_conditions=None, noconds=True)` solver:
+  builds the Laplace-domain MNA system in the new `mode="tran"` and
+  inverse-Laplace-transforms the selected unknowns into exact
+  time-domain expressions. Returns a `TransientResult` dataclass with
+  both `s_solution` (always available) and `t_solution` (entries the
+  CAS cannot invert are preserved as unevaluated
+  `InverseLaplaceTransform` objects). Both are exported from `sycan`.
+- `mode="tran"` stamping across components: linear dynamic elements
+  (C, L, mutual coupling, varactor, TLINE, controlled sources,
+  behavioural elements, blocks) stamp exactly as in AC; nonlinear
+  devices contribute their small-signal AC stamps (small-signal
+  transient around the operating point).
+- Source waveforms (`"sine"` / `"pulse"` / `"exp"`) stamp their
+  Laplace transforms in `tran`; a source without a waveform stamps its
+  DC `value` as a step at `t = 0` (`value/s`). New free helpers
+  `waveform_laplace(source, s)` and `waveform_time(source, t)`
+  (time helper uses `Heaviside` for delayed segments).
+- Initial conditions: `add_capacitor(..., ic=V0)` /
+  `add_inductor(..., ic=I0)` element fields plus a solver-time
+  `initial_conditions={...}` override map (overrides win; unknown
+  names or non-storage components raise `ValueError`). Capacitor
+  polarity is `v0 = V(n+) − V(n−)`; inductor current is positive
+  `n+ → n−`. Coupled inductors stamp the `−M·i_j0` cross terms.
+- SymEngine backend: `apart` / `inverse_laplace_transform` bridges
+  (results containing `Heaviside` stay sympy-side).
+- Tests under `tests/transient/`; REPL demos ("RC step response",
+  "Natural responses (ICs)"); docs in `docs/analysis.md`,
+  `sphinx/getting_started.rst`, `STRUCTURE.md`.
+
 ## [0.1.8] — 2026-05-11
 
 ### Added

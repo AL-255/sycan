@@ -81,7 +81,7 @@ class BehavioralCurrent(Component):
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode != "ac":
+        if ctx.mode not in ("ac", "tran"):
             return
         i, j = ctx.n(self.n_plus), ctx.n(self.n_minus)
         for v_sym in _node_symbols(self.expr):
@@ -164,7 +164,7 @@ class BehavioralVoltage(Component):
             ctx.A[j, aux] -= 1
             ctx.A[aux, j] -= 1
 
-        if ctx.mode == "ac":
+        if ctx.mode in ("ac", "tran"):
             # Linearise: V(+) - V(-) = sum_k (d expr / d V(k))_op · v(k).
             # The aux row is V(+) - V(-) - sum_k ... = 0 (constant op-point
             # term contributes only to the DC bias, which has been zeroed in

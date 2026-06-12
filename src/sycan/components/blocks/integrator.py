@@ -42,13 +42,13 @@ class Integrator(Component):
         self.include_noise = self._normalize_noise(self.include_noise)
 
     def aux_count(self, mode: str) -> int:
-        if mode == "ac":
+        if mode in ("ac", "tran"):
             return 1
         # Ideal integrator: open-circuit at DC. Leaky: stamps k / leak.
         return 0 if self.leak == 0 else 1
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode == "ac":
+        if ctx.mode in ("ac", "tran"):
             gain = self.k / (ctx.s + self.leak)
         else:
             if self.leak == 0:

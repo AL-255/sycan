@@ -1,6 +1,6 @@
 """MNA infrastructure: component base, stamping context, and solvers.
 
-Two analysis modes are supported:
+Three analysis modes are supported:
 
 * ``"dc"`` — steady-state operating point. Inductors short, capacitors open.
   Components with a ``stamp_nonlinear`` hook (e.g. MOSFETs in sub-threshold)
@@ -8,6 +8,12 @@ Two analysis modes are supported:
 * ``"ac"`` — small-signal frequency-domain analysis using a Laplace
   variable ``s``. Capacitors stamp admittance ``sC``; inductors stamp
   ``1/(sL)``. Source AC values override DC values.
+* ``"tran"`` — symbolic Laplace transient analysis. Linear dynamic
+  components stamp exactly as in AC; independent sources stamp the
+  Laplace transform of their waveform (a plain DC ``value`` becomes the
+  step ``value/s``); capacitor / inductor initial conditions enter as
+  right-hand-side injections. :func:`solve_transient` inverse-transforms
+  the s-domain solution into time-domain expressions.
 """
 from __future__ import annotations
 
@@ -65,10 +71,17 @@ class StampContext:
     b: cas.Matrix
     node_rows: dict[str, int]
     aux_rows: dict[str, int]
-    mode: str = "dc"  # "dc" or "ac"
-    s: Optional[cas.Expr] = None  # Laplace variable, set in AC mode
+    mode: str = "dc"  # "dc", "ac" or "tran"
+    s: Optional[cas.Expr] = None  # Laplace variable, set in AC/tran mode
     x: Optional[cas.Matrix] = None  # unknown symbols vector (set for nonlinear pass)
     residuals: Optional[list] = None  # nonlinear residuals (set for nonlinear pass)
+    # Resolved initial conditions for ``mode="tran"``: component name →
+    # capacitor voltage / inductor current at t = 0⁻. Empty otherwise.
+    initial_conditions: dict[str, cas.Expr] = field(default_factory=dict)
+
+    def ic(self, name: str) -> Optional[cas.Expr]:
+        """Initial condition for component ``name``, or ``None`` if unset."""
+        return self.initial_conditions.get(name)
 
     def n(self, node: str) -> int:
         """MNA row of a node name; ``-1`` for ground."""
@@ -195,13 +208,53 @@ class Component(ABC):
         return None
 
 
+def _resolve_initial_conditions(
+    flat: list[Component],
+    overrides: Optional[dict[str, Value]],
+) -> dict[str, cas.Expr]:
+    """Merge per-element ``ic`` fields with solver-time overrides.
+
+    Element fields (``add_capacitor(..., ic=V0)``) seed the map;
+    entries in ``overrides`` win. Override keys must name a capacitor
+    or inductor present in the flat component list — anything else
+    raises :class:`ValueError` so user mistakes surface early.
+    """
+    from sycan.components.basic.capacitor import Capacitor
+    from sycan.components.basic.inductor import Inductor
+
+    ics: dict[str, cas.Expr] = {}
+    for c in flat:
+        ic = getattr(c, "ic", None)
+        if ic is not None:
+            ics[c.name] = cas.sympify(ic)
+    if not overrides:
+        return ics
+    by_name = {c.name: c for c in flat}
+    for name, val in overrides.items():
+        comp = by_name.get(name)
+        if comp is None:
+            raise ValueError(
+                f"initial_conditions: unknown component {name!r}; "
+                f"available: {sorted(by_name)!r}"
+            )
+        if not isinstance(comp, (Capacitor, Inductor)):
+            raise ValueError(
+                f"initial_conditions: {name!r} is a "
+                f"{type(comp).__name__}; only capacitors and inductors "
+                "accept initial conditions"
+            )
+        ics[name] = cas.sympify(val)
+    return ics
+
+
 def build_mna(
     circuit: "Circuit",
     mode: str = "dc",
     s: Optional[cas.Expr] = None,
+    initial_conditions: Optional[dict[str, Value]] = None,
 ) -> tuple[cas.Matrix, cas.Matrix, cas.Matrix]:
     """Assemble the linear symbolic MNA system ``A * x = b`` for ``mode``."""
-    if mode == "ac" and s is None:
+    if mode in ("ac", "tran") and s is None:
         s = cas.Symbol("s")
 
     nodes = circuit.nodes
@@ -222,8 +275,17 @@ def build_mna(
         if isinstance(c, MutualCoupling):
             c.resolve(flat)
 
+    ics: dict[str, cas.Expr] = {}
+    if mode == "tran":
+        ics = _resolve_initial_conditions(flat, initial_conditions)
+    elif initial_conditions:
+        raise ValueError(
+            "initial_conditions are only supported with mode='tran'"
+        )
+
     ctx = StampContext(
-        A=A, b=b, node_rows=node_rows, aux_rows=aux_rows, mode=mode, s=s
+        A=A, b=b, node_rows=node_rows, aux_rows=aux_rows, mode=mode, s=s,
+        initial_conditions=ics,
     )
     for c in flat:
         c.stamp(ctx)
@@ -521,6 +583,153 @@ def solve_ac(
     return _apply_circuit_assumptions(result, circuit, assume)
 
 
+@dataclass
+class TransientResult:
+    """Result of a symbolic Laplace-domain transient analysis.
+
+    Attributes
+    ----------
+    s_solution
+        Full Laplace-domain MNA solution (every unknown), available
+        even when the inverse transform stays unevaluated.
+    t_solution
+        Time-domain expressions for the selected outputs. Entries the
+        CAS cannot invert in closed form are preserved as unevaluated
+        ``InverseLaplaceTransform`` objects rather than raised on.
+    s
+        Laplace variable used in ``s_solution``.
+    t
+        Time variable used in ``t_solution`` (positive by default,
+        so ``Heaviside(t)`` factors collapse to 1).
+    """
+
+    s_solution: dict[cas.Symbol, cas.Expr]
+    t_solution: dict[cas.Symbol, cas.Expr]
+    s: cas.Symbol
+    t: cas.Symbol
+
+
+def _inverse_laplace(
+    expr: cas.Expr,
+    s: cas.Expr,
+    t: cas.Expr,
+    noconds: bool = True,
+) -> cas.Expr:
+    """Best-effort inverse Laplace transform of one MNA solution entry.
+
+    Partial fractions (``apart``) are attempted first because they
+    dramatically improve the CAS hit rate on the rational expressions
+    LU produces; inputs ``apart`` rejects (delay factors ``exp(-s·td)``,
+    non-rational parameters) are inverted as-is. If the transform
+    cannot be closed, an unevaluated ``InverseLaplaceTransform`` is
+    returned so the caller still has the raw s-domain result.
+    """
+    if expr == 0:
+        return cas.Integer(0)
+    prepared = expr
+    try:
+        prepared = cas.apart(expr, s)
+    except Exception:
+        prepared = expr
+    try:
+        return cas.inverse_laplace_transform(prepared, s, t, noconds=noconds)
+    except Exception:
+        return cas.InverseLaplaceTransform(prepared, s, t, None)
+
+
+def solve_transient(
+    circuit: "Circuit",
+    outputs: Optional[list[Union[str, cas.Symbol]]] = None,
+    s: Optional[cas.Expr] = None,
+    t: Optional[cas.Expr] = None,
+    simplify: bool = False,
+    initial_conditions: Optional[dict[str, Value]] = None,
+    noconds: bool = True,
+) -> TransientResult:
+    """Symbolic transient analysis of an LTI circuit.
+
+    Solves the Laplace-domain MNA system in ``mode="tran"`` and
+    inverse-Laplace-transforms the selected unknowns into exact
+    time-domain expressions. In ``tran`` mode:
+
+    * Source ``waveform`` specs (``"sine"`` / ``"pulse"`` / ``"exp"``)
+      stamp their Laplace transforms; a source without a waveform
+      stamps its DC ``value`` switched on at ``t = 0`` (``value/s``).
+    * Capacitors / inductors stamp their usual ``sC`` / ``sL`` dynamic
+      terms plus initial-condition injections on the right-hand side.
+    * Nonlinear devices contribute their small-signal AC stamps only —
+      the result is a small-signal transient around the supplied
+      operating point, not a nonlinear large-signal simulation.
+
+    Parameters
+    ----------
+    circuit
+        Circuit under analysis.
+    outputs
+        Unknowns to inverse-transform. Node-name strings map to
+        ``Symbol("V(<node>)")``; symbols (e.g. ``Symbol("I(L1)")``)
+        are used directly. ``None`` transforms every unknown.
+    s, t
+        Laplace / time variables. Defaults are ``Symbol("s")`` and
+        ``Symbol("t", positive=True)``.
+    simplify
+        Apply :func:`cas.simplify` to each time-domain expression.
+    initial_conditions
+        Map of capacitor / inductor names to their t = 0⁻ voltage /
+        current. Entries override per-element ``ic`` fields. Unknown
+        names or non-storage components raise :class:`ValueError`.
+        Capacitor polarity is ``v0 = V(n_plus) - V(n_minus)``; inductor
+        current is positive flowing ``n_plus → n_minus``.
+    noconds
+        Forwarded to ``inverse_laplace_transform`` — drop convergence
+        conditions from the result (default ``True``).
+
+    Returns
+    -------
+    TransientResult
+        Both the raw s-domain solution and the time-domain expressions.
+    """
+    if s is None:
+        s = cas.Symbol("s")
+    if t is None:
+        try:
+            t = cas.Symbol("t", positive=True)
+        except TypeError:
+            # Backends without assumption support (symengine) take
+            # a bare symbol; Heaviside(t) factors then stay explicit.
+            t = cas.Symbol("t")
+
+    A, x, b = build_mna(
+        circuit, mode="tran", s=s, initial_conditions=initial_conditions
+    )
+    sol = A.LUsolve(b)
+    s_solution = {sym: expr for sym, expr in zip(x, sol)}
+
+    if outputs is None:
+        selected = list(s_solution)
+    else:
+        selected = []
+        for out in outputs:
+            sym = cas.Symbol(f"V({out})") if isinstance(out, str) else out
+            if sym not in s_solution:
+                raise ValueError(
+                    f"output {sym!r} not in solution; "
+                    f"available: {list(s_solution)!r}"
+                )
+            selected.append(sym)
+
+    t_solution: dict[cas.Symbol, cas.Expr] = {}
+    for sym in selected:
+        expr_t = _inverse_laplace(s_solution[sym], s, t, noconds=noconds)
+        if simplify:
+            expr_t = cas.simplify(expr_t)
+        t_solution[sym] = expr_t
+
+    return TransientResult(
+        s_solution=s_solution, t_solution=t_solution, s=s, t=t
+    )
+
+
 def _apply_circuit_assumptions(
     result: dict,
     circuit: "Circuit",
@@ -570,7 +779,8 @@ def solve(
     """
     if mode not in ("dc", "ac"):
         raise ValueError(
-            f"solve: mode must be 'dc' or 'ac', got {mode!r}"
+            f"solve: mode must be 'dc' or 'ac', got {mode!r}; "
+            "for time-domain analysis use solve_transient()"
         )
     if mode == "ac":
         return solve_ac(circuit, s=s, simplify=simplify, assume=assume)

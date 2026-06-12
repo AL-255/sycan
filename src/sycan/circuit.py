@@ -290,11 +290,35 @@ class Circuit:
     def add_resistor(self, name: str, n_plus: str, n_minus: str, value: Value) -> Resistor:
         return self.add(Resistor(name, n_plus, n_minus, value))  # type: ignore[return-value]
 
-    def add_inductor(self, name: str, n_plus: str, n_minus: str, value: Value) -> Inductor:
-        return self.add(Inductor(name, n_plus, n_minus, value))  # type: ignore[return-value]
+    def add_inductor(
+        self,
+        name: str,
+        n_plus: str,
+        n_minus: str,
+        value: Value,
+        ic: Optional[Value] = None,
+    ) -> Inductor:
+        """Attach a linear inductor.
 
-    def add_capacitor(self, name: str, n_plus: str, n_minus: str, value: Value) -> Capacitor:
-        return self.add(Capacitor(name, n_plus, n_minus, value))  # type: ignore[return-value]
+        ``ic`` is the optional transient initial current, positive
+        flowing ``n_plus → n_minus`` through the inductor.
+        """
+        return self.add(Inductor(name, n_plus, n_minus, value, ic=ic))  # type: ignore[return-value]
+
+    def add_capacitor(
+        self,
+        name: str,
+        n_plus: str,
+        n_minus: str,
+        value: Value,
+        ic: Optional[Value] = None,
+    ) -> Capacitor:
+        """Attach a linear capacitor.
+
+        ``ic`` is the optional transient initial voltage
+        ``v0 = V(n_plus) − V(n_minus)`` at ``t = 0⁻``.
+        """
+        return self.add(Capacitor(name, n_plus, n_minus, value, ic=ic))  # type: ignore[return-value]
 
     def add_varactor(
         self,

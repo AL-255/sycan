@@ -112,5 +112,5 @@ class TLINE(Component):
     def stamp(self, ctx: StampContext) -> None:
         if ctx.mode == "dc":
             self._stamp_dc(ctx)
-        elif ctx.mode == "ac":
+        elif ctx.mode in ("ac", "tran"):
             self._stamp_ac(ctx)

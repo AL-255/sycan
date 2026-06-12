@@ -11,9 +11,7 @@ from typing import ClassVar, Optional
 from sycan import cas as cas
 
 from sycan.mna import Component, NoiseSpec, StampContext
-from sycan.components.basic.voltage_source import (
-    _sine_laplace, _pulse_laplace, _exp_laplace,
-)
+from sycan.components.basic.voltage_source import waveform_laplace
 
 
 @dataclass
@@ -118,18 +116,16 @@ class CurrentSource(Component):
 
     def _source_value(self, ctx: StampContext) -> cas.Expr:
         wf = self.waveform
+        # Transient: Laplace transform of the waveform; a plain DC value
+        # is a step switched on at t = 0 (value/s). ``ac_value`` is an
+        # AC-phasor concept and is ignored here.
+        if ctx.mode == "tran":
+            return waveform_laplace(self, ctx.s)
         if ctx.mode == "ac":
-            if wf == "sine":
-                assert self.amplitude is not None and self.frequency is not None
-                omega = 2 * cas.pi * self.frequency
-                return _sine_laplace(ctx.s, self.amplitude, omega, self.phase)
-            if wf == "pulse":
-                assert self.v1 is not None and self.v2 is not None
-                return _pulse_laplace(ctx.s, self.v1, self.v2, self.td, self.pw)
-            if wf == "exp":
-                assert self.v1 is not None and self.v2 is not None
-                return _exp_laplace(ctx.s, self.v1, self.v2,
-                                    self.td1, self.tau1, self.td2, self.tau2)
+            # Waveform-as-AC is legacy compatibility; solve_transient()
+            # is the intended API for time-domain responses.
+            if wf is not None:
+                return waveform_laplace(self, ctx.s)
             if self.ac_value is not None:
                 return self.ac_value
         if ctx.mode == "dc" and wf in ("pulse", "exp"):

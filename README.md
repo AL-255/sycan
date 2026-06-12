@@ -5,9 +5,9 @@
 [![CI](https://github.com/AL-255/sycan/actions/workflows/ci.yml/badge.svg)](https://github.com/AL-255/sycan/actions/workflows/ci.yml) [![Pages](https://github.com/AL-255/sycan/actions/workflows/pages/pages-build-deployment/badge.svg)](https://al-255.github.io/sycan/)
 
 **SYCAN** (SYmbolic Circuit ANalysis) is a Python package for symbolic
-circuit simulation built on SymPy. It provides closed-form DC, AC, noise,
-transfer-function, pole–zero, and sensitivity analyses, plus automatic
-schematic drawing and an in-browser REPL.
+circuit simulation built on SymPy. It provides closed-form DC, AC, transient,
+noise, transfer-function, pole–zero, and sensitivity analyses, plus
+automatic schematic drawing and an in-browser REPL.
 
 ## Install
 

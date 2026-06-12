@@ -181,7 +181,7 @@ class BJT(Component):
         self._stamp_conductance(ctx, Y, p_a, p_b)
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode != "ac":
+        if ctx.mode not in ("ac", "tran"):
             return
         hp = self._hybrid_pi_params()
         c, b, e = ctx.n(self.collector), ctx.n(self.base), ctx.n(self.emitter)

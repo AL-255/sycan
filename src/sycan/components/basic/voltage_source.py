@@ -61,6 +61,59 @@ def _exp_laplace(
     return v1 / s + rise
 
 
+def waveform_laplace(source, s: cas.Expr) -> cas.Expr:
+    """Laplace transform of an independent source's transient waveform.
+
+    ``source`` is a :class:`VoltageSource` or
+    :class:`~sycan.components.basic.current_source.CurrentSource`.
+    A source without a ``waveform`` is treated as its DC ``value``
+    switched on at ``t = 0`` (a step), i.e. ``value / s``.
+    """
+    wf = source.waveform
+    if wf == "sine":
+        omega = 2 * cas.pi * source.frequency
+        return _sine_laplace(s, source.amplitude, omega, source.phase)
+    if wf == "pulse":
+        return _pulse_laplace(s, source.v1, source.v2, source.td, source.pw)
+    if wf == "exp":
+        return _exp_laplace(
+            s, source.v1, source.v2,
+            source.td1, source.tau1, source.td2, source.tau2,
+        )
+    return source.value / s
+
+
+def waveform_time(source, t: cas.Expr) -> cas.Expr:
+    """Time-domain expression of an independent source's waveform.
+
+    Delayed pulse / exponential segments are expressed with
+    ``Heaviside``. A source without a ``waveform`` returns its DC
+    ``value`` — valid for ``t > 0``, matching the step convention
+    :func:`waveform_laplace` uses for plain DC sources.
+    """
+    wf = source.waveform
+    if wf == "sine":
+        omega = 2 * cas.pi * source.frequency
+        return source.amplitude * cas.sin(omega * t + source.phase)
+    if wf == "pulse":
+        dV = source.v2 - source.v1
+        out = source.v1 + dV * cas.Heaviside(t - source.td)
+        if source.pw != cas.oo:
+            out -= dV * cas.Heaviside(t - source.td - source.pw)
+        return out
+    if wf == "exp":
+        dV = source.v2 - source.v1
+        out = source.v1 + dV * (
+            1 - cas.exp(-(t - source.td1) / source.tau1)
+        ) * cas.Heaviside(t - source.td1)
+        if source.td2 is not None and source.tau2 is not None:
+            out -= dV * (
+                1 - cas.exp(-(t - source.td2) / source.tau2)
+            ) * cas.Heaviside(t - source.td2)
+        return out
+    return source.value
+
+
 @dataclass
 class VoltageSource(Component):
     """Ideal voltage source enforcing ``V(n_plus) - V(n_minus) = value``.
@@ -163,18 +216,16 @@ class VoltageSource(Component):
 
     def _source_value(self, ctx: StampContext) -> cas.Expr:
         wf = self.waveform
+        # Transient: Laplace transform of the waveform; a plain DC value
+        # is a step switched on at t = 0 (value/s). ``ac_value`` is an
+        # AC-phasor concept and is ignored here.
+        if ctx.mode == "tran":
+            return waveform_laplace(self, ctx.s)
         if ctx.mode == "ac":
-            if wf == "sine":
-                assert self.amplitude is not None and self.frequency is not None
-                omega = 2 * cas.pi * self.frequency
-                return _sine_laplace(ctx.s, self.amplitude, omega, self.phase)
-            if wf == "pulse":
-                assert self.v1 is not None and self.v2 is not None
-                return _pulse_laplace(ctx.s, self.v1, self.v2, self.td, self.pw)
-            if wf == "exp":
-                assert self.v1 is not None and self.v2 is not None
-                return _exp_laplace(ctx.s, self.v1, self.v2,
-                                    self.td1, self.tau1, self.td2, self.tau2)
+            # Waveform-as-AC is legacy compatibility; solve_transient()
+            # is the intended API for time-domain responses.
+            if wf is not None:
+                return waveform_laplace(self, ctx.s)
             if self.ac_value is not None:
                 return self.ac_value
         # DC: for pulsed waveforms v1 is the DC level; otherwise use value.

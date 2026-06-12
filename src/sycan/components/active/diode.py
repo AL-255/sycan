@@ -89,7 +89,7 @@ class Diode(Component):
         return out
 
     def stamp(self, ctx: StampContext) -> None:
-        if ctx.mode != "ac":
+        if ctx.mode not in ("ac", "tran"):
             return
         g_d = self._small_signal_gd()
         a, k = ctx.n(self.anode), ctx.n(self.cathode)
