@@ -79,6 +79,10 @@ interface Part {
   x: number;
   y: number;
   rot: number;
+  // Horizontal mirror, applied about the part's own axis BEFORE
+  // rotation (KiCad convention). Terminals, bbox and the glyph all
+  // mirror together; world-space labels stay readable.
+  flip?: boolean;
   value?: string;
   ctrlSrc?: string;   // current-controlled sources only
   // Free-form trailing-token string for devices whose SPICE syntax
@@ -270,6 +274,7 @@ interface ClipboardData {
     dx: number;
     dy: number;
     rot: number;
+    flip?: boolean;
     value?: string;
     ctrlSrc?: string;
     params?: string;
@@ -805,7 +810,9 @@ function partTerminals(p: Part): PartTerminal[] {
   if (!t) return [];
   return t.ports.map(port => ({
     name: port.name,
-    pos: rotateLocal(port.pos, p.rot, p.x, p.y),
+    pos: rotateLocal(
+      p.flip ? [-port.pos[0], port.pos[1]] : port.pos,
+      p.rot, p.x, p.y),
   }));
 }
 
@@ -850,6 +857,10 @@ function partBBox(p: Part): [number, number, number, number] {
   // Slack for hit-testing.
   l -= 2; r += 2; top -= 2; b += 2;
 
+  // Horizontal mirror (about the part's own axis) before rotation —
+  // matches drawPart's `scale(-1,1)` and partTerminals.
+  if (p.flip) { const nl = -r; r = -l; l = nl; }
+
   // Now rotate corners and pick world extrema.
   const corners: Point[] = [[l, top], [r, top], [r, b], [l, b]];
   let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
@@ -876,7 +887,8 @@ function partBBox(p: Part): [number, number, number, number] {
 function drawPart(p: Part, opts: DrawPartOpts = {}): SVGGElement {
   const t = ELEM_TYPES[p.type];
   const g = el('g', {
-    transform: `translate(${p.x},${p.y}) rotate(${p.rot})`,
+    transform: `translate(${p.x},${p.y}) rotate(${p.rot})` +
+               (p.flip ? ' scale(-1,1)' : ''),
     'data-id': p.id,
   }) as SVGGElement;
 

@@ -118,6 +118,31 @@ Tests: commands.test.mjs (30) — suite now 148 assertions / 9 files.
 Carried forward: full 20×20 part-glyph redraw; menu translucency
 during entrance animation is cosmetic-only (screenshot artifact).
 
+## Iteration 3 — DONE
+
+Shipped: flip/mirror (Y, KiCad own-axis convention, carried through
+clipboard/duplicate/serialization); standalone SVG export + 2x PNG
+clipboard copy (token values inlined, editor layers stripped, tight
+viewBox); proactive ERC (floating terminals, dangling wire ends,
+missing ground) with offset map-pin badges + leader lines, clickable
+zoom-to-finding, status-bar counter that cycles findings; wire-draft
+power keys (Backspace pops corner, Enter finishes, / flips posture);
+zoom-adaptive grid (pitch doubles below 14px screen spacing,
+screen-constant marks, toggle persisted); collapsible side-panel
+sections (persisted); undoable Clear via action toast (no confirm());
+toolbar IA (drag toggles into gear popover with descriptive labels,
+Analyze group: Calc arm + Matrix, Clear moved to the end); audit
+fixes (dead legacy matrix-button CSS removed, deterministic two-row
+toolbar kills the orphan wrap divider, dark elevation tokens
+--overlay-line/--shadow-1..3, ctx-sep contrast, palette group-tag
+noise removed, cmdk active row unified on accent, Highlight icon
+tracks --highlight).
+Tests: features3.test.mjs (17) — suite 165 assertions / 10 files.
+
+Carried forward: full 20x20 part-glyph redraw; ERC name-collision
+check; keyboard-invoked context menu (Menu key); picker chevron
+hardcodes one gray for both themes.
+
 ## Next iterations
 
 ### First-solve loading state for Pyodide (~10-20s currently looks frozen)

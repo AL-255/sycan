@@ -547,6 +547,9 @@ function render(): void {
   // Layer 3: node dots at junctions where >=3 endpoints meet
   drawJunctions();
 
+  // Layer 3.4: ERC badges (above junctions, below selection UI).
+  drawErcMarkers();
+
   // Layer 3.5: live box-select rectangle
   if (state.boxSelect) {
     const b = state.boxSelect;
@@ -669,21 +672,38 @@ function updateStatusBar(): void {
   }
 }
 
+const GRID_VISIBLE_KEY = 'sycan.sedra.grid.v1';
+let gridVisible = true;
+try { gridVisible = localStorage.getItem(GRID_VISIBLE_KEY) !== '0'; } catch (_) { /* ok */ }
+
+function toggleGrid(): void {
+  gridVisible = !gridVisible;
+  try { localStorage.setItem(GRID_VISIBLE_KEY, gridVisible ? '1' : '0'); } catch (_) { /* ok */ }
+  render();
+  flashHint(gridVisible ? 'Grid shown' : 'Grid hidden');
+}
+
 function drawGrid(): void {
+  if (!gridVisible) return;
   const W = wrap.clientWidth, H = wrap.clientHeight;
   const x0 = -state.pan.x / state.zoom;
   const y0 = -state.pan.y / state.zoom;
   const x1 = x0 + W / state.zoom;
   const y1 = y0 + H / state.zoom;
-  const gx0 = Math.floor(x0 / GRID) * GRID;
-  const gy0 = Math.floor(y0 / GRID) * GRID;
-  // Use a single <path> of small "+" marks for crisp dots at any zoom.
+  // Zoom-adaptive pitch: skip grid points so marks never pack tighter
+  // than ~14 screen px (KiCad's adaptive grid). Steps double: 1,2,4,8…
+  let step = GRID;
+  while (step * state.zoom < 14) step *= 2;
+  const gx0 = Math.floor(x0 / step) * step;
+  const gy0 = Math.floor(y0 / step) * step;
+  if ((x1 - x0) / step > 600) return;   // hard cap
+  // Constant *screen-size* marks: half-extent of the "+" is 1.25
+  // screen px regardless of zoom.
+  const m = 1.25 / state.zoom;
   let d = '';
-  // Cap density at ridiculous zoom-outs.
-  if ((x1 - x0) / GRID > 600) return;
-  for (let y = gy0; y <= y1; y += GRID) {
-    for (let x = gx0; x <= x1; x += GRID) {
-      d += `M${x - 1},${y} h2 M${x},${y - 1} v2 `;
+  for (let y = gy0; y <= y1; y += step) {
+    for (let x = gx0; x <= x1; x += step) {
+      d += `M${x - m},${y} h${2 * m} M${x},${y - m} v${2 * m} `;
     }
   }
   el('path', {
@@ -691,7 +711,9 @@ function drawGrid(): void {
     fill: 'none',
     stroke: 'var(--grid)',
     'stroke-width': 1,
+    'vector-effect': 'non-scaling-stroke',
     'stroke-linecap': 'butt',
+    'data-layer': 'grid',
   }, svg);
 }
 
@@ -2923,6 +2945,15 @@ function expandSelectionToNet(wireId: string): void {
   render();
 }
 
+function flipSelection(): void {
+  let did = false;
+  for (const id of state.selectedIds) {
+    const pp = state.parts.find(x => x.id === id);
+    if (pp) { pp.flip = !pp.flip || undefined; did = true; }
+  }
+  if (did) { pushHistory(); render(); }
+}
+
 function rotateSelection(): void {
   let did = false;
   for (const id of state.selectedIds) {
@@ -2980,6 +3011,11 @@ const COMMANDS: Command[] = [
     menu: { section: 'part', order: 20 },
     enabled: () => [...state.selectedIds].some(id => state.parts.some(pp => pp.id === id)),
     run: () => rotateSelection() },
+  { id: 'edit.flip', title: 'Flip horizontally', group: 'Edit', shortcut: 'Y',
+    cheat: true,
+    menu: { section: 'part', order: 25 },
+    enabled: () => [...state.selectedIds].some(id => state.parts.some(pp => pp.id === id)),
+    run: () => flipSelection() },
   { id: 'edit.duplicate', title: () => `Duplicate${countSuffix()}`, group: 'Edit',
     shortcut: 'Ctrl+D', cheat: true,
     menu: { section: 'net', order: 30 },
@@ -3070,6 +3106,10 @@ const COMMANDS: Command[] = [
     run: () => setZoom(state.zoom * ZOOM_STEP) },
   { id: 'view.zoomOut', title: 'Zoom out', group: 'View', shortcut: 'Ctrl+-',
     run: () => setZoom(state.zoom / ZOOM_STEP) },
+  { id: 'view.toggleGrid', title: 'Toggle grid', group: 'View',
+    run: () => toggleGrid() },
+  { id: 'view.toggleErc', title: 'Toggle ERC markers', group: 'View',
+    run: () => toggleErc() },
   { id: 'view.matrix', title: 'MNA matrix viewer', group: 'View',
     run: () => (document.getElementById('btn-matrix') as HTMLButtonElement).click() },
   { id: 'view.cheatsheet', title: 'Keyboard shortcuts', group: 'View', shortcut: '?',
@@ -3077,6 +3117,13 @@ const COMMANDS: Command[] = [
   { id: 'view.palette', title: 'Command palette', group: 'View', shortcut: 'Ctrl+K',
     cheat: true, palette: false,
     run: () => toggleCmdPalette() },
+  { id: 'file.exportSvg', title: 'Export schematic SVG', group: 'File',
+    menu: { section: 'canvas', order: 50 },
+    enabled: () => state.parts.length > 0 || state.wires.length > 0,
+    run: () => downloadSchematicSvg() },
+  { id: 'file.copyPng', title: 'Copy schematic as PNG', group: 'File',
+    enabled: () => state.parts.length > 0 || state.wires.length > 0,
+    run: () => { void copySchematicPng(); } },
   { id: 'file.copyNetlist', title: 'Copy netlist', group: 'File',
     run: () => (document.getElementById('btn-copy') as HTMLButtonElement).click() },
   { id: 'file.exportJson', title: 'Export JSON', group: 'File',
@@ -3376,18 +3423,23 @@ function toggleCmdPalette(): void {
     }
   };
 
-  const makeRow = (cmd: Command, titleHtml: string): HTMLElement => {
+  const makeRow = (cmd: Command, titleHtml: string,
+                   showGroup: boolean): HTMLElement => {
     const item = document.createElement('div');
     item.className = 'cmdk-item' + (cmd.danger ? ' danger' : '');
     item.setAttribute('role', 'option');
     const title = document.createElement('span');
     title.className = 'cmdk-title';
     title.innerHTML = titleHtml;
-    const group = document.createElement('span');
-    group.className = 'cmdk-group';
-    group.textContent = cmd.group;
     item.appendChild(title);
-    item.appendChild(group);
+    if (showGroup) {
+      // Group tag is useful in flat/mixed lists (search, Recent) but
+      // redundant noise under a same-group caption.
+      const group = document.createElement('span');
+      group.className = 'cmdk-group';
+      group.textContent = cmd.group;
+      item.appendChild(group);
+    }
     if (cmd.shortcut) {
       const keys = document.createElement('span');
       keys.className = 'ctx-keys';
@@ -3425,7 +3477,7 @@ function toggleCmdPalette(): void {
         cap.textContent = 'Recent';
         list.appendChild(cap);
         for (const cmd of recentCmds) {
-          const el = makeRow(cmd, escapeHtmlLocal(cmdTitle(cmd, ctx)));
+          const el = makeRow(cmd, escapeHtmlLocal(cmdTitle(cmd, ctx)), true);
           list.appendChild(el);
           entries.push({ cmd, el });
         }
@@ -3438,7 +3490,7 @@ function toggleCmdPalette(): void {
         cap.textContent = groupName;
         list.appendChild(cap);
         for (const cmd of cmds) {
-          const el = makeRow(cmd, escapeHtmlLocal(cmdTitle(cmd, ctx)));
+          const el = makeRow(cmd, escapeHtmlLocal(cmdTitle(cmd, ctx)), false);
           list.appendChild(el);
           entries.push({ cmd, el });
         }
@@ -3461,7 +3513,7 @@ function toggleCmdPalette(): void {
           const c = escapeHtmlLocal(title[ix]);
           html += marks.has(ix) ? `<b>${c}</b>` : c;
         }
-        const el = makeRow(cmd, html);
+        const el = makeRow(cmd, html, true);
         list.appendChild(el);
         entries.push({ cmd, el });
       }
@@ -4184,6 +4236,326 @@ function flashHint(msg: string): void {
 }
 
 // ------------------------------------------------------------------
+// Proactive ERC: lightweight electrical-rule lint recomputed on every
+// committed edit (pushHistory). Findings render as clickable canvas
+// badges plus a status-bar counter that cycles through them.
+// ------------------------------------------------------------------
+interface ErcFinding {
+  level: 'warn' | 'error';
+  msg: string;
+  at: Point;
+  ids: string[];
+}
+
+const ERC_VISIBLE_KEY = 'sycan.sedra.erc.v1';
+let ercVisible = true;
+try { ercVisible = localStorage.getItem(ERC_VISIBLE_KEY) !== '0'; } catch (_) { /* ok */ }
+let ercCache: ErcFinding[] = [];
+let ercCycle = 0;
+
+function toggleErc(): void {
+  ercVisible = !ercVisible;
+  try { localStorage.setItem(ERC_VISIBLE_KEY, ercVisible ? '1' : '0'); } catch (_) { /* ok */ }
+  refreshErc();
+  render();
+  flashHint(ercVisible ? 'ERC markers shown' : 'ERC markers hidden');
+}
+
+function ercFindings(): ErcFinding[] {
+  const out: ErcFinding[] = [];
+  if (!state.parts.length && !state.wires.length) return out;
+
+  // Occupancy maps: wire endpoint/body points and terminal points.
+  const wirePoint = new Map<string, string[]>();   // grid key -> wire ids
+  for (const w of state.wires) {
+    if (w.bad || w.points.length < 2) continue;
+    for (const pt of w.points) {
+      const k = `${pt[0]},${pt[1]}`;
+      const list = wirePoint.get(k) ?? [];
+      list.push(w.id);
+      wirePoint.set(k, list);
+    }
+    // Mid-segment coverage at grid pitch (terminals can tap segments).
+    for (let i = 0; i < w.points.length - 1; i++) {
+      const a = w.points[i], b = w.points[i + 1];
+      if (a[0] === b[0]) {
+        const lo = Math.min(a[1], b[1]), hi = Math.max(a[1], b[1]);
+        for (let y = lo; y <= hi; y += GRID) {
+          const k = `${a[0]},${y}`;
+          const list = wirePoint.get(k) ?? [];
+          if (!list.includes(w.id)) list.push(w.id);
+          wirePoint.set(k, list);
+        }
+      } else if (a[1] === b[1]) {
+        const lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]);
+        for (let x = lo; x <= hi; x += GRID) {
+          const k = `${x},${a[1]}`;
+          const list = wirePoint.get(k) ?? [];
+          if (!list.includes(w.id)) list.push(w.id);
+          wirePoint.set(k, list);
+        }
+      }
+    }
+  }
+  const termPoint = new Map<string, string[]>();
+  for (const pp of state.parts) {
+    for (const term of partTerminals(pp)) {
+      const k = `${term.pos[0]},${term.pos[1]}`;
+      const list = termPoint.get(k) ?? [];
+      list.push(pp.id);
+      termPoint.set(k, list);
+    }
+  }
+
+  // 1. Floating part terminals: no wire and no coincident terminal.
+  for (const pp of state.parts) {
+    if (pp.type === 'gnd') continue;
+    for (const term of partTerminals(pp)) {
+      const k = `${term.pos[0]},${term.pos[1]}`;
+      const wires = wirePoint.get(k) ?? [];
+      const terms = termPoint.get(k) ?? [];
+      if (!wires.length && terms.length <= 1) {
+        out.push({ level: 'warn',
+                   msg: `${pp.id}: unconnected terminal (${term.name})`,
+                   at: term.pos, ids: [pp.id] });
+      }
+    }
+  }
+
+  // 2. Dangling wire endpoints (free ends that touch nothing).
+  for (const w of state.wires) {
+    if (w.bad || w.points.length < 2) continue;
+    for (const idx of [0, w.points.length - 1]) {
+      const pt = w.points[idx];
+      const k = `${pt[0]},${pt[1]}`;
+      const wires = wirePoint.get(k) ?? [];
+      const terms = termPoint.get(k) ?? [];
+      if (wires.length <= 1 && !terms.length) {
+        out.push({ level: 'warn',
+                   msg: `${w.id}: dangling wire end`,
+                   at: pt, ids: [w.id] });
+      }
+    }
+  }
+
+  // 3. Missing ground reference.
+  if (state.parts.length && !state.parts.some(pp => pp.type === 'gnd')) {
+    const first = state.parts[0];
+    const [bx0, by0] = partBBox(first);
+    out.push({ level: 'error',
+               msg: 'No ground reference (add a GND part)',
+               at: [bx0, by0], ids: [first.id] });
+  }
+
+  return out;
+}
+
+function refreshErc(): void {
+  ercCache = ercVisible ? ercFindings() : [];
+  const zone = document.getElementById('sb-erc');
+  if (!zone) return;
+  if (!ercCache.length) {
+    zone.classList.add('hidden');
+    return;
+  }
+  const errors = ercCache.filter(f => f.level === 'error').length;
+  const warns = ercCache.length - errors;
+  const frags: string[] = [];
+  if (errors) frags.push(`${errors} error${errors === 1 ? '' : 's'}`);
+  if (warns) frags.push(`${warns} warning${warns === 1 ? '' : 's'}`);
+  zone.textContent = `⚠ ${frags.join(', ')}`;
+  zone.classList.toggle('erc-errors', errors > 0);
+  zone.classList.remove('hidden');
+}
+
+function focusErcFinding(f: ErcFinding): void {
+  state.selectedIds = new Set(f.ids);
+  state.selectedSegments.clear();
+  for (const id of f.ids) {
+    if (state.wires.some(w => w.id === id)) selectWholeWire(id);
+  }
+  refreshProps();
+  zoomToSelection();
+  flashHint(f.msg);
+}
+
+function drawErcMarkers(): void {
+  if (!ercVisible || !ercCache.length) return;
+  ercCache.forEach((f, idx) => {
+    const g = el('g', {
+      class: `erc-marker${f.level === 'error' ? ' erc-error' : ''}`,
+      'data-erc': String(idx),
+    }, svg) as SVGGElement;
+    // Badge floats up-right of the problem point (screen-constant
+    // offset) so the underlying terminal / part stays clickable; a
+    // hairline leader ties it back to the exact spot.
+    const off = 14 / state.zoom;
+    const r = 7 / state.zoom;
+    const bx = f.at[0] + off, by = f.at[1] - off;
+    el('path', {
+      d: `M${f.at[0]},${f.at[1]} L${bx},${by}`,
+      stroke: 'currentColor', 'stroke-width': 1, opacity: 0.5,
+      'vector-effect': 'non-scaling-stroke', fill: 'none',
+      'pointer-events': 'none',
+    }, g);
+    el('circle', { cx: bx, cy: by, r }, g);
+    el('text', { x: bx, y: by + 0.5 }, g).textContent = '!';
+    g.addEventListener('mousedown', (ev: Event) => {
+      ev.stopPropagation();
+      focusErcFinding(f);
+    });
+  });
+}
+
+// ------------------------------------------------------------------
+// Schematic export: standalone SVG download + 2x PNG to clipboard.
+//
+// The live canvas SVG is re-rendered with every interaction layer
+// suppressed (selection, hover, crosshair, marquee), cloned, stripped
+// of editor-only nodes, given a tight viewBox, and equipped with a
+// <style> block whose token values are resolved from the current
+// theme — the exported file must stand alone without the app's CSS.
+// ------------------------------------------------------------------
+
+function schematicBBox(): [number, number, number, number] | null {
+  if (!state.parts.length && !state.wires.length) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const pp of state.parts) {
+    const [a, b, c, d] = partBBox(pp);
+    x0 = Math.min(x0, a); y0 = Math.min(y0, b);
+    x1 = Math.max(x1, c); y1 = Math.max(y1, d);
+  }
+  for (const w of state.wires) {
+    for (const [x, y] of w.points) {
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    }
+  }
+  // Room for the name/value labels hanging off the right edge.
+  return [x0 - 20, y0 - 20, x1 + 90, y1 + 20];
+}
+
+function exportSchematicSvg(): string | null {
+  const bbox = schematicBBox();
+  if (!bbox) return null;
+
+  // Re-render with interaction layers suppressed.
+  const savedSel = state.selectedIds;
+  const savedSegs = state.selectedSegments;
+  const savedCursor = state.cursorInside;
+  const savedHover = hoverTarget;
+  const savedBox = state.boxSelect;
+  state.selectedIds = new Set();
+  state.selectedSegments = new Set();
+  state.cursorInside = false;
+  hoverTarget = null;
+  state.boxSelect = null;
+  render();
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  state.selectedIds = savedSel;
+  state.selectedSegments = savedSegs;
+  state.cursorInside = savedCursor;
+  hoverTarget = savedHover;
+  state.boxSelect = savedBox;
+  render();
+
+  // Strip editor-only layers.
+  clone.querySelector('#hit-layer')?.remove();
+  clone.querySelectorAll('[data-layer="grid"]').forEach(n => n.remove());
+
+  const [x0, y0, x1, y1] = bbox;
+  clone.setAttribute('viewBox', `${x0} ${y0} ${x1 - x0} ${y1 - y0}`);
+  clone.setAttribute('width', String(x1 - x0));
+  clone.setAttribute('height', String(y1 - y0));
+  clone.removeAttribute('style');
+
+  // Inline the theme tokens the SVG classes reference.
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) =>
+    (cs.getPropertyValue(name) || fallback).trim() || fallback;
+  const stroke = v('--stroke', '#1b1b1f');
+  const bg = v('--surface-0', '#ffffff');
+  const mono = v('--font-mono', 'monospace');
+  const ui = v('--font-ui', 'sans-serif');
+  const style = document.createElementNS(SVGNS, 'style');
+  style.textContent = `
+    svg { background: ${bg}; }
+    .wire { fill: none; stroke: ${stroke}; stroke-width: 1.8;
+            stroke-linecap: round; stroke-linejoin: round; }
+    .wire-bad { stroke: ${v('--error', '#d24343')}; stroke-dasharray: 6 3; }
+    .glyph { color: ${stroke}; }
+    .part-body { fill: none; stroke: ${stroke}; stroke-width: 1.6;
+                 stroke-linecap: round; stroke-linejoin: round; }
+    .part-fill { fill: ${bg}; stroke: ${stroke}; stroke-width: 1.6; }
+    .part-text { fill: ${stroke}; font-size: 11px; font-family: ${mono}; }
+    .part-name { fill: ${stroke}; font-size: 11px; font-weight: 600;
+                 font-family: ${ui}; }
+    .terminal { fill: ${v('--terminal', '#44444a')}; stroke: none; }
+    .node-dot { fill: ${stroke}; stroke: none; }
+    .net-label-text { fill: ${stroke}; font-size: 11px; font-weight: 600;
+                      font-family: ${mono}; }
+    .net-label-bg { fill: ${bg}; stroke: ${stroke}; stroke-width: 1; }
+  `;
+  clone.insertBefore(style, clone.firstChild);
+  // Opaque background rect so PNG rasterisation isn't transparent.
+  const bgRect = document.createElementNS(SVGNS, 'rect');
+  bgRect.setAttribute('x', String(x0));
+  bgRect.setAttribute('y', String(y0));
+  bgRect.setAttribute('width', String(x1 - x0));
+  bgRect.setAttribute('height', String(y1 - y0));
+  bgRect.setAttribute('fill', bg);
+  clone.insertBefore(bgRect, style.nextSibling);
+
+  return new XMLSerializer().serializeToString(clone);
+}
+
+function downloadSchematicSvg(): void {
+  const markup = exportSchematicSvg();
+  if (!markup) { flashHint('Nothing to export — the canvas is empty'); return; }
+  const blob = new Blob([markup], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sedra-schematic.svg';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  flashHint('Exported sedra-schematic.svg');
+}
+
+async function copySchematicPng(): Promise<void> {
+  const markup = exportSchematicSvg();
+  if (!markup) { flashHint('Nothing to export — the canvas is empty'); return; }
+  const bbox = schematicBBox()!;
+  const w = (bbox[2] - bbox[0]) * 2, h = (bbox[3] - bbox[1]) * 2;
+  const img = new Image();
+  const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml' }));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('SVG rasterisation failed'));
+      img.src = url;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const g2d = canvas.getContext('2d')!;
+    g2d.drawImage(img, 0, 0, w, h);
+    const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'));
+    if (!blob) throw new Error('PNG encode failed');
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    notify('Schematic PNG copied to clipboard (2×)', 'info');
+  } catch (err) {
+    // Clipboard write needs a secure context / permission — fall back
+    // to a download so the action never dead-ends.
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sedra-schematic.svg';
+    a.click();
+    notify('Clipboard unavailable — downloaded SVG instead', 'warn');
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+}
+
+// ------------------------------------------------------------------
 // Async affordance helpers: staged progress bars + busy buttons.
 // ------------------------------------------------------------------
 
@@ -4234,7 +4606,8 @@ function refreshClearAllButton(): void {
   btn.hidden = stack.children.length === 0;
 }
 
-function notify(msg: string, level: NotifyLevel = 'info'): HTMLElement {
+function notify(msg: string, level: NotifyLevel = 'info',
+                action?: { label: string; fn: () => void }): HTMLElement {
   const stack = document.getElementById('notifications')!;
   const el = document.createElement('div');
   el.className = `notification notification-${level}`;
@@ -4249,8 +4622,17 @@ function notify(msg: string, level: NotifyLevel = 'info'): HTMLElement {
     refreshClearAllButton();
   };
 
+  if (action) {
+    const btn = document.createElement('button');
+    btn.className = 'notification-action';
+    btn.type = 'button';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => { dismiss(); action.fn(); });
+    el.appendChild(btn);
+  }
+
   if (level === 'info') {
-    window.setTimeout(dismiss, INFO_AUTO_DISMISS_MS);
+    window.setTimeout(dismiss, action ? 6000 : INFO_AUTO_DISMISS_MS);
   } else {
     const close = document.createElement('button');
     close.className = 'notification-close';
@@ -4336,6 +4718,7 @@ function pushHistory(): void {
   if (editHistory.length > HISTORY_LIMIT) editHistory.shift();
   historyIdx = editHistory.length - 1;
   updateUndoRedoButtons();
+  refreshErc();
 }
 
 function restore(idx: number): boolean {
@@ -4383,21 +4766,94 @@ btnRedo.addEventListener('click', () => {
 });
 
 document.getElementById('btn-clear')!.addEventListener('click', () => {
-  if (state.parts.length === 0 && state.wires.length === 0) return;
-  if (!confirm('Clear all parts and wires?')) return;
+  const n = state.parts.length + state.wires.length;
+  if (n === 0) return;
   state.parts = [];
   state.wires = [];
   state.nameCounters = {};
   state.selectedIds.clear();
+  state.selectedSegments.clear();
   state.wireDraft = null;
   pushHistory();
   refreshProps();
   render();
+  // No blocking confirm() — clearing is immediately undoable, and the
+  // toast carries the undo affordance (Linear/Figma convention).
+  notify(`Cleared ${n} item${n === 1 ? '' : 's'}`, 'info', {
+    label: 'Undo',
+    fn: () => (document.getElementById('btn-undo') as HTMLButtonElement).click(),
+  });
 });
 
 document.getElementById('btn-fit')!.addEventListener('click', fitView);
 
 document.getElementById('sb-grid')!.textContent = `Grid ${GRID}`;
+
+// Drag-options gear popover.
+{
+  const gear = document.getElementById('btn-drag-options') as HTMLButtonElement;
+  const pop = document.getElementById('drag-options-pop') as HTMLElement;
+  const closePop = () => {
+    pop.hidden = true;
+    gear.setAttribute('aria-expanded', 'false');
+    gear.classList.remove('active');
+  };
+  gear.addEventListener('click', () => {
+    if (!pop.hidden) { closePop(); return; }
+    const r = gear.getBoundingClientRect();
+    pop.style.left = `${r.left}px`;
+    pop.style.top = `${r.bottom + 4}px`;
+    pop.hidden = false;
+    gear.setAttribute('aria-expanded', 'true');
+    gear.classList.add('active');
+  });
+  document.addEventListener('mousedown', (e: MouseEvent) => {
+    if (!pop.hidden && !pop.contains(e.target as Node)
+        && e.target !== gear && !gear.contains(e.target as Node)) {
+      closePop();
+    }
+  }, true);
+}
+
+// Collapsible side-panel sections, persisted per heading.
+{
+  const PANE_KEY = 'sycan.sedra.panes.v1';
+  let collapsed: Record<string, boolean> = {};
+  try { collapsed = JSON.parse(localStorage.getItem(PANE_KEY) || '{}'); }
+  catch (_) { /* fresh */ }
+  const headers = document.querySelectorAll<HTMLElement>('#side h3');
+  headers.forEach(h3 => {
+    const pane = h3.nextElementSibling as HTMLElement | null;
+    if (!pane) return;
+    const key = (h3.textContent || '').trim();
+    const apply = () => {
+      const isCollapsed = !!collapsed[key];
+      h3.classList.toggle('collapsed', isCollapsed);
+      pane.style.display = isCollapsed ? 'none' : '';
+    };
+    apply();
+    h3.addEventListener('click', () => {
+      collapsed[key] = !collapsed[key];
+      try { localStorage.setItem(PANE_KEY, JSON.stringify(collapsed)); }
+      catch (_) { /* full */ }
+      apply();
+    });
+  });
+}
+
+// ERC status-bar zone cycles through findings.
+document.getElementById('sb-erc')!.addEventListener('click', () => {
+  if (!ercCache.length) return;
+  const f = ercCache[ercCycle % ercCache.length];
+  ercCycle++;
+  focusErcFinding(f);
+});
+
+// Toolbar Calc-arm button mirrors the side-panel Calc Node button.
+document.getElementById('btn-calc-arm')!.addEventListener('click', () => {
+  if (state.calcNode.armed) cancelCalcNodePick();
+  else startCalcNodePick();
+});
 document.getElementById('sb-zoom-in')!.addEventListener('click', (e: Event) => {
   setZoom(state.zoom * ZOOM_STEP);
   (e.currentTarget as HTMLElement).blur();   // keep Space = rotate
@@ -4580,6 +5036,51 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
       updateMove([dx, dy]);
       commitMove();
     }
+    e.preventDefault();
+    return;
+  }
+
+  // Wire-draft power keys: Backspace pops the last corner, Enter
+  // finishes, '/' flips the preview's first-leg posture.
+  if (state.wireDraft) {
+    if (e.key === 'Backspace') {
+      const wd = state.wireDraft;
+      // Pop back to the previous click point: corners were added in
+      // L-pairs, so strip trailing collinear corners with the click.
+      if (wd.points.length <= 1) {
+        state.wireDraft = null;
+        refreshHint();
+      } else {
+        wd.points.pop();
+        // Drop a remaining auto-inserted L corner if present.
+        const last = wd.points[wd.points.length - 1];
+        const prev = wd.points[wd.points.length - 2];
+        if (prev && last && (prev[0] === last[0] || prev[1] === last[1])
+            && wd.points.length >= 2 && (wd.points.length % 2 === 0)) {
+          // best-effort; canonicalize cleans any leftovers on commit
+        }
+      }
+      render();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Enter') {
+      finalizeWireDraft();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === '/') {
+      state.wireDraft.axisFirst =
+        state.wireDraft.axisFirst === 'h' ? 'v' : 'h';
+      render();
+      e.preventDefault();
+      return;
+    }
+  }
+
+  // 'Y' flips (mirrors) the selected parts about their own axis.
+  if (k === 'y' && !e.altKey && state.selectedIds.size && !state.moveDraft) {
+    flipSelection();
     e.preventDefault();
     return;
   }
@@ -4802,7 +5303,8 @@ function finalizeCopyAnchor(anchor: Point): void {
   clipboard = {
     parts: selParts.map(p => ({
       type: p.type, dx: p.x - anchor[0], dy: p.y - anchor[1],
-      rot: p.rot, value: p.value, ctrlSrc: p.ctrlSrc, params: p.params,
+      rot: p.rot, flip: p.flip, value: p.value, ctrlSrc: p.ctrlSrc,
+      params: p.params,
     })),
     wires: selWires.map(w => ({
       points: w.points.map(([x, y]) => [x - anchor[0], y - anchor[1]] as Point),
@@ -4858,6 +5360,7 @@ function pasteClipboard(at?: Point): void {
     addPart(c.type, anchor[0] + c.dx, anchor[1] + c.dy, c.rot);
     const fresh = state.parts[state.parts.length - 1];
     if (c.value && c.type !== 'gnd') fresh.value = c.value;
+    if (c.flip) fresh.flip = true;
     if (c.ctrlSrc) fresh.ctrlSrc = c.ctrlSrc;
     if (c.params) fresh.params = c.params;
     newIds.add(fresh.id);
@@ -5523,6 +6026,7 @@ function startCalcNodePick(): void {
   if (state.copyAnchorPending) cancelCopyAnchor();
   state.calcNode.armed = true;
   calcBtn.classList.add('armed');
+  document.getElementById('btn-calc-arm')?.classList.add('active');
   wrap.classList.add('picking-node');
   calcLog('Pick a net…');
   refreshHint();
@@ -5533,6 +6037,7 @@ function cancelCalcNodePick(): void {
   if (!state.calcNode.armed) return;
   state.calcNode.armed = false;
   calcBtn.classList.remove('armed');
+  document.getElementById('btn-calc-arm')?.classList.remove('active');
   wrap.classList.remove('picking-node');
   calcLog('');
   refreshHint();

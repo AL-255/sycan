@@ -472,7 +472,7 @@ function partTerminals(p) {
         return [];
     return t.ports.map(port => ({
         name: port.name,
-        pos: rotateLocal(port.pos, p.rot, p.x, p.y),
+        pos: rotateLocal(p.flip ? [-port.pos[0], port.pos[1]] : port.pos, p.rot, p.x, p.y),
     }));
 }
 // World-space bounding box. We union the glyph viewBox (mapped to
@@ -522,6 +522,13 @@ function partBBox(p) {
     r += 2;
     top -= 2;
     b += 2;
+    // Horizontal mirror (about the part's own axis) before rotation —
+    // matches drawPart's `scale(-1,1)` and partTerminals.
+    if (p.flip) {
+        const nl = -r;
+        r = -l;
+        l = nl;
+    }
     // Now rotate corners and pick world extrema.
     const corners = [[l, top], [r, top], [r, b], [l, b]];
     let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
@@ -547,7 +554,8 @@ function partBBox(p) {
 function drawPart(p, opts = {}) {
     const t = ELEM_TYPES[p.type];
     const g = el('g', {
-        transform: `translate(${p.x},${p.y}) rotate(${p.rot})`,
+        transform: `translate(${p.x},${p.y}) rotate(${p.rot})` +
+            (p.flip ? ' scale(-1,1)' : ''),
         'data-id': p.id,
     });
     // 1. Glyph body. Two paths to embed inline SVG: parse the cached
