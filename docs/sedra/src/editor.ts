@@ -499,12 +499,32 @@ function render(): void {
   // Layer 2: parts
   const partsLayer = el('g', { id: 'parts-layer' }, svg);
   const hitLayer = el('g', { id: 'hit-layer' }, svg);
+  const hoverPartId = (state.tool === 'select' && !state.moveDraft
+                       && !state.boxSelect && hoverTarget
+                       && hoverTarget.kind === 'part')
+    ? hoverTarget.id : null;
   for (const p of state.parts) {
     const g = drawPart(p, {
       hitParent: hitLayer,
       selected: state.selectedIds.has(p.id),
+      hover: p.id === hoverPartId && !state.selectedIds.has(p.id),
     });
     partsLayer.appendChild(g);
+  }
+  // Hovered wire segment pre-selection wash.
+  if (state.tool === 'select' && !state.moveDraft && !state.boxSelect
+      && hoverTarget && hoverTarget.kind === 'wire'
+      && hoverTarget.segIdx !== undefined) {
+    const w = state.wires.find(x => x.id === hoverTarget!.id);
+    const i = hoverTarget.segIdx;
+    if (w && i >= 0 && i < w.points.length - 1
+        && !state.selectedSegments.has(segKey(w.id, i))) {
+      const a = w.points[i], b = w.points[i + 1];
+      el('path', {
+        d: `M${a[0]},${a[1]} L${b[0]},${b[1]}`,
+        class: 'wire-hover',
+      }, svg);
+    }
   }
 
   // Layer 2.5: highlight the most recently picked calc-node net.
@@ -534,6 +554,7 @@ function render(): void {
       fill: 'rgba(25, 118, 210, 0.08)',
       stroke: 'var(--select)', 'stroke-width': 1.2,
       'stroke-dasharray': '4 3',
+      'vector-effect': 'non-scaling-stroke',
     }, svg);
   }
 
@@ -1786,11 +1807,11 @@ function refreshHint(): void {
   } else if (state.wireDraft) {
     h = 'Wire: click to add a corner, <kbd>double-click</kbd> to finish, <kbd>Esc</kbd> to cancel.';
   } else if (t === 'select') {
-    h = 'Select: click a wire to pick a segment, <kbd>U</kbd> expands ' +
-        'to the whole net. Drag a box for multi-select. ' +
-        '<kbd>M</kbd> or drag a selected item to move. ' +
-        '<kbd>Ctrl+C</kbd>/<kbd>V</kbd> copy/paste, <kbd>Del</kbd> remove, ' +
-        '<kbd>Space</kbd> rotate, <kbd>Esc</kbd> deselect.';
+    h = 'Select: click picks, drag moves, box multi-selects. ' +
+        '<kbd>U</kbd> expand to net, <kbd>Ctrl+D</kbd> duplicate, ' +
+        'arrows nudge, <kbd>double-click</kbd> edits a value, ' +
+        '<kbd>Del</kbd> remove, <kbd>Space</kbd> rotate, ' +
+        '<kbd>Esc</kbd> deselect.';
   } else if (t === 'delete') {
     h = 'Delete: click a part or wire to remove it.';
   } else if (t === 'rotate') {
@@ -1807,8 +1828,9 @@ function refreshHint(): void {
     h = '';
   }
   hint.innerHTML = h +
-    ' &middot; <kbd>F</kbd> fit &middot; ' +
-    '<kbd>Shift</kbd>+drag pan &middot; wheel zoom.';
+    ' &middot; <kbd>?</kbd> shortcuts &middot; <kbd>F</kbd> fit &middot; ' +
+    'scroll pan &middot; <kbd>Ctrl</kbd>+scroll zoom &middot; ' +
+    'middle/right-drag pan.';
 }
 
 // ------------------------------------------------------------------
@@ -1817,6 +1839,9 @@ function refreshHint(): void {
 
 let panning = false;
 let panStart: { x: number; y: number; px: number; py: number } | null = null;
+// Pre-selection hover feedback (select tool): what's under the cursor
+// right now. segIdx is set for wire hits.
+let hoverTarget: { kind: 'part' | 'wire'; id: string; segIdx?: number } | null = null;
 // Track whether the current mouse-down→up sequence performed a drag,
 // so the synthesised click event can be suppressed for box-selects.
 let suppressNextClick = false;
@@ -2070,6 +2095,14 @@ function onSelectGestureMove(e: MouseEvent): void {
   }
 }
 
+// Self-detected double-click. The gesture's mousedown preventDefault
+// stops Chrome from synthesising click/dblclick events for the select
+// tool, so — like KiCad's tool framework — we detect the second
+// quick click on the same part ourselves.
+let lastGestureClick: {
+  t: number; x: number; y: number; partId: string;
+} | null = null;
+
 function onSelectGestureUp(e: MouseEvent): void {
   if (e.button !== 0) return;
   const g = selectGesture;
@@ -2077,6 +2110,22 @@ function onSelectGestureUp(e: MouseEvent): void {
 
   if (g.phase === 'pressed') {
     applyClickSelection(g);
+    const partId = g.target.hit && g.target.hit.kind === 'part'
+      ? g.target.hit.id : null;
+    const now = Date.now();
+    if (partId && lastGestureClick
+        && lastGestureClick.partId === partId
+        && now - lastGestureClick.t < 400
+        && Math.abs(e.clientX - lastGestureClick.x) < 5
+        && Math.abs(e.clientY - lastGestureClick.y) < 5) {
+      // Double-click on a part: edit its value in place.
+      lastGestureClick = null;
+      openInlineValueEditor(partId);
+    } else {
+      lastGestureClick = partId
+        ? { t: now, x: e.clientX, y: e.clientY, partId }
+        : null;
+    }
   } else if (g.phase === 'move') {
     // Esc may have cancelled the move mid-drag; commit only if the
     // draft is still live.
@@ -2184,6 +2233,23 @@ wrap.addEventListener('mousemove', (e: MouseEvent) => {
     return;
   }
 
+  // Hover pre-selection feedback in the select tool: light up the
+  // part / wire segment a click would pick.
+  if (state.tool === 'select') {
+    const h = pickAt(world);
+    if (!h) {
+      hoverTarget = null;
+    } else if (h.kind === 'wire') {
+      const w = state.wires.find(x => x.id === h.id);
+      const segIdx = w ? closestSegmentIndex(world, w) : undefined;
+      hoverTarget = { kind: 'wire', id: h.id, segIdx };
+    } else {
+      hoverTarget = { kind: 'part', id: h.id };
+    }
+  } else if (hoverTarget) {
+    hoverTarget = null;
+  }
+
   // Fallback: keep the grid-snap crosshair tracking the cursor in
   // tools that don't otherwise re-render on mousemove (select /
   // delete / rotate / WIRE-idle / anchor-pick).
@@ -2207,6 +2273,7 @@ wrap.addEventListener('mouseleave', () => {
   // when the cursor leaves the canvas, so neither lingers at the last
   // recorded position.
   state.cursorInside = false;
+  hoverTarget = null;
   if (placementPreview) placementPreview = null;
   render();
 });
@@ -2298,18 +2365,32 @@ wrap.addEventListener('click', (e: MouseEvent) => {
 });
 
 // Mouse wheel zoom (anchored to cursor).
+// Trackpad-correct wheel handling (Figma convention): pinch gestures
+// (delivered as ctrl+wheel) and explicit Ctrl/Cmd+wheel zoom, anchored
+// at the cursor; plain wheel / two-finger scroll pans. Shift turns a
+// vertical mouse wheel into horizontal pan.
 wrap.addEventListener('wheel', (e: WheelEvent) => {
   e.preventDefault();
-  const factor = Math.exp(-e.deltaY * 0.0015);
-  const newZoom = Math.max(0.2, Math.min(4, state.zoom * factor));
-  if (newZoom === state.zoom) return;
-  const rect = wrap.getBoundingClientRect();
-  const ax = e.clientX - rect.left;
-  const ay = e.clientY - rect.top;
-  // Anchor: keep world point under cursor fixed.
-  state.pan.x = ax - (ax - state.pan.x) * (newZoom / state.zoom);
-  state.pan.y = ay - (ay - state.pan.y) * (newZoom / state.zoom);
-  state.zoom = newZoom;
+  if (e.ctrlKey || e.metaKey) {
+    // Normalise: pinch deltas are small and smooth, mouse detents are
+    // ±100-ish — clamp so one detent is a pleasant ~1.6× step.
+    const dy = Math.max(-40, Math.min(40, e.deltaY));
+    const factor = Math.exp(-dy * 0.012);
+    const newZoom = Math.max(0.2, Math.min(4, state.zoom * factor));
+    if (newZoom === state.zoom) return;
+    const rect = wrap.getBoundingClientRect();
+    const ax = e.clientX - rect.left;
+    const ay = e.clientY - rect.top;
+    // Anchor: keep world point under cursor fixed.
+    state.pan.x = ax - (ax - state.pan.x) * (newZoom / state.zoom);
+    state.pan.y = ay - (ay - state.pan.y) * (newZoom / state.zoom);
+    state.zoom = newZoom;
+    render();
+    return;
+  }
+  const horizontal = e.shiftKey && e.deltaX === 0;
+  state.pan.x -= horizontal ? e.deltaY : e.deltaX;
+  state.pan.y -= horizontal ? 0 : e.deltaY;
   render();
 }, { passive: false });
 
@@ -2608,10 +2689,207 @@ function finalizeWireDraft(): void {
 }
 
 wrap.addEventListener('dblclick', (e: MouseEvent) => {
-  if (state.tool !== 'WIRE') return;
-  e.preventDefault();
-  finalizeWireDraft();
+  if (state.tool === 'WIRE') {
+    e.preventDefault();
+    finalizeWireDraft();
+    return;
+  }
+  // Select tool: double-click a part to edit its value in place.
+  if (state.tool === 'select' && !state.moveDraft) {
+    const hit = pickAt(eventToWorld(e));
+    if (hit && hit.kind === 'part') {
+      state.selectedIds.clear();
+      state.selectedSegments.clear();
+      state.selectedIds.add(hit.id);
+      refreshProps();
+      render();
+      openInlineValueEditor(hit.id);
+      e.preventDefault();
+    }
+  }
 });
+
+// ------------------------------------------------------------------
+// Floating on-canvas value editor (double-click / F2). Commits on
+// Enter or blur; Esc cancels. The document-level keydown handler
+// already ignores events targeting inputs, so tool shortcuts stay
+// quiet while it's open.
+// ------------------------------------------------------------------
+let inlineEditEl: HTMLInputElement | null = null;
+
+function closeInlineValueEditor(): void {
+  if (!inlineEditEl) return;
+  const elx = inlineEditEl;
+  inlineEditEl = null;       // null first so blur-commit can't re-enter
+  elx.remove();
+}
+
+function openInlineValueEditor(partId: string): void {
+  const part = state.parts.find(pp => pp.id === partId);
+  if (!part || part.type === 'gnd') return;
+  closeInlineValueEditor();
+  const [x0, , x1, y1] = partBBox(part);
+  const inp = document.createElement('input');
+  inp.className = 'inline-edit';
+  inp.value = part.value || '';
+  inp.style.left = `${state.pan.x + ((x0 + x1) / 2) * state.zoom}px`;
+  inp.style.top = `${state.pan.y + (y1 + 6) * state.zoom}px`;
+  inp.style.transform = 'translateX(-50%)';
+  wrap.appendChild(inp);
+  inlineEditEl = inp;
+  const commit = () => {
+    if (inlineEditEl !== inp) return;
+    const v = inp.value.trim();
+    closeInlineValueEditor();
+    if (v && v !== part.value) {
+      part.value = v;
+      pushHistory();
+      refreshProps();
+      render();
+      flashHint(`${part.id} value → ${v}`);
+    }
+  };
+  inp.addEventListener('keydown', (ev: KeyboardEvent) => {
+    if (ev.key === 'Enter') commit();
+    else if (ev.key === 'Escape') closeInlineValueEditor();
+    ev.stopPropagation();
+  });
+  inp.addEventListener('blur', commit);
+  inp.focus();
+  inp.select();
+}
+
+// ------------------------------------------------------------------
+// Duplicate (Ctrl+D): clone the selection one grid step down-right
+// and select the clones. Current-controlled sources keep their
+// controlling reference, remapped when the controller is part of the
+// duplicated set.
+// ------------------------------------------------------------------
+function duplicateSelection(): void {
+  if (!state.selectedIds.size) return;
+  const OFF = GRID * 2;
+  const idMap = new Map<string, string>();
+  const newPartIds: string[] = [];
+  const newWireIds: string[] = [];
+  for (const part of state.parts.filter(pp => state.selectedIds.has(pp.id))) {
+    const meta = ELEM_TYPES[part.type];
+    const id = nextName(meta ? meta.prefix : part.type.toUpperCase());
+    const clone: Part = { ...part, id, x: part.x + OFF, y: part.y + OFF };
+    state.parts.push(clone);
+    idMap.set(part.id, id);
+    newPartIds.push(id);
+  }
+  for (const w of state.wires.filter(ww => state.selectedIds.has(ww.id))) {
+    const id = `W${state.nextId++}`;
+    const clone: Wire = {
+      id,
+      points: w.points.map(([x, y]) => [x + OFF, y + OFF] as Point),
+    };
+    if (w.label !== undefined) clone.label = w.label;
+    state.wires.push(clone);
+    newWireIds.push(id);
+  }
+  // Remap intra-selection control references (F/H sources).
+  for (const id of newPartIds) {
+    const clone = state.parts.find(pp => pp.id === id);
+    if (clone?.ctrlSrc && idMap.has(clone.ctrlSrc)) {
+      clone.ctrlSrc = idMap.get(clone.ctrlSrc);
+    }
+  }
+  state.selectedIds = new Set([...newPartIds, ...newWireIds]);
+  state.selectedSegments.clear();
+  for (const id of newWireIds) selectWholeWire(id);
+  pushHistory();
+  refreshProps();
+  render();
+  const n = newPartIds.length + newWireIds.length;
+  flashHint(`Duplicated ${n} item${n === 1 ? '' : 's'} — drag or nudge into place`);
+}
+
+// ------------------------------------------------------------------
+// Keyboard shortcut registry — single source for the '?' cheat
+// sheet. Keep in sync with the keydown handler below and the
+// toolbar tooltips.
+// ------------------------------------------------------------------
+const SHORTCUT_GROUPS: Array<{ title: string; rows: Array<[string, string]> }> = [
+  { title: 'Tools', rows: [
+    ['S / Esc', 'Select'], ['W', 'Wire'], ['X', 'Delete'],
+    ['B', 'Rotate'], ['H', 'Net highlight'],
+    ['R L C V I D G', 'Place part'],
+  ]},
+  { title: 'Edit', rows: [
+    ['Ctrl+Z / Ctrl+Y', 'Undo / redo'],
+    ['Ctrl+C / X / V', 'Copy / cut / paste'],
+    ['Ctrl+D', 'Duplicate'],
+    ['Ctrl+A', 'Select all parts'],
+    ['Del', 'Delete selection'],
+    ['Space', 'Rotate selection / ghost'],
+    ['F2 / dbl-click', 'Edit part value'],
+    ['← ↑ ↓ →', 'Nudge selection'],
+  ]},
+  { title: 'Selection', rows: [
+    ['Click', 'Select part / segment'],
+    ['Shift+click', 'Add to selection'],
+    ['Ctrl+click', 'Toggle'],
+    ['Drag', 'Move (wires follow)'],
+    ['M', 'Move with cursor'],
+    ['U', 'Expand to whole net'],
+  ]},
+  { title: 'View', rows: [
+    ['F', 'Fit view'],
+    ['Scroll', 'Pan'],
+    ['Ctrl+scroll', 'Zoom'],
+    ['Mid/right-drag', 'Pan'],
+    ['?', 'This cheat sheet'],
+  ]},
+];
+
+let shortcutOverlayEl: HTMLElement | null = null;
+
+function toggleShortcutOverlay(): void {
+  if (shortcutOverlayEl) {
+    shortcutOverlayEl.remove();
+    shortcutOverlayEl = null;
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.className = 'shortcut-overlay';
+  const card = document.createElement('div');
+  card.className = 'shortcut-card';
+  const h2 = document.createElement('h2');
+  h2.textContent = 'Keyboard shortcuts';
+  card.appendChild(h2);
+  const cols = document.createElement('div');
+  cols.className = 'shortcut-cols';
+  for (const group of SHORTCUT_GROUPS) {
+    const g = document.createElement('div');
+    g.className = 'shortcut-group';
+    const h4 = document.createElement('h4');
+    h4.textContent = group.title;
+    g.appendChild(h4);
+    for (const [keys, desc] of group.rows) {
+      const row = document.createElement('div');
+      row.className = 'shortcut-row';
+      const d = document.createElement('span');
+      d.textContent = desc;
+      const k = document.createElement('span');
+      k.className = 'keys';
+      k.innerHTML = keys.split(' / ')
+        .map(part => `<kbd>${part}</kbd>`).join(' / ');
+      row.appendChild(d);
+      row.appendChild(k);
+      g.appendChild(row);
+    }
+    cols.appendChild(g);
+  }
+  card.appendChild(cols);
+  overlay.appendChild(card);
+  overlay.addEventListener('mousedown', (ev) => {
+    if (ev.target === overlay) toggleShortcutOverlay();
+  });
+  document.body.appendChild(overlay);
+  shortcutOverlayEl = overlay;
+}
 
 function addWire(points: Point[]): void {
   const id = `W${state.nextId++}`;
@@ -2643,11 +2921,11 @@ function refreshProps(): void {
     info.innerHTML = `<strong>${parts.join(' + ')}</strong> selected. ` +
       `<kbd>M</kbd> move, <kbd>Ctrl+C</kbd>/<kbd>V</kbd> copy/paste, ` +
       `<kbd>Space</kbd> rotate, <kbd>Del</kbd> remove.`;
-    info.style.cssText = 'font-size: 0.85rem; color: var(--fg);';
+    info.style.cssText = 'font-size: var(--text-md); color: var(--fg);';
     propPane.appendChild(info);
     const list = document.createElement('div');
     list.style.cssText = 'margin-top: 8px; color: var(--muted); ' +
-      'font-size: 0.78rem; font-family: "JetBrains Mono", monospace;';
+      'font-size: var(--text-xs); font-family: var(--font-mono);';
     list.textContent = sel.join(', ');
     propPane.appendChild(list);
     return;
@@ -2681,7 +2959,7 @@ function refreshProps(): void {
     const lab2Val = document.createElement('span');
     lab2Val.textContent = idText;
     lab2Val.style.cssText =
-      'font-family: "JetBrains Mono", monospace; ' +
+      'font-family: var(--font-mono); ' +
       'word-break: break-all; text-align: right;';
     lab2.appendChild(lab2Sp);
     lab2.appendChild(lab2Val);
@@ -2734,7 +3012,7 @@ function refreshProps(): void {
     propPane.appendChild(labRow);
 
     const info = document.createElement('div');
-    info.style.cssText = 'color: var(--muted); font-size: 0.78rem; margin-top: 6px;';
+    info.style.cssText = 'color: var(--muted); font-size: var(--text-xs); margin-top: 6px;';
     info.textContent = `${segs} segment${segs === 1 ? '' : 's'}, ` +
                        `${length} px total ` +
                        `(${wire.points.length} vertices)`;
@@ -2814,7 +3092,7 @@ function refreshProps(): void {
     });
     if (!cur) {
       const hint = document.createElement('div');
-      hint.style.cssText = 'color: var(--muted); font-size: 0.72rem; margin: -4px 0 6px 68px;';
+      hint.style.cssText = 'color: var(--muted); font-size: var(--text-xs); margin: -4px 0 6px 68px;';
       hint.textContent = `default: ${placeholder}`;
       propPane.appendChild(hint);
     }
@@ -2829,7 +3107,7 @@ function refreshProps(): void {
   }
   // Position info (read-only)
   const info = document.createElement('div');
-  info.style.cssText = 'color: var(--muted); font-size: 0.78rem; margin-top: 6px;';
+  info.style.cssText = 'color: var(--muted); font-size: var(--text-xs); margin-top: 6px;';
   info.textContent = `pos = (${p.x},${p.y})  rot = ${p.rot}°`;
   propPane.appendChild(info);
 }
@@ -3471,7 +3749,48 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
       render();
       e.preventDefault(); return;
     }
+    if (k === 'd') {
+      duplicateSelection();
+      e.preventDefault(); return;
+    }
     return;  // any other Ctrl/Cmd combo: don't intercept
+  }
+
+  // '?' toggles the shortcut cheat sheet.
+  if (e.key === '?') {
+    toggleShortcutOverlay();
+    e.preventDefault();
+    return;
+  }
+
+  // F2 opens the inline value editor on a single-part selection.
+  if (e.key === 'F2') {
+    if (state.selectedIds.size === 1) {
+      const [onlyId] = state.selectedIds;
+      openInlineValueEditor(onlyId);
+    }
+    e.preventDefault();
+    return;
+  }
+
+  // Arrow keys nudge the selection one grid step, going through the
+  // full move engine so attached wires follow per the drag settings.
+  if (!e.altKey && state.tool === 'select' && !state.moveDraft
+      && state.selectedIds.size
+      && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'
+          || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    const dx = e.key === 'ArrowLeft' ? -GRID
+             : e.key === 'ArrowRight' ? GRID : 0;
+    const dy = e.key === 'ArrowUp' ? -GRID
+             : e.key === 'ArrowDown' ? GRID : 0;
+    startMove([...state.selectedIds], [0, 0],
+              /*viaDrag=*/false, /*freshlyPasted=*/false);
+    if (state.moveDraft) {
+      updateMove([dx, dy]);
+      commitMove();
+    }
+    e.preventDefault();
+    return;
   }
 
   // 'U' expands a segment-only selection (set by clicking or
@@ -3537,6 +3856,11 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     return;
   }
   if (e.key === 'Escape') {
+    if (shortcutOverlayEl) {
+      toggleShortcutOverlay();
+      e.preventDefault();
+      return;
+    }
     if (selectGesture) {
       // Abort the in-flight gesture (cancels a live move-draft /
       // drops the marquee); the eventual mouseup is then inert.

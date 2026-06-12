@@ -8,25 +8,60 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Michroma&display=swap">
+      href="https://fonts.googleapis.com/css2?family=Michroma&family=JetBrains+Mono:wght@400;600&display=swap">
 
 <style>
   :root {
     color-scheme: light dark;
-    --fg: #111;
-    --bg: #fff;
-    --muted: #888;
-    --line: #bbb;
-    --panel: #f6f6f6;
-    --hover: #d8d8d8;
-    --btn-bg: #eaeaea;
-    --btn-fg: #111;
-    --grid: #d5d5d5;
-    --stroke: #111;
+
+    /* ---- design tokens: type / spacing / radius ---- */
+    --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono",
+                 "Cascadia Code", Menlo, Consolas, monospace;
+    --text-xs: 11px;
+    --text-sm: 12px;
+    --text-md: 13px;
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --r-sm: 4px;
+    --r-md: 6px;
+
+    /* ---- surface elevation scale (light) ----
+       Separation comes from surface steps, not 1px borders. */
+    --surface-0: #fcfcfd;   /* canvas               */
+    --surface-1: #f3f3f5;   /* chrome: toolbar/side */
+    --surface-2: #eaeaee;   /* wells: inputs, code  */
+    --surface-3: #dfdfe4;   /* hover                */
+    --fg: #1b1b1f;
+    --muted: #71717a;
+    --line: #dcdce1;
+
+    /* accent: filled controls (active tool, primary buttons) —
+       distinct from --select, which strokes canvas selections. */
+    --accent: #2f6fed;
+    --accent-fg: #ffffff;
+
+    /* semantic */
+    --info: #2f6fed;
+    --ok: #1a9c54;
+    --warn: #b87d0e;
+    --error: #d24343;
+
+    /* legacy aliases — older rules and editor.ts cssText use these */
+    --bg: var(--surface-0);
+    --panel: var(--surface-1);
+    --hover: var(--surface-3);
+    --btn-bg: var(--surface-2);
+    --btn-fg: var(--fg);
+
+    --grid: #d5d5d9;
+    --stroke: #1b1b1f;
     --select: #1976d2;
     --preview: #1976d2;
-    --terminal: #444;
-    --node: #666;
+    --terminal: #44444a;
+    --node: #66666e;
     /* Cursor crosshair colour. Dark navy on light backgrounds for
        contrast; the dark-theme override below swaps in amber. */
     --cross: #003266;
@@ -36,20 +71,29 @@
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --fg: #eee;
-      --bg: #181818;
-      --muted: #aaa;
-      --line: #555;
-      --panel: #1a1a1a;
-      --hover: #3a3a3a;
-      --btn-bg: #2a2a2a;
-      --btn-fg: #eee;
-      --grid: #2c2c2c;
-      --stroke: #e7e7e7;
+      /* slightly cool-tinted dark surface scale */
+      --surface-0: #141416;
+      --surface-1: #1c1c1f;
+      --surface-2: #242428;
+      --surface-3: #2e2e33;
+      --fg: #e6e6e9;
+      --muted: #9a9aa3;
+      --line: #2c2c30;
+
+      --accent: #3574f0;
+      --accent-fg: #ffffff;
+
+      --info: #5b96f7;
+      --ok: #3fb874;
+      --warn: #e0a83c;
+      --error: #e5645c;
+
+      --grid: #2c2c30;
+      --stroke: #e7e7e9;
       --select: #6cb4ff;
       --preview: #6cb4ff;
-      --terminal: #aaa;
-      --node: #888;
+      --terminal: #a4a4ac;
+      --node: #84848c;
       --cross: #ffb405;
       --highlight: #ffa45a;
     }
@@ -57,7 +101,7 @@
 
   html, body {
     margin: 0; padding: 0; height: 100%;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: var(--font-ui);
     background: var(--bg); color: var(--fg);
     line-height: 1.45;
   }
@@ -66,73 +110,125 @@
     height: 100vh;
   }
   header {
-    padding: 12px 18px 4px;
+    padding: 0 var(--sp-4);
+    height: 44px; flex: none;
+    display: flex; align-items: center;
+    background: var(--surface-1);
     border-bottom: 1px solid var(--line);
   }
-  .header-row { display: flex; align-items: center; gap: 16px; }
-  .header-row img { height: 48px; width: auto; flex: none; }
+  .header-row { display: flex; align-items: center; gap: var(--sp-3); width: 100%; }
+  .header-row img { height: 24px; width: auto; flex: none; }
   h1 {
     margin: 0;
-    font-family: "Michroma", system-ui, sans-serif;
-    font-size: 1.1rem;
-    letter-spacing: 0.02em;
+    font-family: "Michroma", var(--font-ui);
+    font-size: var(--text-md);
+    font-weight: 400;
+    letter-spacing: 0.04em;
   }
   .sub {
-    margin: 2px 0 0; color: var(--muted); font-size: 0.85rem;
+    margin: 0 0 0 auto; color: var(--muted); font-size: var(--text-sm);
+    white-space: nowrap;
   }
-  .sub a { color: inherit; }
+  .sub a { color: inherit; text-decoration: none; }
+  .sub a:hover { color: var(--fg); }
 
   /* Toolbar */
   #toolbar {
-    display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px;
+    display: flex; flex-wrap: wrap; gap: 2px; row-gap: var(--sp-1);
+    padding: var(--sp-1) var(--sp-2);
     border-bottom: 1px solid var(--line);
-    background: var(--panel);
+    background: var(--surface-1);
   }
+  /* Groups separate with a short inset hairline, not a full-height
+     border wall. */
   .group {
-    display: flex; gap: 2px; padding: 0 6px;
-    border-right: 1px solid var(--line);
+    display: flex; gap: 2px; padding: 0 var(--sp-2);
+    align-items: center;
+    position: relative;
   }
-  .group:last-child { border-right: none; }
+  .group + .group::before {
+    content: '';
+    position: absolute; left: 0; top: 50%;
+    transform: translateY(-50%);
+    width: 1px; height: 16px;
+    background: var(--line);
+  }
+  /* Ghost buttons: quiet at rest, surface on hover, accent-filled
+     only when the tool is active. */
   .tool {
-    background: var(--btn-bg); color: var(--btn-fg);
-    border: 1px solid var(--line); border-radius: 4px;
-    padding: 4px 8px; cursor: pointer;
-    font-size: 12px; min-width: 38px;
-    display: inline-flex; align-items: center; gap: 4px;
+    background: transparent; color: var(--btn-fg);
+    border: none; border-radius: 5px;
+    padding: 0 var(--sp-2); height: 28px; cursor: pointer;
+    font-size: var(--text-sm); font-family: inherit;
+    display: inline-flex; align-items: center; gap: 5px;
     user-select: none;
   }
-  .tool:hover { background: var(--hover); }
+  .tool:hover { background: var(--surface-3); }
+  .tool:active { background: var(--surface-3); filter: brightness(0.92); }
   .tool.active {
-    background: var(--select); color: white; border-color: var(--select);
+    background: var(--accent); color: var(--accent-fg);
   }
-  .tool svg { display: block; }
+  .tool svg { display: block; width: 16px; height: 16px; flex: none; }
   .tool .label { font-weight: 500; }
+  /* Destructive affordance for Clear. */
+  #btn-clear:hover {
+    background: color-mix(in srgb, var(--error) 16%, transparent);
+    color: var(--error);
+  }
 
-  /* Toolbar checkboxes (Drag / Parity). Visually flush with the
-     adjacent .tool buttons so they feel like part of the strip. */
+  /* Toolbar toggles (Drag / Parity / No-revert): the native checkbox
+     is kept for a11y but visually hidden; checked state renders as a
+     tinted chip with a check glyph. */
   .check {
     display: inline-flex; align-items: center; gap: 5px;
-    padding: 4px 8px; cursor: pointer;
-    font-size: 12px; color: var(--btn-fg);
-    background: var(--btn-bg);
-    border: 1px solid var(--line); border-radius: 4px;
+    padding: 0 var(--sp-2); height: 28px; cursor: pointer;
+    font-size: var(--text-sm); color: var(--muted);
+    background: transparent;
+    border: none; border-radius: 5px;
     user-select: none;
+    position: relative;
   }
-  .check:hover { background: var(--hover); }
+  .check:hover { background: var(--surface-3); color: var(--fg); }
   .check input[type="checkbox"] {
-    margin: 0; cursor: pointer;
-    accent-color: var(--select);
+    position: absolute; opacity: 0; pointer-events: none;
+    width: 0; height: 0; margin: 0;
+  }
+  .check span::before {
+    content: '';
+    display: inline-block;
+    width: 12px; height: 12px;
+    margin-right: 5px;
+    vertical-align: -1px;
+    border: 1.5px solid currentColor; border-radius: 3px;
+    box-sizing: border-box;
+    opacity: 0.6;
+  }
+  .check:has(input:checked) {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: color-mix(in srgb, var(--accent) 75%, var(--fg));
+  }
+  .check:has(input:checked) span::before {
+    content: '✓';
+    border-color: transparent;
+    background: var(--accent); color: var(--accent-fg);
+    font-size: 10px; line-height: 12px; text-align: center;
+    font-weight: 700;
+    opacity: 1;
   }
 
-  /* Components dropdown */
+  /* Components dropdown — custom chrome so it sits flush with the
+     ghost buttons (native select arrows clash with the strip). */
   .picker {
-    background: var(--btn-bg); color: var(--btn-fg);
-    border: 1px solid var(--line); border-radius: 4px;
-    padding: 4px 6px; font-size: 12px;
+    appearance: none; -webkit-appearance: none;
+    background: var(--surface-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%23888890' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 8px center;
+    color: var(--btn-fg);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 0 26px 0 var(--sp-2); height: 28px;
+    font-size: var(--text-sm);
     font-family: inherit;
     min-width: 170px; cursor: pointer;
   }
-  .picker:focus { outline: 1px solid var(--select); }
+  .picker:focus { outline: none; border-color: var(--accent); }
 
   /* Main work area */
   main {
@@ -145,8 +241,14 @@
     touch-action: none;
   }
   #canvas-wrap.tool-select { cursor: default; }
-  #canvas-wrap.tool-delete { cursor: not-allowed; }
-  #canvas-wrap.tool-rotate { cursor: alias; }
+  /* Custom SVG cursors: crosshair-with-x for delete, circular arrow
+     for rotate (not-allowed / alias read as "broken", not as tools). */
+  #canvas-wrap.tool-delete {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cpath d='M11 2v6M11 14v6M2 11h6M14 11h6' stroke='%23999' stroke-width='1.4'/%3E%3Cpath d='M14.5 3.5l4 4M18.5 3.5l-4 4' stroke='%23e5645c' stroke-width='1.8' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, crosshair;
+  }
+  #canvas-wrap.tool-rotate {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cpath d='M17 11a6 6 0 1 1-2.2-4.6' fill='none' stroke='%23999' stroke-width='1.8'/%3E%3Cpath d='M15 2.5l.3 4.2 4-1.4' fill='none' stroke='%23999' stroke-width='1.8' stroke-linejoin='round'/%3E%3C/svg%3E") 11 11, alias;
+  }
   #canvas-wrap.tool-highlight { cursor: crosshair; }
   #canvas-wrap.panning { cursor: grabbing; }
   #canvas-wrap.moving  { cursor: move; }
@@ -162,10 +264,10 @@
   #coords {
     position: absolute; right: 8px; bottom: 6px;
     padding: 2px 8px;
-    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
     color: var(--muted);
-    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    background: color-mix(in srgb, var(--surface-0) 80%, transparent);
     border: 1px solid var(--line); border-radius: 4px;
     pointer-events: none; user-select: none;
     white-space: nowrap;
@@ -191,14 +293,14 @@
   #side {
     width: 320px; flex: none;
     min-width: 200px; max-width: 800px;
-    background: var(--panel);
+    background: var(--surface-1);
     display: flex; flex-direction: column;
     overflow: hidden;
   }
   #side h3 {
-    margin: 0; padding: 8px 12px;
-    font-size: 0.78rem; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.05em;
+    margin: 0; padding: var(--sp-2) var(--sp-3);
+    font-size: var(--text-xs); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--muted);
     border-bottom: 1px solid var(--line);
   }
@@ -212,10 +314,14 @@
   }
   .pane input[type=text] {
     flex: 1; min-width: 0;
-    padding: 4px 6px; font-size: 0.85rem;
-    background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 4px;
-    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    padding: 4px 6px; font-size: var(--text-sm);
+    background: var(--surface-2); color: var(--fg);
+    border: 1px solid transparent; border-radius: var(--r-sm);
+    font-family: var(--font-mono);
+  }
+  .pane input[type=text]:focus {
+    outline: none; border-color: var(--accent);
+    background: var(--surface-0);
   }
   .pane .empty-msg { color: var(--muted); font-style: italic; font-size: 0.85rem; }
 
@@ -223,10 +329,10 @@
     flex: 1; display: flex; flex-direction: column; min-height: 0;
   }
   #netlist {
-    flex: 1; padding: 8px 12px; margin: 0;
-    background: var(--bg);
-    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 12px; white-space: pre;
+    flex: 1; padding: var(--sp-2) var(--sp-3); margin: 0;
+    background: var(--surface-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm); white-space: pre;
     overflow: auto; min-height: 0;
     border: none;
     color: var(--fg);
@@ -239,11 +345,12 @@
   }
   .netlist-actions button {
     flex: 1;
-    background: var(--btn-bg); color: var(--btn-fg);
-    border: 1px solid var(--line); border-radius: 4px;
-    padding: 5px 8px; cursor: pointer; font-size: 12px;
+    background: var(--surface-2); color: var(--btn-fg);
+    border: 1px solid transparent; border-radius: var(--r-sm);
+    padding: 5px 8px; cursor: pointer; font-size: var(--text-sm);
+    font-family: inherit;
   }
-  .netlist-actions button:hover { background: var(--hover); }
+  .netlist-actions button:hover { background: var(--surface-3); }
 
   /* Node-expression pane */
   #calc-pane {
@@ -256,15 +363,17 @@
     display: flex; gap: 6px; align-items: center;
     margin-bottom: 6px; flex: none;
   }
+  /* Calc Node is the side panel's primary action — filled accent. */
   .calc-controls button {
-    background: var(--btn-bg); color: var(--btn-fg);
-    border: 1px solid var(--line); border-radius: 4px;
-    padding: 4px 10px; cursor: pointer; font-size: 12px;
+    background: var(--accent); color: var(--accent-fg);
+    border: 1px solid transparent; border-radius: var(--r-sm);
+    padding: 4px 10px; cursor: pointer; font-size: var(--text-sm);
+    font-family: inherit; font-weight: 500;
     flex: none;
   }
-  .calc-controls button:hover { background: var(--hover); }
+  .calc-controls button:hover { filter: brightness(1.1); }
   .calc-controls button.armed {
-    background: var(--select); color: white; border-color: var(--select);
+    background: var(--warn); color: var(--surface-0);
   }
   .calc-status {
     color: var(--muted); font-size: 0.78rem;
@@ -274,9 +383,9 @@
   .calc-output {
     flex: 1; min-height: 0; overflow: auto;
     padding: 6px 8px;
-    background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
-    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 12px;
+    background: var(--surface-2); border: none; border-radius: var(--r-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
   }
   .calc-output .calc-node-name {
     color: var(--select); font-weight: 600;
@@ -288,24 +397,25 @@
     margin-top: 6px; font-family: serif; font-size: 13px;
   }
   .calc-output .calc-err {
-    color: #d33; white-space: pre-wrap;
+    color: var(--error); white-space: pre-wrap;
   }
 
   /* Status / hint bar — fixed height of two text lines so the layout
      never reflows when a hint grows or shrinks. Long hints clip with
      `overflow: hidden`; flashHint replaces them after 1.6s anyway. */
   #hint {
-    padding: 4px 12px; font-size: 0.78rem; color: var(--muted);
-    border-top: 1px solid var(--line); background: var(--panel);
+    padding: 4px var(--sp-3); font-size: var(--text-xs); color: var(--muted);
+    border-top: 1px solid var(--line); background: var(--surface-1);
     height: calc(2lh + 8px);
     line-height: 1.45;
     overflow: hidden;
     box-sizing: border-box;
   }
-  #hint kbd {
-    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: 0.85em; background: var(--bg);
-    padding: 1px 4px; border: 1px solid var(--line);
+  #hint kbd, .shortcut-overlay kbd {
+    font-family: var(--font-mono);
+    font-size: 0.85em; background: var(--surface-2);
+    padding: 1px 5px; border: 1px solid var(--line);
+    border-bottom-width: 2px;
     border-radius: 3px; color: var(--fg);
   }
 
@@ -334,16 +444,29 @@
   #notifications-clear-all:hover { color: var(--fg); border-color: var(--fg); }
   .notification {
     pointer-events: auto;
-    padding: 8px 32px 8px 12px; border-radius: 6px;
-    font-size: 0.82rem; line-height: 1.4;
-    border: 1px solid var(--line); background: var(--panel);
+    padding: 8px 32px 8px 12px; border-radius: var(--r-md);
+    font-size: var(--text-sm); line-height: 1.4;
+    border: 1px solid var(--line); background: var(--surface-2);
     color: var(--fg); position: relative;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
     word-wrap: break-word;
   }
-  .notification-info    { border-left: 4px solid #3b82f6; }
-  .notification-warn    { border-left: 4px solid #f59e0b; background: #fef3c7; color: #78350f; }
-  .notification-error   { border-left: 4px solid #d73a49; background: #fee2e2; color: #7f1d1d; }
+  @media (prefers-reduced-motion: no-preference) {
+    .notification { animation: toast-in 130ms ease-out; }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: none; }
+    }
+  }
+  .notification-info  { border-left: 3px solid var(--info); }
+  .notification-warn  {
+    border-left: 3px solid var(--warn);
+    background: color-mix(in srgb, var(--warn) 12%, var(--surface-2));
+  }
+  .notification-error {
+    border-left: 3px solid var(--error);
+    background: color-mix(in srgb, var(--error) 12%, var(--surface-2));
+  }
   .notification-close {
     position: absolute; top: 4px; right: 4px;
     width: 20px; height: 20px; border-radius: 3px;
@@ -352,6 +475,77 @@
     display: flex; align-items: center; justify-content: center;
   }
   .notification-close:hover { opacity: 1; background: rgba(0,0,0,0.06); }
+
+  /* ---- micro-interaction layer ---- */
+  @media (prefers-reduced-motion: no-preference) {
+    .tool, .check, .picker, .netlist-actions button,
+    .calc-controls button, #notifications-clear-all {
+      transition: background-color 90ms ease, color 90ms ease,
+                  border-color 90ms ease, filter 90ms ease;
+    }
+  }
+  :is(.tool, .check, .picker, button):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* Themed scrollbars (chrome wells + panels). */
+  * { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--surface-3); border-radius: 5px;
+    border: 2px solid transparent; background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted); background-clip: content-box;
+  }
+
+  /* Keyboard shortcut cheat sheet ('?'). */
+  .shortcut-overlay {
+    position: fixed; inset: 0; z-index: 1200;
+    background: color-mix(in srgb, var(--surface-0) 55%, transparent);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .shortcut-card {
+    background: var(--surface-1); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    padding: var(--sp-4) calc(var(--sp-4) + 4px);
+    max-width: 760px; max-height: 80vh; overflow: auto;
+    font-size: var(--text-sm);
+  }
+  .shortcut-card h2 {
+    margin: 0 0 var(--sp-3);
+    font-size: var(--text-md); font-weight: 600;
+  }
+  .shortcut-cols {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0 var(--sp-4);
+  }
+  .shortcut-group h4 {
+    margin: var(--sp-2) 0 var(--sp-1);
+    font-size: var(--text-xs); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .shortcut-row {
+    display: flex; justify-content: space-between; gap: var(--sp-3);
+    padding: 2px 0;
+  }
+  .shortcut-row .keys { white-space: nowrap; }
+
+  /* Floating on-canvas value editor (double-click / F2). */
+  .inline-edit {
+    position: absolute; z-index: 50;
+    background: var(--surface-1); color: var(--fg);
+    border: 1px solid var(--accent); border-radius: var(--r-sm);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    padding: 3px 6px; font-size: var(--text-sm);
+    font-family: var(--font-mono);
+    min-width: 60px;
+    outline: none;
+  }
 
   /* Canvas SVG element styling */
   .grid-dot { fill: var(--grid); }
@@ -368,12 +562,12 @@
   .part-fill { fill: var(--bg); stroke: var(--stroke); stroke-width: 1.6; }
   .part-text {
     fill: var(--stroke); font-size: 11px;
-    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     pointer-events: none; user-select: none;
   }
   .part-name {
     fill: var(--stroke); font-size: 11px; font-weight: 600;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: var(--font-ui);
     pointer-events: none; user-select: none;
   }
   .wire {
@@ -388,7 +582,7 @@
      a visual marker telling the user to select, delete, and
      re-route by hand. */
   .wire-bad {
-    stroke: #d73a49; stroke-width: 2.2;
+    stroke: var(--error); stroke-width: 2.2;
     stroke-dasharray: 6 3;
   }
   .move-ghost {
@@ -398,7 +592,7 @@
   .node-dot { fill: var(--stroke); stroke: none; }
   .net-label-text {
     fill: var(--stroke); font-size: 11px; font-weight: 600;
-    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     pointer-events: none; user-select: none;
   }
   .net-label-bg {
@@ -427,13 +621,22 @@
     stroke-dasharray: 4 3; opacity: 0.85;
   }
   .preview-fill { fill: var(--bg); stroke: var(--preview); stroke-width: 1.6; stroke-dasharray: 4 3; opacity: 0.85; }
+  /* Selection / hover visuals are zoom-stable: stroke widths are
+     measured in screen pixels via non-scaling-stroke. */
   .selection-box {
     fill: none; stroke: var(--select); stroke-width: 1.4;
     stroke-dasharray: 3 3;
+    vector-effect: non-scaling-stroke;
   }
   .hover-box {
     fill: none; stroke: var(--select); stroke-width: 1;
-    stroke-dasharray: 2 3; opacity: 0.5;
+    stroke-dasharray: 2 3; opacity: 0.55;
+    vector-effect: non-scaling-stroke;
+  }
+  .wire-hover {
+    fill: none; stroke: var(--select); stroke-width: 4;
+    stroke-linecap: round; opacity: 0.35;
+    pointer-events: none;
   }
   .hit { fill: transparent; pointer-events: stroke; stroke: transparent; stroke-width: 14; }
   .hit-rect { fill: transparent; pointer-events: all; }
@@ -506,7 +709,7 @@
   }
   .matrix-axis-text {
     fill: var(--muted); font-size: 9px;
-    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     pointer-events: none; user-select: none;
   }
   .matrix-axis-text.matrix-axis-active { fill: var(--select); font-weight: 600; }
@@ -593,22 +796,19 @@
   <div class="header-row">
     <img src="../repl/res/sycan_s.png" alt="SYCAN logo"
          onerror="this.style.display='none'">
-    <div>
-      <h1>SYCAN Circuit Editor</h1>
-      <p class="sub">
-        Schematic capture for symbolic circuit analysis &mdash;
-        <a href="../">docs home</a> &middot;
-        <a href="../repl/">REPL</a> &middot;
-        <a href="https://github.com/AL-255/sycan">source</a>
-      </p>
-    </div>
+    <h1>SYCAN Circuit Editor</h1>
+    <p class="sub">
+      <a href="../">docs</a> &middot;
+      <a href="../repl/">REPL</a> &middot;
+      <a href="https://github.com/AL-255/sycan">source</a>
+    </p>
   </div>
 </header>
 
 <div id="toolbar">
   <div class="group" data-group="picker">
     <select id="part-picker" class="picker" title="All components">
-      <option value="" disabled selected>— components —</option>
+      <option value="" disabled selected>All components…</option>
       <optgroup label="Passive">
         <option value="res">Resistor (R)</option>
         <option value="ind">Inductor (L)</option>
@@ -816,19 +1016,20 @@
   <div class="group" data-group="edit">
     <button class="tool" data-tool="select" title="Select (S / Esc)">
       <svg width="14" height="14" viewBox="-1 -1 14 14" aria-hidden="true">
-        <path d="M0,0 L0,11 L3,8 L6,12 L8,11 L5,7 L9,7 Z"
-              fill="currentColor" stroke="currentColor" stroke-width="0.5"/>
+        <path d="M0.5,0.5 L0.5,10.5 L3.2,7.9 L5.2,11.6 L7.2,10.6 L5.3,7 L9,7 Z"
+              fill="none" stroke="currentColor" stroke-width="1.4"
+              stroke-linejoin="round"/>
       </svg>
       <span class="label">Select</span>
     </button>
-    <button class="tool" data-tool="delete" title="Delete tool (D)">
+    <button class="tool" data-tool="delete" title="Delete tool (X)">
       <svg width="14" height="14" viewBox="-7 -7 14 14" aria-hidden="true">
         <path d="M-4,-4 L4,4 M-4,4 L4,-4" fill="none"
               stroke="currentColor" stroke-width="1.8"/>
       </svg>
       <span class="label">Delete</span>
     </button>
-    <button class="tool" data-tool="rotate" title="Rotate tool (T)">
+    <button class="tool" data-tool="rotate" title="Rotate tool (B)">
       <svg width="14" height="14" viewBox="-7 -7 14 14" aria-hidden="true">
         <path d="M5,-1 A5,5 0 1 0 4,4" fill="none"
               stroke="currentColor" stroke-width="1.5"/>
@@ -838,7 +1039,7 @@
       <span class="label">Rotate</span>
     </button>
     <button class="tool" data-tool="highlight"
-            title="Net Highlight: click a wire to highlight its net (and any wires sharing the same name)">
+            title="Net Highlight (H): click a wire to highlight its net (and any wires sharing the same name)">
       <svg width="22" height="14" viewBox="-11 -7 22 14" aria-hidden="true">
         <!-- A wire under an orange wash, mirroring the canvas overlay. -->
         <path d="M-10,3 L-3,3 L-3,-3 L10,-3" fill="none"
@@ -869,12 +1070,51 @@
     </label>
   </div>
   <div class="group" data-group="file">
-    <button class="tool" id="btn-undo" title="Undo (Ctrl+Z)"><span class="label">Undo</span></button>
-    <button class="tool" id="btn-redo" title="Redo (Ctrl+Shift+Z)"><span class="label">Redo</span></button>
-    <button class="tool" id="btn-clear" title="Clear all"><span class="label">Clear</span></button>
-    <button class="tool" id="btn-fit" title="Fit / center view"><span class="label">Fit</span></button>
+    <button class="tool" id="btn-undo" title="Undo (Ctrl+Z)">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <path d="M4.5,2 L1.5,5 L4.5,8 M1.5,5 H9 a3.5,3.5 0 0 1 0,7 H6"
+              fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="label">Undo</span>
+    </button>
+    <button class="tool" id="btn-redo" title="Redo (Ctrl+Y / Ctrl+Shift+Z)">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <path d="M9.5,2 L12.5,5 L9.5,8 M12.5,5 H5 a3.5,3.5 0 0 0 0,7 H8"
+              fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="label">Redo</span>
+    </button>
+    <button class="tool" id="btn-clear" title="Clear all (irreversible via Undo)">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <path d="M2,3.5 H12 M5,3.5 V2 h4 v1.5 M3.5,3.5 L4.2,12.5 h5.6 L10.5,3.5 M5.8,6 v4 M8.2,6 v4"
+              fill="none" stroke="currentColor" stroke-width="1.3"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="label">Clear</span>
+    </button>
+    <button class="tool" id="btn-fit" title="Fit view (F)">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <path d="M5,1.5 H2.5 a1,1 0 0 0 -1,1 V5 M9,1.5 h2.5 a1,1 0 0 1 1,1 V5 M5,12.5 H2.5 a1,1 0 0 1 -1,-1 V9 M9,12.5 h2.5 a1,1 0 0 0 1,-1 V9"
+              fill="none" stroke="currentColor" stroke-width="1.4"
+              stroke-linecap="round"/>
+      </svg>
+      <span class="label">Fit</span>
+    </button>
     <button class="tool" id="btn-matrix"
             title="Open MNA matrix viewer — dots show populated cells; hover a dot to highlight the originating component on the schematic and every other cell from that component">
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <circle cx="3" cy="3" r="1.3" fill="currentColor"/>
+        <circle cx="7" cy="3" r="1.3" fill="currentColor"/>
+        <circle cx="11" cy="3" r="1.3" fill="currentColor" opacity="0.35"/>
+        <circle cx="3" cy="7" r="1.3" fill="currentColor" opacity="0.35"/>
+        <circle cx="7" cy="7" r="1.3" fill="currentColor"/>
+        <circle cx="11" cy="7" r="1.3" fill="currentColor"/>
+        <circle cx="3" cy="11" r="1.3" fill="currentColor"/>
+        <circle cx="7" cy="11" r="1.3" fill="currentColor" opacity="0.35"/>
+        <circle cx="11" cy="11" r="1.3" fill="currentColor"/>
+      </svg>
       <span class="label">Matrix</span>
     </button>
   </div>
